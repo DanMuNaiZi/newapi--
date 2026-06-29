@@ -165,10 +165,14 @@ export function formatModelName(
     canSeeActualModel && other?.request_model_name
       ? other.request_model_name
       : log.model_name
-  const actualModel =
-    canSeeActualModel && other?.upstream_model_name
-      ? other.upstream_model_name
-      : undefined
+  let actualModel: string | undefined
+  if (canSeeActualModel) {
+    if (log.actual_model_name) {
+      actualModel = log.actual_model_name
+    } else if (other?.upstream_model_name) {
+      actualModel = other.upstream_model_name
+    }
+  }
   const isMapped = !!(
     actualModel &&
     actualModel !== '' &&

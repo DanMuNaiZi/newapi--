@@ -430,10 +430,18 @@ export function DetailsDialog(props: DetailsDialogProps) {
     props.isAdmin && other?.request_model_name
       ? other.request_model_name
       : props.log.model_name
+  let actualModelName = ''
+  if (props.isAdmin) {
+    if (props.log.actual_model_name) {
+      actualModelName = props.log.actual_model_name
+    } else if (other?.upstream_model_name) {
+      actualModelName = other.upstream_model_name
+    }
+  }
   const showModelMapping =
     props.isAdmin &&
-    !!other?.upstream_model_name &&
-    other.upstream_model_name !== requestModelName
+    actualModelName !== '' &&
+    actualModelName !== requestModelName
   const adminInfo = other?.admin_info
   const topupAuditFields =
     isTopup && props.isAdmin && adminInfo
@@ -950,7 +958,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
             />
             <DetailRow
               label={t('Actual Model')}
-              value={other?.upstream_model_name ?? ''}
+              value={actualModelName}
               mono
             />
           </DetailSection>
