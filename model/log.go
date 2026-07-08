@@ -77,6 +77,7 @@ type Log struct {
 	Ip                string `json:"ip" gorm:"index;default:''"`
 	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
+	ActualModelName   string `json:"actual_model_name,omitempty" gorm:"-"`
 	Other             string `json:"other"`
 }
 
@@ -116,11 +117,19 @@ func assignDisplayLogIds(logs []*Log, startIdx int) {
 func formatUserLogs(logs []*Log, startIdx int) {
 	for i := range logs {
 		logs[i].ChannelName = ""
+		logs[i].ActualModelName = ""
 		var otherMap map[string]interface{}
 		otherMap, _ = common.StrToMap(logs[i].Other)
 		if otherMap != nil {
+			if requestModelName, ok := otherMap["request_model_name"].(string); ok && requestModelName != "" {
+				logs[i].ModelName = requestModelName
+			}
 			// Remove admin-only debug fields.
 			delete(otherMap, "admin_info")
+			// Hide model mapping details from non-admin log responses.
+			delete(otherMap, "request_model_name")
+			delete(otherMap, "upstream_model_name")
+			delete(otherMap, "is_model_mapped")
 			// Remove operation-audit details (operator/route info), admin-only.
 			delete(otherMap, "audit_info")
 			// delete(otherMap, "reject_reason")
@@ -129,6 +138,26 @@ func formatUserLogs(logs []*Log, startIdx int) {
 		logs[i].Other = common.MapToJsonStr(otherMap)
 	}
 	assignDisplayLogIds(logs, startIdx)
+}
+
+func formatAdminLogs(logs []*Log) {
+	for i := range logs {
+		actualModelName := logs[i].ModelName
+		otherMap, _ := common.StrToMap(logs[i].Other)
+		if otherMap != nil {
+			if upstreamModelName, ok := otherMap["upstream_model_name"].(string); ok && upstreamModelName != "" {
+				actualModelName = upstreamModelName
+			}
+			if requestModelName, ok := otherMap["request_model_name"].(string); ok && requestModelName != "" {
+				logs[i].ModelName = requestModelName
+			}
+		}
+		if actualModelName != "" && actualModelName != logs[i].ModelName {
+			logs[i].ActualModelName = actualModelName
+		} else {
+			logs[i].ActualModelName = ""
+		}
+	}
 }
 
 func GetLogByTokenId(tokenId int) (logs []*Log, err error) {
@@ -515,6 +544,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		assignDisplayLogIds(logs, startIdx)
 	}
+	formatAdminLogs(logs)
 
 	channelIds := types.NewSet[int]()
 	for _, log := range logs {

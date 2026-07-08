@@ -437,6 +437,22 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const showTiming = isTimingLogType(props.log.type)
   const showAdminIp =
     !!props.log.ip && (showTiming || (props.isAdmin && isTopup))
+  const requestModelName =
+    props.isAdmin && other?.request_model_name
+      ? other.request_model_name
+      : props.log.model_name
+  let actualModelName = ''
+  if (props.isAdmin) {
+    if (props.log.actual_model_name) {
+      actualModelName = props.log.actual_model_name
+    } else if (other?.upstream_model_name) {
+      actualModelName = other.upstream_model_name
+    }
+  }
+  const showModelMapping =
+    props.isAdmin &&
+    actualModelName !== '' &&
+    actualModelName !== requestModelName
   const adminInfo = other?.admin_info
   const topupAuditFields =
     isTopup && props.isAdmin && adminInfo
@@ -979,16 +995,16 @@ export function DetailsDialog(props: DetailsDialogProps) {
         )}
 
         {/* Model mapping */}
-        {other?.is_model_mapped && other?.upstream_model_name && (
+        {showModelMapping && (
           <DetailSection label={t('Model Mapping')}>
             <DetailRow
               label={t('Request Model')}
-              value={props.log.model_name}
+              value={requestModelName}
               mono
             />
             <DetailRow
               label={t('Actual Model')}
-              value={other.upstream_model_name}
+              value={actualModelName}
               mono
             />
           </DetailSection>
