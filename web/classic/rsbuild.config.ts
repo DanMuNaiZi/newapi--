@@ -1,4 +1,5 @@
 import path from 'path'
+import { readFileSync } from 'fs'
 import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
 import { defineConfig, loadEnv } from '@rsbuild/core'
@@ -10,7 +11,24 @@ const semiUiDir = path.resolve(
   path.dirname(require.resolve('@douyinfe/semi-ui')),
   '../..',
 )
-const semiDateFnsDir = path.resolve(semiUiDir, 'node_modules/date-fns')
+const dateFnsCandidates = [
+  path.resolve(semiUiDir, 'node_modules/date-fns'),
+  path.resolve(__dirname, '../node_modules/date-fns'),
+]
+const semiDateFnsDir = dateFnsCandidates.find((candidate) => {
+  try {
+    const packageJson = JSON.parse(
+      readFileSync(path.resolve(candidate, 'package.json'), 'utf8'),
+    ) as { version?: string }
+    return packageJson.version?.startsWith('2.') === true
+  } catch {
+    return false
+  }
+})
+
+if (!semiDateFnsDir) {
+  throw new Error('date-fns v2 is required by @douyinfe/semi-ui')
+}
 
 export default defineConfig(({ envMode }) => {
   const env = loadEnv({ mode: envMode, prefixes: ['VITE_'] })
