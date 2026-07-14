@@ -328,3 +328,46 @@ func TestProcessLotteryScheduleOpensAndDrawsDuePlans(t *testing.T) {
 	assert.Equal(t, LotteryPlanStatusOpen, openPlan.Status)
 	assert.Equal(t, LotteryPlanStatusFinished, duePlan.Status)
 }
+
+func TestListLotteryPlansForUserOnlyReturnsEligibleAndParticipatedPlans(t *testing.T) {
+	userIDs := setupLotteryFixture(t)
+	now := common.GetTimestamp()
+	publicPlan := &LotteryPlan{
+		Title:                 "Public lottery",
+		Status:                LotteryPlanStatusOpen,
+		EligibilityMode:       LotteryEligibilityAll,
+		MaxParticipants:       5,
+		RegistrationStartTime: now - 60,
+		DrawTime:              now + 3600,
+	}
+	privatePlan := &LotteryPlan{
+		Title:                 "Private lottery",
+		Status:                LotteryPlanStatusOpen,
+		EligibilityMode:       LotteryEligibilityUsers,
+		MaxParticipants:       5,
+		RegistrationStartTime: now - 60,
+		DrawTime:              now + 3600,
+	}
+	historyPlan := &LotteryPlan{
+		Title:                 "History lottery",
+		Status:                LotteryPlanStatusFinished,
+		EligibilityMode:       LotteryEligibilityUsers,
+		MaxParticipants:       5,
+		RegistrationStartTime: now - 7200,
+		DrawTime:              now - 3600,
+	}
+	prize := []*LotteryPrize{{Name: "Prize", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 100, FulfillmentMode: LotteryFulfillmentAuto}}
+	require.NoError(t, CreateLotteryPlan(publicPlan, nil, nil, prize))
+	require.NoError(t, CreateLotteryPlan(privatePlan, []int{userIDs[0]}, nil, []*LotteryPrize{{Name: "Private prize", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 100, FulfillmentMode: LotteryFulfillmentAuto}}))
+	require.NoError(t, CreateLotteryPlan(historyPlan, []int{userIDs[0]}, nil, []*LotteryPrize{{Name: "History prize", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 100, FulfillmentMode: LotteryFulfillmentAuto}}))
+	require.NoError(t, DB.Create(&LotteryParticipant{PlanId: historyPlan.Id, UserId: userIDs[0], UserGroup: "vip", Weight: 100, Status: LotteryParticipantStatusJoined, JoinedAt: now - 4000}).Error)
+
+	visibleToAllowed, err := ListLotteryPlansForUser(userIDs[0])
+	require.NoError(t, err)
+	assert.Len(t, visibleToAllowed, 3)
+
+	visibleToOther, err := ListLotteryPlansForUser(userIDs[1])
+	require.NoError(t, err)
+	require.Len(t, visibleToOther, 1)
+	assert.Equal(t, publicPlan.Id, visibleToOther[0].Id)
+}

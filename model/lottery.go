@@ -262,6 +262,69 @@ func CreateLotteryPlan(plan *LotteryPlan, userIds []int, groups []string, prizes
 	})
 }
 
+func ListLotteryPlansForUser(userId int) ([]LotteryPlan, error) {
+	if userId <= 0 {
+		return nil, errors.New("invalid user id")
+	}
+	var user User
+	if err := DB.First(&user, userId).Error; err != nil {
+		return nil, err
+	}
+	if user.Role == common.RoleAdminUser || user.Role == common.RoleRootUser {
+		return []LotteryPlan{}, nil
+	}
+
+	var plans []LotteryPlan
+	if err := DB.Order("draw_time desc, id desc").Find(&plans).Error; err != nil {
+		return nil, err
+	}
+	var participantPlanIds []int
+	if err := DB.Model(&LotteryParticipant{}).
+		Where("user_id = ? AND status = ?", userId, LotteryParticipantStatusJoined).
+		Pluck("plan_id", &participantPlanIds).Error; err != nil {
+		return nil, err
+	}
+	participated := make(map[int]struct{}, len(participantPlanIds))
+	for _, planId := range participantPlanIds {
+		participated[planId] = struct{}{}
+	}
+	visible := make([]LotteryPlan, 0, len(plans))
+	for _, plan := range plans {
+		if _, ok := participated[plan.Id]; ok {
+			visible = append(visible, plan)
+			continue
+		}
+		if plan.Status != LotteryPlanStatusScheduled && plan.Status != LotteryPlanStatusOpen {
+			continue
+		}
+		eligible, err := isUserEligibleForLotteryPlan(plan.Id, plan.EligibilityMode, user.Id, user.Group)
+		if err != nil {
+			return nil, err
+		}
+		if eligible {
+			visible = append(visible, plan)
+		}
+	}
+	return visible, nil
+}
+
+func isUserEligibleForLotteryPlan(planId int, mode LotteryEligibilityMode, userId int, userGroup string) (bool, error) {
+	switch mode {
+	case LotteryEligibilityAll:
+		return true, nil
+	case LotteryEligibilityGroups:
+		var count int64
+		err := DB.Model(&LotteryPlanGroup{}).Where("plan_id = ? AND "+commonGroupCol+" = ?", planId, userGroup).Count(&count).Error
+		return count > 0, err
+	case LotteryEligibilityUsers:
+		var count int64
+		err := DB.Model(&LotteryPlanUser{}).Where("plan_id = ? AND user_id = ?", planId, userId).Count(&count).Error
+		return count > 0, err
+	default:
+		return false, errors.New("invalid eligibility mode")
+	}
+}
+
 func JoinLotteryPlan(planId int, userId int) error {
 	if planId <= 0 || userId <= 0 {
 		return errors.New("invalid lottery participant")
