@@ -264,7 +264,9 @@ func SetApiRouter(router *gin.Engine) {
 		lotteryAdminRoute := apiRouter.Group("/lottery/admin")
 		lotteryAdminRoute.Use(middleware.AdminAuth())
 		{
+			lotteryAdminRoute.GET("/plans", controller.AdminListLotteryPlans)
 			lotteryAdminRoute.POST("/plans", controller.AdminCreateLotteryPlan)
+			lotteryAdminRoute.GET("/plans/:id/prizes", controller.AdminListLotteryPrizes)
 			lotteryAdminRoute.POST("/plans/:id/draw", controller.AdminDrawLotteryPlan)
 			lotteryAdminRoute.GET("/plans/:id/participants", controller.AdminListLotteryParticipants)
 			lotteryAdminRoute.PUT("/plans/:id/participants", controller.AdminUpdateLotteryParticipant)

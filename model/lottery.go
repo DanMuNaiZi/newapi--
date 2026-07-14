@@ -314,6 +314,25 @@ func ListLotteryPlansForUser(userId int) ([]LotteryPlan, error) {
 	return visible, nil
 }
 
+func ListLotteryPlansForAdmin() ([]LotteryPlan, error) {
+	var plans []LotteryPlan
+	if err := DB.Order("created_at desc, id desc").Find(&plans).Error; err != nil {
+		return nil, err
+	}
+	return plans, nil
+}
+
+func ListLotteryPrizes(planId int) ([]LotteryPrize, error) {
+	if planId <= 0 {
+		return nil, errors.New("invalid lottery plan")
+	}
+	var prizes []LotteryPrize
+	if err := DB.Where("plan_id = ?", planId).Order("sort_order asc, id asc").Find(&prizes).Error; err != nil {
+		return nil, err
+	}
+	return prizes, nil
+}
+
 func ListLotteryParticipants(planId int) ([]LotteryParticipantView, error) {
 	if planId <= 0 {
 		return nil, errors.New("invalid lottery plan")

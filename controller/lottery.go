@@ -118,6 +118,29 @@ func AdminCreateLotteryPlan(c *gin.Context) {
 	common.ApiSuccess(c, plan)
 }
 
+func AdminListLotteryPlans(c *gin.Context) {
+	plans, err := model.ListLotteryPlansForAdmin()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, plans)
+}
+
+func AdminListLotteryPrizes(c *gin.Context) {
+	planId, err := lotteryPathID(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	prizes, err := model.ListLotteryPrizes(planId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, prizes)
+}
+
 func AdminDrawLotteryPlan(c *gin.Context) {
 	planId, err := lotteryPathID(c)
 	if err != nil {

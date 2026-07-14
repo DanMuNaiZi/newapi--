@@ -46,6 +46,7 @@ import {
   CardStaggerItem,
 } from '@/components/page-transition'
 import { Button } from '@/components/ui/button'
+import { LotteryDashboardPanel } from '@/features/lottery/components/lottery-dashboard-panel'
 import { fetchTokenKey, getApiKeys } from '@/features/keys/api'
 import type { ApiKey } from '@/features/keys/types'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
@@ -373,9 +374,9 @@ function RequestPreview(props: {
           <span className='bg-success size-2 rounded-full' />
         </div>
         <div className='flex flex-col gap-1 overflow-hidden'>
-          {previewLines.map((line, index) => (
+          {previewLines.map((line) => (
             <code
-              key={`${line}-${index}`}
+              key={line}
               className='text-muted-foreground truncate'
               title={line}
             >
@@ -746,6 +747,8 @@ export function OverviewDashboard() {
       )}
 
       <SummaryCards />
+
+      <LotteryDashboardPanel />
 
       {showContentPanels && (
         <CardStaggerContainer
