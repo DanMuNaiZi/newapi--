@@ -83,6 +83,24 @@ func ClaimLotteryResultForSelf(c *gin.Context) {
 	common.ApiSuccess(c, nil)
 }
 
+func GetLotteryResultsForSelf(c *gin.Context) {
+	results, err := model.ListLotteryResultsForUser(c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, results)
+}
+
+func GetLotteryNotificationsForSelf(c *gin.Context) {
+	notifications, err := model.ListLotteryNotificationsForUser(c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, notifications)
+}
+
 func AdminCreateLotteryPlan(c *gin.Context) {
 	req := lotteryPlanRequest{}
 	if err := c.ShouldBindJSON(&req); err != nil {

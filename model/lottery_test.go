@@ -19,9 +19,11 @@ func setupLotteryFixture(t *testing.T) []int {
 		&LotteryParticipant{},
 		&LotteryDrawRun{},
 		&LotteryResult{},
+		&LotteryNotification{},
 	))
 	for _, table := range []interface{}{
 		&LotteryResult{},
+		&LotteryNotification{},
 		&LotteryDrawRun{},
 		&LotteryParticipant{},
 		&LotteryPrize{},
@@ -37,6 +39,7 @@ func setupLotteryFixture(t *testing.T) []int {
 	t.Cleanup(func() {
 		for _, table := range []interface{}{
 			&LotteryResult{},
+			&LotteryNotification{},
 			&LotteryDrawRun{},
 			&LotteryParticipant{},
 			&LotteryPrize{},
@@ -209,6 +212,9 @@ func TestLotteryAutoQuotaPrizeIsFulfilledAfterDraw(t *testing.T) {
 	var result LotteryResult
 	require.NoError(t, DB.Where("plan_id = ? AND user_id = ?", plan.Id, userIDs[0]).First(&result).Error)
 	assert.Equal(t, "fulfilled", result.FulfillmentStatus)
+	var notificationCount int64
+	require.NoError(t, DB.Model(&LotteryNotification{}).Where("plan_id = ? AND user_id = ? AND type = ?", plan.Id, userIDs[0], "lottery_result").Count(&notificationCount).Error)
+	assert.Equal(t, int64(1), notificationCount)
 }
 
 func TestLotterySelfClaimPrizeCreditsQuotaOnce(t *testing.T) {

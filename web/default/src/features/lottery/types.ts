@@ -36,6 +36,17 @@ export interface LotteryPlan {
   draw_time: number
 }
 
+export interface LotteryResult {
+  id: number
+  plan_id: number
+  prize_id: number
+  reward_type: 'quota' | 'subscription'
+  quota: number
+  fulfillment_mode: 'auto' | 'self_claim' | 'redemption_code'
+  fulfillment_status: string
+  claim_expires_at: number
+}
+
 export interface ApiResponse<T = undefined> {
   success: boolean
   message: string

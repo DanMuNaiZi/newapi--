@@ -333,6 +333,28 @@ func ListLotteryPrizes(planId int) ([]LotteryPrize, error) {
 	return prizes, nil
 }
 
+func ListLotteryResultsForUser(userId int) ([]LotteryResult, error) {
+	if userId <= 0 {
+		return nil, errors.New("invalid user id")
+	}
+	var results []LotteryResult
+	if err := DB.Where("user_id = ?", userId).Order("created_at desc, id desc").Find(&results).Error; err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+func ListLotteryNotificationsForUser(userId int) ([]LotteryNotification, error) {
+	if userId <= 0 {
+		return nil, errors.New("invalid user id")
+	}
+	var notifications []LotteryNotification
+	if err := DB.Where("user_id = ?", userId).Order("created_at desc, id desc").Find(&notifications).Error; err != nil {
+		return nil, err
+	}
+	return notifications, nil
+}
+
 func ListLotteryParticipants(planId int) ([]LotteryParticipantView, error) {
 	if planId <= 0 {
 		return nil, errors.New("invalid lottery plan")
@@ -648,6 +670,15 @@ func DrawLotteryPlan(planId int, trigger LotteryDrawTrigger, reason string) (*Lo
 		for index := range results {
 			results[index].DrawRunId = run.Id
 			if err := tx.Create(&results[index]).Error; err != nil {
+				return err
+			}
+			if err := tx.Create(&LotteryNotification{
+				UserId:    results[index].UserId,
+				PlanId:    plan.Id,
+				Type:      "lottery_result",
+				Content:   "You won a lottery reward.",
+				CreatedAt: now,
+			}).Error; err != nil {
 				return err
 			}
 			if results[index].FulfillmentMode == LotteryFulfillmentAuto {

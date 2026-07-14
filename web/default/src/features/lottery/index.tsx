@@ -18,14 +18,20 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import dayjs from 'dayjs'
-import { CalendarClock, LogIn, LogOut } from 'lucide-react'
+import { CalendarClock, Gift, LogIn, LogOut } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
 
-import { getLotteryPlansForSelf, joinLotteryPlan, leaveLotteryPlan } from './api'
+import {
+  claimLotteryResult,
+  getLotteryPlansForSelf,
+  getLotteryResultsForSelf,
+  joinLotteryPlan,
+  leaveLotteryPlan,
+} from './api'
 import type { LotteryPlan } from './types'
 
 const LOTTERY_QUERY_KEY = ['lottery', 'self'] as const
@@ -40,6 +46,11 @@ export function Lotteries() {
   const plansQuery = useQuery({
     queryKey: LOTTERY_QUERY_KEY,
     queryFn: getLotteryPlansForSelf,
+    refetchInterval: 30_000,
+  })
+  const resultsQuery = useQuery({
+    queryKey: ['lottery', 'results'],
+    queryFn: getLotteryResultsForSelf,
     refetchInterval: 30_000,
   })
   const invalidatePlans = async (): Promise<void> => {
@@ -65,6 +76,18 @@ export function Lotteries() {
       }
       toast.success(t('Left lottery'))
       await invalidatePlans()
+    },
+  })
+
+  const claimMutation = useMutation({
+    mutationFn: claimLotteryResult,
+    onSuccess: async (result) => {
+      if (!result.success) {
+        toast.error(result.message || t('Failed to claim lottery reward'))
+        return
+      }
+      toast.success(t('Lottery reward claimed'))
+      await queryClient.invalidateQueries({ queryKey: ['lottery', 'results'] })
     },
   })
   const plans = plansQuery.data?.success ? plansQuery.data.data : []
@@ -136,6 +159,40 @@ export function Lotteries() {
             <div className='text-muted-foreground border border-dashed p-8 text-center text-sm'>
               {t('No lottery plans are available')}
             </div>
+          )}
+
+          {(resultsQuery.data?.success ? resultsQuery.data.data : []).map(
+            (result) => {
+              const canClaim =
+                result.fulfillment_mode === 'self_claim' &&
+                result.fulfillment_status !== 'fulfilled'
+              return (
+                <section
+                  key={result.id}
+                  className='bg-card flex items-center justify-between gap-3 rounded-lg border p-4'
+                >
+                  <span className='flex min-w-0 items-center gap-2 text-sm'>
+                    <Gift className='size-4 shrink-0' aria-hidden='true' />
+                    <span className='truncate'>
+                      {t('Lottery reward')} #{result.id}
+                    </span>
+                  </span>
+                  {canClaim ? (
+                    <Button
+                      size='sm'
+                      disabled={claimMutation.isPending}
+                      onClick={() => claimMutation.mutate(result.id)}
+                    >
+                      {t('Claim lottery reward')}
+                    </Button>
+                  ) : (
+                    <span className='text-muted-foreground text-xs'>
+                      {result.fulfillment_status}
+                    </span>
+                  )}
+                </section>
+              )
+            }
           )}
         </div>
       </SectionPageLayout.Content>

@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 
-import type { ApiResponse, LotteryPlan } from './types'
+import type { ApiResponse, LotteryPlan, LotteryResult } from './types'
 
 export async function getLotteryPlansForSelf(): Promise<
   ApiResponse<LotteryPlan[]>
@@ -39,5 +39,12 @@ export async function leaveLotteryPlan(id: number): Promise<ApiResponse> {
 
 export async function claimLotteryResult(id: number): Promise<ApiResponse> {
   const response = await api.post(`/api/lottery/results/${id}/claim`)
+  return response.data
+}
+
+export async function getLotteryResultsForSelf(): Promise<
+  ApiResponse<LotteryResult[]>
+> {
+  const response = await api.get('/api/lottery/results/self')
   return response.data
 }

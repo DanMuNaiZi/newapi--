@@ -32,6 +32,7 @@ func setupLotteryControllerTestDB(t *testing.T) *gorm.DB {
 	model.LOG_DB = db
 	require.NoError(t, db.AutoMigrate(
 		&model.User{},
+		&model.Log{},
 		&model.LotteryPlan{},
 		&model.LotteryPlanGroup{},
 		&model.LotteryPlanUser{},
@@ -39,6 +40,7 @@ func setupLotteryControllerTestDB(t *testing.T) *gorm.DB {
 		&model.LotteryParticipant{},
 		&model.LotteryDrawRun{},
 		&model.LotteryResult{},
+		&model.LotteryNotification{},
 	))
 	t.Cleanup(func() {
 		common.RedisEnabled = previousRedisEnabled
