@@ -85,6 +85,34 @@ func AddRedemption(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgRedemptionCountMax)
 		return
 	}
+	if redemption.RewardType == "" {
+		redemption.RewardType = model.RedemptionRewardQuota
+	}
+	if redemption.RewardType != model.RedemptionRewardQuota && redemption.RewardType != model.RedemptionRewardSubscription {
+		common.ApiErrorMsg(c, "invalid redemption reward type")
+		return
+	}
+	if redemption.RewardType == model.RedemptionRewardQuota && redemption.Quota <= 0 {
+		common.ApiErrorMsg(c, "redemption quota must be positive")
+		return
+	}
+	if redemption.RewardType == model.RedemptionRewardSubscription {
+		if redemption.SubscriptionPlanId <= 0 {
+			common.ApiErrorMsg(c, "subscription plan is required")
+			return
+		}
+		plan, err := model.GetSubscriptionPlanById(redemption.SubscriptionPlanId)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		snapshot, err := common.Marshal(plan)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		redemption.SubscriptionSnapshot = string(snapshot)
+	}
 	if valid, msg := validateExpiredTime(c, redemption.ExpiredTime); !valid {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 		return
@@ -93,12 +121,18 @@ func AddRedemption(c *gin.Context) {
 	for i := 0; i < redemption.Count; i++ {
 		key := common.GetUUID()
 		cleanRedemption := model.Redemption{
-			UserId:      c.GetInt("id"),
-			Name:        redemption.Name,
-			Key:         key,
-			CreatedTime: common.GetTimestamp(),
-			Quota:       redemption.Quota,
-			ExpiredTime: redemption.ExpiredTime,
+			UserId:               c.GetInt("id"),
+			Name:                 redemption.Name,
+			Key:                  key,
+			CreatedTime:          common.GetTimestamp(),
+			Quota:                redemption.Quota,
+			RewardType:           redemption.RewardType,
+			SubscriptionPlanId:   redemption.SubscriptionPlanId,
+			SubscriptionSnapshot: redemption.SubscriptionSnapshot,
+			Batch:                redemption.Batch,
+			SourceRef:            redemption.SourceRef,
+			Remark:               redemption.Remark,
+			ExpiredTime:          redemption.ExpiredTime,
 		}
 		err = cleanRedemption.Insert()
 		if err != nil {
@@ -113,9 +147,11 @@ func AddRedemption(c *gin.Context) {
 		keys = append(keys, key)
 	}
 	recordManageAudit(c, "redemption.create", map[string]interface{}{
-		"name":  redemption.Name,
-		"count": redemption.Count,
-		"quota": logger.LogQuota(redemption.Quota),
+		"name":                 redemption.Name,
+		"count":                redemption.Count,
+		"quota":                logger.LogQuota(redemption.Quota),
+		"reward_type":          redemption.RewardType,
+		"subscription_plan_id": redemption.SubscriptionPlanId,
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

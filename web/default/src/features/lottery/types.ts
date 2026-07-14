@@ -47,6 +47,51 @@ export interface LotteryResult {
   claim_expires_at: number
 }
 
+export interface LotteryPrize {
+  id: number
+  plan_id: number
+  name: string
+  quantity: number
+  reward_type: 'quota' | 'subscription'
+  quota: number
+  subscription_plan_id: number
+  fulfillment_mode: 'auto' | 'self_claim' | 'redemption_code'
+  claim_expire_seconds: number
+}
+
+export interface LotteryParticipant {
+  id: number
+  plan_id: number
+  user_id: number
+  username: string
+  display_name: string
+  user_group: string
+  weight: number
+  preset_prize_id: number
+  status: 'joined' | 'left'
+}
+
+export interface LotteryPlanCreatePayload {
+  title: string
+  description: string
+  status: 'draft' | 'scheduled' | 'open'
+  eligibility_mode: 'all' | 'groups' | 'users'
+  max_participants: number
+  registration_start_time: number
+  draw_time: number
+  user_ids: number[]
+  groups: string[]
+  prizes: Array<{
+    name: string
+    quantity: number
+    reward_type: 'quota' | 'subscription'
+    quota: number
+    subscription_plan_id: number
+    fulfillment_mode: 'auto' | 'self_claim' | 'redemption_code'
+    claim_expire_seconds: number
+  }>
+}
+
 export interface ApiResponse<T = undefined> {
   success: boolean
   message: string

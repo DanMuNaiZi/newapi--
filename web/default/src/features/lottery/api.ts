@@ -18,7 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 
-import type { ApiResponse, LotteryPlan, LotteryResult } from './types'
+import type {
+  ApiResponse,
+  LotteryParticipant,
+  LotteryPlan,
+  LotteryPlanCreatePayload,
+  LotteryPrize,
+  LotteryResult,
+} from './types'
 
 export async function getLotteryPlansForSelf(): Promise<
   ApiResponse<LotteryPlan[]>
@@ -46,5 +53,62 @@ export async function getLotteryResultsForSelf(): Promise<
   ApiResponse<LotteryResult[]>
 > {
   const response = await api.get('/api/lottery/results/self')
+  return response.data
+}
+
+export async function getAdminLotteryPlans(): Promise<
+  ApiResponse<LotteryPlan[]>
+> {
+  const response = await api.get('/api/lottery/admin/plans')
+  return response.data
+}
+
+export async function createLotteryPlan(
+  payload: LotteryPlanCreatePayload
+): Promise<ApiResponse<LotteryPlan>> {
+  const response = await api.post('/api/lottery/admin/plans', payload)
+  return response.data
+}
+
+export async function getLotteryPrizes(
+  planId: number
+): Promise<ApiResponse<LotteryPrize[]>> {
+  const response = await api.get(`/api/lottery/admin/plans/${planId}/prizes`)
+  return response.data
+}
+
+export async function getLotteryParticipants(
+  planId: number
+): Promise<ApiResponse<LotteryParticipant[]>> {
+  const response = await api.get(
+    `/api/lottery/admin/plans/${planId}/participants`
+  )
+  return response.data
+}
+
+export async function updateLotteryParticipant(payload: {
+  planId: number
+  userId: number
+  weight?: number
+  presetPrizeId?: number
+}): Promise<ApiResponse> {
+  const response = await api.put(
+    `/api/lottery/admin/plans/${payload.planId}/participants`,
+    {
+      user_id: payload.userId,
+      weight: payload.weight,
+      preset_prize_id: payload.presetPrizeId,
+    }
+  )
+  return response.data
+}
+
+export async function drawLotteryPlan(
+  planId: number,
+  reason: string
+): Promise<ApiResponse> {
+  const response = await api.post(`/api/lottery/admin/plans/${planId}/draw`, {
+    reason,
+  })
   return response.data
 }
