@@ -45,6 +45,7 @@ export interface LotteryResult {
   fulfillment_mode: 'auto' | 'self_claim' | 'redemption_code'
   fulfillment_status: string
   claim_expires_at: number
+  redemption_code: string
 }
 
 export interface LotteryPrize {

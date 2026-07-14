@@ -186,8 +186,8 @@ export function Lotteries() {
                       {t('Claim lottery reward')}
                     </Button>
                   ) : (
-                    <span className='text-muted-foreground text-xs'>
-                      {result.fulfillment_status}
+                    <span className='text-muted-foreground max-w-52 truncate font-mono text-xs'>
+                      {result.redemption_code || result.fulfillment_status}
                     </span>
                   )}
                 </section>

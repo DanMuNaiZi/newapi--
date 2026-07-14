@@ -12,6 +12,7 @@ import (
 func setupLotteryFixture(t *testing.T) []int {
 	t.Helper()
 	require.NoError(t, DB.AutoMigrate(
+		&Redemption{},
 		&LotteryPlan{},
 		&LotteryPlanGroup{},
 		&LotteryPlanUser{},
@@ -19,6 +20,7 @@ func setupLotteryFixture(t *testing.T) []int {
 		&LotteryParticipant{},
 		&LotteryDrawRun{},
 		&LotteryResult{},
+		&Redemption{},
 		&LotteryNotification{},
 	))
 	for _, table := range []interface{}{
@@ -39,6 +41,7 @@ func setupLotteryFixture(t *testing.T) []int {
 	t.Cleanup(func() {
 		for _, table := range []interface{}{
 			&LotteryResult{},
+			&Redemption{},
 			&LotteryNotification{},
 			&LotteryDrawRun{},
 			&LotteryParticipant{},
@@ -242,6 +245,36 @@ func TestLotterySelfClaimPrizeCreditsQuotaOnce(t *testing.T) {
 	var user User
 	require.NoError(t, DB.First(&user, userIDs[0]).Error)
 	assert.Equal(t, 123, user.Quota)
+}
+
+func TestLotteryRedemptionCodePrizeCreatesRedeemableCode(t *testing.T) {
+	userIDs := setupLotteryFixture(t)
+	plan := &LotteryPlan{
+		Title:                 "Code prize lottery",
+		Status:                LotteryPlanStatusOpen,
+		EligibilityMode:       LotteryEligibilityAll,
+		MaxParticipants:       2,
+		RegistrationStartTime: common.GetTimestamp() - 60,
+		DrawTime:              common.GetTimestamp() + 3600,
+	}
+	require.NoError(t, CreateLotteryPlan(plan, nil, nil, []*LotteryPrize{{
+		Name:            "Code prize",
+		Quantity:        1,
+		RewardType:      LotteryRewardQuota,
+		Quota:           222,
+		FulfillmentMode: LotteryFulfillmentRedemptionCode,
+	}}))
+	require.NoError(t, JoinLotteryPlan(plan.Id, userIDs[0]))
+	_, err := DrawLotteryPlan(plan.Id, LotteryDrawTriggerManual, "test")
+	require.NoError(t, err)
+
+	var result LotteryResult
+	require.NoError(t, DB.Where("plan_id = ? AND user_id = ?", plan.Id, userIDs[0]).First(&result).Error)
+	require.NotEmpty(t, result.RedemptionCode)
+	assert.Equal(t, "issued", result.FulfillmentStatus)
+	quota, err := Redeem(result.RedemptionCode, userIDs[0])
+	require.NoError(t, err)
+	assert.Equal(t, 222, quota)
 }
 
 func TestLotterySubscriptionRewardUsesSnapshotAndIgnoresPurchaseLimit(t *testing.T) {

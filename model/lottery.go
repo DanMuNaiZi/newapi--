@@ -165,6 +165,7 @@ type LotteryResult struct {
 	SubscriptionSnapshot string                 `json:"subscription_snapshot" gorm:"type:text"`
 	FulfillmentMode      LotteryFulfillmentMode `json:"fulfillment_mode" gorm:"type:varchar(32)"`
 	FulfillmentStatus    string                 `json:"fulfillment_status" gorm:"type:varchar(32);index"`
+	RedemptionCode       string                 `json:"redemption_code" gorm:"type:varchar(64);index"`
 	ClaimExpiresAt       int64                  `json:"claim_expires_at" gorm:"type:bigint;index"`
 	ClaimedAt            int64                  `json:"claimed_at" gorm:"type:bigint"`
 	CreatedAt            int64                  `json:"created_at" gorm:"type:bigint"`
@@ -672,6 +673,32 @@ func DrawLotteryPlan(planId int, trigger LotteryDrawTrigger, reason string) (*Lo
 			if err := tx.Create(&results[index]).Error; err != nil {
 				return err
 			}
+			if results[index].FulfillmentMode == LotteryFulfillmentRedemptionCode {
+				code := common.GetUUID()
+				redemption := &Redemption{
+					UserId:               plan.CreatedBy,
+					Key:                  code,
+					Status:               common.RedemptionCodeStatusEnabled,
+					Name:                 "Lottery reward",
+					Quota:                results[index].Quota,
+					RewardType:           string(results[index].RewardType),
+					SubscriptionPlanId:   results[index].SubscriptionPlanId,
+					SubscriptionSnapshot: results[index].SubscriptionSnapshot,
+					SourceRef:            "lottery_result",
+					CreatedTime:          now,
+				}
+				if err := tx.Create(redemption).Error; err != nil {
+					return err
+				}
+				if err := tx.Model(&LotteryResult{}).Where("id = ?", results[index].Id).Updates(map[string]interface{}{
+					"redemption_code":    code,
+					"fulfillment_status": "issued",
+				}).Error; err != nil {
+					return err
+				}
+				results[index].RedemptionCode = code
+				results[index].FulfillmentStatus = "issued"
+			}
 			if err := tx.Create(&LotteryNotification{
 				UserId:    results[index].UserId,
 				PlanId:    plan.Id,
@@ -727,6 +754,8 @@ func lotteryResultFromPrize(planId int, userId int, prize LotteryPrize, now int6
 	claimExpiresAt := int64(0)
 	if prize.FulfillmentMode == LotteryFulfillmentAuto {
 		fulfillmentStatus = "pending_auto"
+	} else if prize.FulfillmentMode == LotteryFulfillmentRedemptionCode {
+		fulfillmentStatus = "issued"
 	} else if prize.ClaimExpireSeconds > 0 {
 		claimExpiresAt = now + prize.ClaimExpireSeconds
 	}
