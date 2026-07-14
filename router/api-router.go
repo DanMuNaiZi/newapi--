@@ -253,6 +253,23 @@ func SetApiRouter(router *gin.Engine) {
 			}
 		}
 
+		lotteryRoute := apiRouter.Group("/lottery")
+		lotteryRoute.Use(middleware.UserAuth())
+		{
+			lotteryRoute.GET("/self", controller.GetLotteryPlansForSelf)
+			lotteryRoute.POST("/:id/join", controller.JoinLotteryPlanForSelf)
+			lotteryRoute.POST("/:id/leave", controller.LeaveLotteryPlanForSelf)
+			lotteryRoute.POST("/results/:id/claim", controller.ClaimLotteryResultForSelf)
+		}
+		lotteryAdminRoute := apiRouter.Group("/lottery/admin")
+		lotteryAdminRoute.Use(middleware.AdminAuth())
+		{
+			lotteryAdminRoute.POST("/plans", controller.AdminCreateLotteryPlan)
+			lotteryAdminRoute.POST("/plans/:id/draw", controller.AdminDrawLotteryPlan)
+			lotteryAdminRoute.GET("/plans/:id/participants", controller.AdminListLotteryParticipants)
+			lotteryAdminRoute.PUT("/plans/:id/participants", controller.AdminUpdateLotteryParticipant)
+		}
+
 		redemptionRoute := apiRouter.Group("/redemption")
 		redemptionRoute.Use(middleware.AdminAuth())
 		{

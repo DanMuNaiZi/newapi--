@@ -371,3 +371,17 @@ func TestListLotteryPlansForUserOnlyReturnsEligibleAndParticipatedPlans(t *testi
 	require.Len(t, visibleToOther, 1)
 	assert.Equal(t, publicPlan.Id, visibleToOther[0].Id)
 }
+
+func TestSetLotteryParticipantWeightRejectsInvalidValues(t *testing.T) {
+	userIDs := setupLotteryFixture(t)
+	plan := &LotteryPlan{Title: "Weight lottery", Status: LotteryPlanStatusOpen, EligibilityMode: LotteryEligibilityAll, MaxParticipants: 2, RegistrationStartTime: common.GetTimestamp() - 60, DrawTime: common.GetTimestamp() + 3600}
+	require.NoError(t, CreateLotteryPlan(plan, nil, nil, []*LotteryPrize{{Name: "Prize", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 100, FulfillmentMode: LotteryFulfillmentAuto}}))
+	require.NoError(t, JoinLotteryPlan(plan.Id, userIDs[0]))
+	require.Error(t, SetLotteryParticipantWeight(plan.Id, userIDs[0], 0))
+	require.Error(t, SetLotteryParticipantWeight(plan.Id, userIDs[0], 1000001))
+	require.NoError(t, SetLotteryParticipantWeight(plan.Id, userIDs[0], 500))
+
+	var participant LotteryParticipant
+	require.NoError(t, DB.Where("plan_id = ? AND user_id = ?", plan.Id, userIDs[0]).First(&participant).Error)
+	assert.Equal(t, 500, participant.Weight)
+}

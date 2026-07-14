@@ -180,6 +180,12 @@ type LotteryNotification struct {
 	CreatedAt int64  `json:"created_at" gorm:"type:bigint;index"`
 }
 
+type LotteryParticipantView struct {
+	LotteryParticipant
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+}
+
 func CreateLotteryPlan(plan *LotteryPlan, userIds []int, groups []string, prizes []*LotteryPrize) error {
 	if plan == nil || strings.TrimSpace(plan.Title) == "" {
 		return errors.New("lottery plan title is required")
@@ -306,6 +312,41 @@ func ListLotteryPlansForUser(userId int) ([]LotteryPlan, error) {
 		}
 	}
 	return visible, nil
+}
+
+func ListLotteryParticipants(planId int) ([]LotteryParticipantView, error) {
+	if planId <= 0 {
+		return nil, errors.New("invalid lottery plan")
+	}
+	var participants []LotteryParticipant
+	if err := DB.Where("plan_id = ?", planId).Order("joined_at asc, id asc").Find(&participants).Error; err != nil {
+		return nil, err
+	}
+	if len(participants) == 0 {
+		return []LotteryParticipantView{}, nil
+	}
+	userIds := make([]int, 0, len(participants))
+	for _, participant := range participants {
+		userIds = append(userIds, participant.UserId)
+	}
+	var users []User
+	if err := DB.Where("id IN ?", userIds).Find(&users).Error; err != nil {
+		return nil, err
+	}
+	usersById := make(map[int]User, len(users))
+	for _, user := range users {
+		usersById[user.Id] = user
+	}
+	views := make([]LotteryParticipantView, 0, len(participants))
+	for _, participant := range participants {
+		user := usersById[participant.UserId]
+		views = append(views, LotteryParticipantView{
+			LotteryParticipant: participant,
+			Username:           user.Username,
+			DisplayName:        user.DisplayName,
+		})
+	}
+	return views, nil
 }
 
 func isUserEligibleForLotteryPlan(planId int, mode LotteryEligibilityMode, userId int, userGroup string) (bool, error) {
@@ -442,8 +483,33 @@ func LeaveLotteryPlan(planId int, userId int) error {
 	})
 }
 
+func SetLotteryParticipantWeight(planId int, userId int, weight int) error {
+	if planId <= 0 || userId <= 0 || weight < 1 || weight > 1000000 {
+		return errors.New("invalid lottery participant weight")
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var plan LotteryPlan
+		if err := lockForUpdate(tx).First(&plan, planId).Error; err != nil {
+			return err
+		}
+		if plan.Status != LotteryPlanStatusOpen {
+			return errors.New("lottery plan is not open")
+		}
+		result := tx.Model(&LotteryParticipant{}).
+			Where("plan_id = ? AND user_id = ? AND status = ?", plan.Id, userId, LotteryParticipantStatusJoined).
+			Update("weight", weight)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("user has not joined this lottery")
+		}
+		return nil
+	})
+}
+
 func SetLotteryParticipantPreset(planId int, userId int, prizeId int) error {
-	if planId <= 0 || userId <= 0 || prizeId <= 0 {
+	if planId <= 0 || userId <= 0 || prizeId < 0 {
 		return errors.New("invalid lottery preset")
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
@@ -454,11 +520,20 @@ func SetLotteryParticipantPreset(planId int, userId int, prizeId int) error {
 		if plan.Status != LotteryPlanStatusOpen {
 			return errors.New("lottery plan is not open")
 		}
-		var prize LotteryPrize
-		if err := tx.Where("id = ? AND plan_id = ?", prizeId, plan.Id).First(&prize).Error; err != nil {
-			return err
+		if prizeId != 0 {
+			var prize LotteryPrize
+			if err := tx.Where("id = ? AND plan_id = ?", prizeId, plan.Id).First(&prize).Error; err != nil {
+				return err
+			}
 		}
-		return tx.Model(&LotteryParticipant{}).Where("plan_id = ? AND user_id = ? AND status = ?", plan.Id, userId, LotteryParticipantStatusJoined).Update("preset_prize_id", prize.Id).Error
+		result := tx.Model(&LotteryParticipant{}).Where("plan_id = ? AND user_id = ? AND status = ?", plan.Id, userId, LotteryParticipantStatusJoined).Update("preset_prize_id", prizeId)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("user has not joined this lottery")
+		}
+		return nil
 	})
 }
 
