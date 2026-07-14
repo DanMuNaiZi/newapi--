@@ -28,6 +28,8 @@ func setupLotteryFixture(t *testing.T) []int {
 		&LotteryPlanGroup{},
 		&LotteryPlanUser{},
 		&LotteryPlan{},
+		&UserSubscription{},
+		&SubscriptionPlan{},
 	} {
 		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(table).Error)
 	}
@@ -41,6 +43,8 @@ func setupLotteryFixture(t *testing.T) []int {
 			&LotteryPlanGroup{},
 			&LotteryPlanUser{},
 			&LotteryPlan{},
+			&UserSubscription{},
+			&SubscriptionPlan{},
 		} {
 			require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(table).Error)
 		}
@@ -179,4 +183,96 @@ func TestLotteryGroupEligibilityAndAdminExclusion(t *testing.T) {
 	}))
 	require.NoError(t, DB.Model(&User{}).Where("id = ?", userIDs[1]).Update("role", common.RoleAdminUser).Error)
 	require.Error(t, JoinLotteryPlan(adminPlan.Id, userIDs[1]))
+}
+
+func TestLotteryAutoQuotaPrizeIsFulfilledAfterDraw(t *testing.T) {
+	userIDs := setupLotteryFixture(t)
+	plan := &LotteryPlan{
+		Title:                 "Auto quota lottery",
+		Status:                LotteryPlanStatusOpen,
+		EligibilityMode:       LotteryEligibilityAll,
+		MaxParticipants:       1,
+		RegistrationStartTime: common.GetTimestamp() - 60,
+		DrawTime:              common.GetTimestamp() + 3600,
+	}
+	require.NoError(t, CreateLotteryPlan(plan, nil, nil, []*LotteryPrize{
+		{Name: "Quota", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 321, FulfillmentMode: LotteryFulfillmentAuto},
+	}))
+	require.NoError(t, JoinLotteryPlan(plan.Id, userIDs[0]))
+	_, err := DrawLotteryPlan(plan.Id, LotteryDrawTriggerManual, "test")
+	require.NoError(t, err)
+
+	var user User
+	require.NoError(t, DB.First(&user, userIDs[0]).Error)
+	assert.Equal(t, 321, user.Quota)
+
+	var result LotteryResult
+	require.NoError(t, DB.Where("plan_id = ? AND user_id = ?", plan.Id, userIDs[0]).First(&result).Error)
+	assert.Equal(t, "fulfilled", result.FulfillmentStatus)
+}
+
+func TestLotterySelfClaimPrizeCreditsQuotaOnce(t *testing.T) {
+	userIDs := setupLotteryFixture(t)
+	plan := &LotteryPlan{
+		Title:                 "Claim quota lottery",
+		Status:                LotteryPlanStatusOpen,
+		EligibilityMode:       LotteryEligibilityAll,
+		MaxParticipants:       1,
+		RegistrationStartTime: common.GetTimestamp() - 60,
+		DrawTime:              common.GetTimestamp() + 3600,
+	}
+	require.NoError(t, CreateLotteryPlan(plan, nil, nil, []*LotteryPrize{
+		{Name: "Quota", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 123, FulfillmentMode: LotteryFulfillmentSelfClaim, ClaimExpireSeconds: 3600},
+	}))
+	require.NoError(t, JoinLotteryPlan(plan.Id, userIDs[0]))
+	_, err := DrawLotteryPlan(plan.Id, LotteryDrawTriggerManual, "test")
+	require.NoError(t, err)
+
+	var result LotteryResult
+	require.NoError(t, DB.Where("plan_id = ? AND user_id = ?", plan.Id, userIDs[0]).First(&result).Error)
+	require.NoError(t, ClaimLotteryResult(result.Id, userIDs[0]))
+	require.Error(t, ClaimLotteryResult(result.Id, userIDs[0]))
+
+	var user User
+	require.NoError(t, DB.First(&user, userIDs[0]).Error)
+	assert.Equal(t, 123, user.Quota)
+}
+
+func TestLotterySubscriptionRewardUsesSnapshotAndIgnoresPurchaseLimit(t *testing.T) {
+	userIDs := setupLotteryFixture(t)
+	plan := &SubscriptionPlan{
+		Title:              "Reward subscription",
+		PriceAmount:        0,
+		DurationUnit:       "month",
+		DurationValue:      1,
+		Enabled:            true,
+		MaxPurchasePerUser: 1,
+		TotalAmount:        456,
+	}
+	plan.NormalizeDefaults()
+	require.NoError(t, DB.Create(plan).Error)
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		_, err := CreateUserSubscriptionFromPlanTx(tx, userIDs[0], plan, "order")
+		return err
+	}))
+
+	lotteryPlan := &LotteryPlan{
+		Title:                 "Subscription lottery",
+		Status:                LotteryPlanStatusOpen,
+		EligibilityMode:       LotteryEligibilityAll,
+		MaxParticipants:       1,
+		RegistrationStartTime: common.GetTimestamp() - 60,
+		DrawTime:              common.GetTimestamp() + 3600,
+	}
+	require.NoError(t, CreateLotteryPlan(lotteryPlan, nil, nil, []*LotteryPrize{
+		{Name: "Subscription", Quantity: 1, RewardType: LotteryRewardSubscription, SubscriptionPlanId: plan.Id, FulfillmentMode: LotteryFulfillmentAuto},
+	}))
+	require.NoError(t, JoinLotteryPlan(lotteryPlan.Id, userIDs[0]))
+	_, err := DrawLotteryPlan(lotteryPlan.Id, LotteryDrawTriggerManual, "test")
+	require.NoError(t, err)
+
+	var subscriptions []UserSubscription
+	require.NoError(t, DB.Where("user_id = ? AND plan_id = ?", userIDs[0], plan.Id).Find(&subscriptions).Error)
+	require.Len(t, subscriptions, 2)
+	assert.Equal(t, "lottery", subscriptions[1].Source)
 }

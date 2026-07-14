@@ -153,16 +153,21 @@ type LotteryDrawRun struct {
 }
 
 type LotteryResult struct {
-	Id                int    `json:"id"`
-	PlanId            int    `json:"plan_id" gorm:"uniqueIndex:idx_lottery_result_user,priority:1;index"`
-	DrawRunId         int    `json:"draw_run_id" gorm:"index"`
-	UserId            int    `json:"user_id" gorm:"uniqueIndex:idx_lottery_result_user,priority:2;index"`
-	PrizeId           int    `json:"prize_id" gorm:"index"`
-	PrizeSnapshot     string `json:"prize_snapshot" gorm:"type:text"`
-	FulfillmentStatus string `json:"fulfillment_status" gorm:"type:varchar(32);index"`
-	ClaimExpiresAt    int64  `json:"claim_expires_at" gorm:"type:bigint;index"`
-	ClaimedAt         int64  `json:"claimed_at" gorm:"type:bigint"`
-	CreatedAt         int64  `json:"created_at" gorm:"type:bigint"`
+	Id                   int                    `json:"id"`
+	PlanId               int                    `json:"plan_id" gorm:"uniqueIndex:idx_lottery_result_user,priority:1;index"`
+	DrawRunId            int                    `json:"draw_run_id" gorm:"index"`
+	UserId               int                    `json:"user_id" gorm:"uniqueIndex:idx_lottery_result_user,priority:2;index"`
+	PrizeId              int                    `json:"prize_id" gorm:"index"`
+	PrizeSnapshot        string                 `json:"prize_snapshot" gorm:"type:text"`
+	RewardType           LotteryRewardType      `json:"reward_type" gorm:"type:varchar(32)"`
+	Quota                int                    `json:"quota" gorm:"type:int"`
+	SubscriptionPlanId   int                    `json:"subscription_plan_id" gorm:"index"`
+	SubscriptionSnapshot string                 `json:"subscription_snapshot" gorm:"type:text"`
+	FulfillmentMode      LotteryFulfillmentMode `json:"fulfillment_mode" gorm:"type:varchar(32)"`
+	FulfillmentStatus    string                 `json:"fulfillment_status" gorm:"type:varchar(32);index"`
+	ClaimExpiresAt       int64                  `json:"claim_expires_at" gorm:"type:bigint;index"`
+	ClaimedAt            int64                  `json:"claimed_at" gorm:"type:bigint"`
+	CreatedAt            int64                  `json:"created_at" gorm:"type:bigint"`
 }
 
 type LotteryNotification struct {
@@ -235,6 +240,17 @@ func CreateLotteryPlan(plan *LotteryPlan, userIds []int, groups []string, prizes
 			}
 			if prize.RewardType == LotteryRewardSubscription && prize.SubscriptionPlanId <= 0 && prize.SubscriptionSnapshot == "" {
 				return errors.New("subscription prize is required")
+			}
+			if prize.RewardType == LotteryRewardSubscription && prize.SubscriptionSnapshot == "" {
+				var subscriptionPlan SubscriptionPlan
+				if err := tx.First(&subscriptionPlan, prize.SubscriptionPlanId).Error; err != nil {
+					return err
+				}
+				snapshot, err := common.Marshal(subscriptionPlan)
+				if err != nil {
+					return err
+				}
+				prize.SubscriptionSnapshot = string(snapshot)
 			}
 			prize.PlanId = plan.Id
 			prize.SortOrder = index
@@ -385,6 +401,7 @@ func DrawLotteryPlan(planId int, trigger LotteryDrawTrigger, reason string) (*Lo
 		return nil, errors.New("manual lottery draw reason is required")
 	}
 	run := &LotteryDrawRun{}
+	autoResultIds := make([]int, 0)
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var plan LotteryPlan
 		if err := lockForUpdate(tx).First(&plan, planId).Error; err != nil {
@@ -467,11 +484,19 @@ func DrawLotteryPlan(planId int, trigger LotteryDrawTrigger, reason string) (*Lo
 			if err := tx.Create(&results[index]).Error; err != nil {
 				return err
 			}
+			if results[index].FulfillmentMode == LotteryFulfillmentAuto {
+				autoResultIds = append(autoResultIds, results[index].Id)
+			}
 		}
 		return tx.Model(&LotteryPlan{}).Where("id = ? AND status = ?", plan.Id, LotteryPlanStatusOpen).Update("status", LotteryPlanStatusFinished).Error
 	})
 	if err != nil {
 		return nil, err
+	}
+	for _, resultId := range autoResultIds {
+		if err := FulfillLotteryResult(resultId); err != nil {
+			common.SysError("failed to auto fulfill lottery result: " + err.Error())
+		}
 	}
 	return run, nil
 }
@@ -485,13 +510,82 @@ func lotteryResultFromPrize(planId int, userId int, prize LotteryPrize, now int6
 		claimExpiresAt = now + prize.ClaimExpireSeconds
 	}
 	return LotteryResult{
-		PlanId:            planId,
-		UserId:            userId,
-		PrizeId:           prize.Id,
-		FulfillmentStatus: fulfillmentStatus,
-		ClaimExpiresAt:    claimExpiresAt,
-		CreatedAt:         now,
+		PlanId:               planId,
+		UserId:               userId,
+		PrizeId:              prize.Id,
+		RewardType:           prize.RewardType,
+		Quota:                prize.Quota,
+		SubscriptionPlanId:   prize.SubscriptionPlanId,
+		SubscriptionSnapshot: prize.SubscriptionSnapshot,
+		FulfillmentMode:      prize.FulfillmentMode,
+		FulfillmentStatus:    fulfillmentStatus,
+		ClaimExpiresAt:       claimExpiresAt,
+		CreatedAt:            now,
 	}
+}
+
+func ClaimLotteryResult(resultId int, userId int) error {
+	if resultId <= 0 || userId <= 0 {
+		return errors.New("invalid lottery claim")
+	}
+	return fulfillLotteryResult(resultId, userId, false)
+}
+
+func FulfillLotteryResult(resultId int) error {
+	if resultId <= 0 {
+		return errors.New("invalid lottery result")
+	}
+	return fulfillLotteryResult(resultId, 0, true)
+}
+
+func fulfillLotteryResult(resultId int, requestedUserId int, allowAuto bool) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var result LotteryResult
+		if err := lockForUpdate(tx).First(&result, resultId).Error; err != nil {
+			return err
+		}
+		if requestedUserId != 0 && result.UserId != requestedUserId {
+			return errors.New("lottery result does not belong to user")
+		}
+		if result.FulfillmentStatus == "fulfilled" {
+			return errors.New("lottery reward has already been fulfilled")
+		}
+		if result.ClaimExpiresAt > 0 && result.ClaimExpiresAt < common.GetTimestamp() {
+			return errors.New("lottery reward claim has expired")
+		}
+		if !allowAuto && result.FulfillmentMode == LotteryFulfillmentAuto {
+			return errors.New("lottery reward is fulfilled automatically")
+		}
+		switch result.RewardType {
+		case LotteryRewardQuota:
+			if result.Quota <= 0 {
+				return errors.New("invalid lottery quota reward")
+			}
+			if err := tx.Model(&User{}).Where("id = ?", result.UserId).Update("quota", gorm.Expr("quota + ?", result.Quota)).Error; err != nil {
+				return err
+			}
+		case LotteryRewardSubscription:
+			if result.SubscriptionSnapshot == "" {
+				return errors.New("lottery subscription snapshot is missing")
+			}
+			var subscriptionPlan SubscriptionPlan
+			if err := common.Unmarshal([]byte(result.SubscriptionSnapshot), &subscriptionPlan); err != nil {
+				return err
+			}
+			if subscriptionPlan.Id == 0 {
+				subscriptionPlan.Id = result.SubscriptionPlanId
+			}
+			if _, err := CreateEarnedUserSubscriptionFromPlanTx(tx, result.UserId, &subscriptionPlan, "lottery"); err != nil {
+				return err
+			}
+		default:
+			return errors.New("invalid lottery reward type")
+		}
+		return tx.Model(&LotteryResult{}).Where("id = ? AND fulfillment_status != ?", result.Id, "fulfilled").Updates(map[string]interface{}{
+			"fulfillment_status": "fulfilled",
+			"claimed_at":         common.GetTimestamp(),
+		}).Error
+	})
 }
 
 func selectWeightedLotteryParticipant(candidates []LotteryParticipant) (LotteryParticipant, error) {
