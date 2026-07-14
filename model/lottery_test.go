@@ -424,3 +424,76 @@ func TestSetLotteryParticipantWeightRejectsInvalidValues(t *testing.T) {
 	require.NoError(t, DB.Where("plan_id = ? AND user_id = ?", plan.Id, userIDs[0]).First(&participant).Error)
 	assert.Equal(t, 500, participant.Weight)
 }
+
+func TestPublishedLotteryPlanOnlyAllowsCopyAndDelayedDrawOrCancellation(t *testing.T) {
+	setupLotteryFixture(t)
+	now := common.GetTimestamp()
+	plan := &LotteryPlan{
+		Title:                 "Published lottery",
+		Description:           "Original copy",
+		Status:                LotteryPlanStatusScheduled,
+		EligibilityMode:       LotteryEligibilityAll,
+		MaxParticipants:       5,
+		RegistrationStartTime: now + 60,
+		DrawTime:              now + 3600,
+	}
+	require.NoError(t, CreateLotteryPlan(plan, nil, nil, []*LotteryPrize{{
+		Name:            "Prize",
+		Quantity:        1,
+		RewardType:      LotteryRewardQuota,
+		Quota:           100,
+		FulfillmentMode: LotteryFulfillmentAuto,
+	}}))
+
+	updated, err := UpdatePublishedLotteryPlan(plan.Id, LotteryPlanPublishedUpdate{
+		Title:       stringPointer("Updated lottery"),
+		Description: stringPointer("Updated copy"),
+		DrawTime:    int64Pointer(now + 7200),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "Updated lottery", updated.Title)
+	assert.Equal(t, "Updated copy", updated.Description)
+	assert.Equal(t, now+7200, updated.DrawTime)
+
+	_, err = UpdatePublishedLotteryPlan(plan.Id, LotteryPlanPublishedUpdate{
+		DrawTime: int64Pointer(now + 3600),
+	})
+	require.Error(t, err)
+
+	require.NoError(t, CancelLotteryPlan(plan.Id))
+	var stored LotteryPlan
+	require.NoError(t, DB.First(&stored, plan.Id).Error)
+	assert.Equal(t, LotteryPlanStatusCancelled, stored.Status)
+	require.Error(t, CancelLotteryPlan(plan.Id))
+}
+
+func TestLotteryWinnerNotificationsTrackExternalDelivery(t *testing.T) {
+	userIDs := setupLotteryFixture(t)
+	notification := &LotteryNotification{
+		UserId:    userIDs[0],
+		PlanId:    1,
+		Type:      "lottery_result",
+		Content:   "You won a lottery reward.",
+		CreatedAt: common.GetTimestamp(),
+	}
+	require.NoError(t, DB.Create(notification).Error)
+
+	pending, err := ListPendingLotteryWinnerNotifications(10)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	marked, err := MarkLotteryNotificationExternallyNotified(notification.Id, common.GetTimestamp())
+	require.NoError(t, err)
+	assert.True(t, marked)
+
+	pending, err = ListPendingLotteryWinnerNotifications(10)
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+}
+
+func stringPointer(value string) *string {
+	return &value
+}
+
+func int64Pointer(value int64) *int64 {
+	return &value
+}

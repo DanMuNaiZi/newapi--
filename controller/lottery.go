@@ -26,6 +26,12 @@ type lotteryManualDrawRequest struct {
 	Reason string `json:"reason"`
 }
 
+type lotteryPlanUpdateRequest struct {
+	Title       *string `json:"title"`
+	Description *string `json:"description"`
+	DrawTime    *int64  `json:"draw_time"`
+}
+
 type lotteryParticipantUpdateRequest struct {
 	UserId        int  `json:"user_id"`
 	Weight        *int `json:"weight"`
@@ -157,6 +163,49 @@ func AdminListLotteryPrizes(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, prizes)
+}
+
+func AdminUpdateLotteryPlan(c *gin.Context) {
+	planId, err := lotteryPathID(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	req := lotteryPlanUpdateRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	plan, err := model.UpdatePublishedLotteryPlan(planId, model.LotteryPlanPublishedUpdate{
+		Title:       req.Title,
+		Description: req.Description,
+		DrawTime:    req.DrawTime,
+	})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "lottery.plan_update", map[string]interface{}{
+		"plan_id":   plan.Id,
+		"draw_time": req.DrawTime,
+	})
+	common.ApiSuccess(c, plan)
+}
+
+func AdminCancelLotteryPlan(c *gin.Context) {
+	planId, err := lotteryPathID(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := model.CancelLotteryPlan(planId); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "lottery.plan_cancel", map[string]interface{}{
+		"plan_id": planId,
+	})
+	common.ApiSuccess(c, nil)
 }
 
 func AdminDrawLotteryPlan(c *gin.Context) {

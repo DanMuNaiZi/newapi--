@@ -197,3 +197,35 @@ func TestAdminUpdateLotteryParticipantUpdatesWeight(t *testing.T) {
 	require.NoError(t, db.Where("plan_id = ? AND user_id = ?", plan.Id, participant.Id).First(&stored).Error)
 	assert.Equal(t, 500, stored.Weight)
 }
+
+func TestAdminUpdatesAndCancelsPublishedLotteryPlan(t *testing.T) {
+	db := setupLotteryControllerTestDB(t)
+	admin := &model.User{Username: "lottery-plan-admin", Password: "password", Status: common.UserStatusEnabled, AffCode: "lottery-plan-admin"}
+	require.NoError(t, db.Create(admin).Error)
+	now := common.GetTimestamp()
+	plan := &model.LotteryPlan{Title: "Published plan", Status: model.LotteryPlanStatusScheduled, EligibilityMode: model.LotteryEligibilityAll, MaxParticipants: 2, RegistrationStartTime: now + 60, DrawTime: now + 3600}
+	require.NoError(t, model.CreateLotteryPlan(plan, nil, nil, []*model.LotteryPrize{{Name: "Prize", Quantity: 1, RewardType: model.LotteryRewardQuota, Quota: 100, FulfillmentMode: model.LotteryFulfillmentAuto}}))
+
+	updateRecorder := httptest.NewRecorder()
+	updateContext, _ := gin.CreateTestContext(updateRecorder)
+	updateContext.Request = httptest.NewRequest(http.MethodPatch, "/api/lottery/admin/plans/1", bytes.NewBufferString(fmt.Sprintf(`{"title":"Updated plan","description":"Updated copy","draw_time":%d}`, now+7200)))
+	updateContext.Request.Header.Set("Content-Type", "application/json")
+	updateContext.Params = gin.Params{{Key: "id", Value: fmt.Sprint(plan.Id)}}
+	updateContext.Set("id", admin.Id)
+	AdminUpdateLotteryPlan(updateContext)
+	require.Contains(t, updateRecorder.Body.String(), `"success":true`)
+
+	cancelRecorder := httptest.NewRecorder()
+	cancelContext, _ := gin.CreateTestContext(cancelRecorder)
+	cancelContext.Request = httptest.NewRequest(http.MethodPost, "/api/lottery/admin/plans/1/cancel", nil)
+	cancelContext.Params = gin.Params{{Key: "id", Value: fmt.Sprint(plan.Id)}}
+	cancelContext.Set("id", admin.Id)
+	AdminCancelLotteryPlan(cancelContext)
+	require.Contains(t, cancelRecorder.Body.String(), `"success":true`)
+
+	var stored model.LotteryPlan
+	require.NoError(t, db.First(&stored, plan.Id).Error)
+	assert.Equal(t, "Updated plan", stored.Title)
+	assert.Equal(t, now+7200, stored.DrawTime)
+	assert.Equal(t, model.LotteryPlanStatusCancelled, stored.Status)
+}

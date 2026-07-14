@@ -172,19 +172,29 @@ type LotteryResult struct {
 }
 
 type LotteryNotification struct {
-	Id        int    `json:"id"`
-	UserId    int    `json:"user_id" gorm:"index"`
-	PlanId    int    `json:"plan_id" gorm:"index"`
-	Type      string `json:"type" gorm:"type:varchar(64);index"`
-	Content   string `json:"content" gorm:"type:text"`
-	ReadAt    int64  `json:"read_at" gorm:"type:bigint"`
-	CreatedAt int64  `json:"created_at" gorm:"type:bigint;index"`
+	Id                 int    `json:"id"`
+	UserId             int    `json:"user_id" gorm:"index"`
+	PlanId             int    `json:"plan_id" gorm:"index"`
+	Type               string `json:"type" gorm:"type:varchar(64);index"`
+	Content            string `json:"content" gorm:"type:text"`
+	ReadAt             int64  `json:"read_at" gorm:"type:bigint"`
+	ExternalNotifiedAt int64  `json:"external_notified_at" gorm:"type:bigint;index"`
+	CreatedAt          int64  `json:"created_at" gorm:"type:bigint;index"`
 }
 
 type LotteryParticipantView struct {
 	LotteryParticipant
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
+}
+
+// LotteryPlanPublishedUpdate contains the only mutable settings once a plan
+// is visible to eligible users. Qualification rules, prizes, capacity, and
+// the draw algorithm remain immutable after publication.
+type LotteryPlanPublishedUpdate struct {
+	Title       *string
+	Description *string
+	DrawTime    *int64
 }
 
 func CreateLotteryPlan(plan *LotteryPlan, userIds []int, groups []string, prizes []*LotteryPrize) error {
@@ -266,6 +276,69 @@ func CreateLotteryPlan(plan *LotteryPlan, userIds []int, groups []string, prizes
 			}
 		}
 		return nil
+	})
+}
+
+func UpdatePublishedLotteryPlan(planId int, update LotteryPlanPublishedUpdate) (*LotteryPlan, error) {
+	if planId <= 0 {
+		return nil, errors.New("invalid lottery plan")
+	}
+	if update.Title == nil && update.Description == nil && update.DrawTime == nil {
+		return nil, errors.New("lottery plan update is empty")
+	}
+	updated := &LotteryPlan{}
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var plan LotteryPlan
+		if err := lockForUpdate(tx).First(&plan, planId).Error; err != nil {
+			return err
+		}
+		if plan.Status != LotteryPlanStatusScheduled && plan.Status != LotteryPlanStatusOpen {
+			return errors.New("only published lottery plans can be updated")
+		}
+		updates := map[string]interface{}{"updated_at": common.GetTimestamp()}
+		if update.Title != nil {
+			title := strings.TrimSpace(*update.Title)
+			if title == "" {
+				return errors.New("lottery plan title is required")
+			}
+			updates["title"] = title
+		}
+		if update.Description != nil {
+			updates["description"] = *update.Description
+		}
+		if update.DrawTime != nil {
+			if *update.DrawTime <= plan.DrawTime {
+				return errors.New("published lottery draw time can only be delayed")
+			}
+			updates["draw_time"] = *update.DrawTime
+		}
+		if err := tx.Model(&LotteryPlan{}).Where("id = ?", plan.Id).Updates(updates).Error; err != nil {
+			return err
+		}
+		return tx.First(updated, plan.Id).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
+func CancelLotteryPlan(planId int) error {
+	if planId <= 0 {
+		return errors.New("invalid lottery plan")
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var plan LotteryPlan
+		if err := lockForUpdate(tx).First(&plan, planId).Error; err != nil {
+			return err
+		}
+		if plan.Status != LotteryPlanStatusScheduled && plan.Status != LotteryPlanStatusOpen {
+			return errors.New("lottery plan cannot be cancelled")
+		}
+		return tx.Model(&LotteryPlan{}).Where("id = ? AND status = ?", plan.Id, plan.Status).Updates(map[string]interface{}{
+			"status":     LotteryPlanStatusCancelled,
+			"updated_at": common.GetTimestamp(),
+		}).Error
 	})
 }
 
@@ -354,6 +427,28 @@ func ListLotteryNotificationsForUser(userId int) ([]LotteryNotification, error) 
 		return nil, err
 	}
 	return notifications, nil
+}
+
+func ListPendingLotteryWinnerNotifications(limit int) ([]LotteryNotification, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var notifications []LotteryNotification
+	err := DB.Where("type = ? AND external_notified_at = ?", "lottery_result", 0).
+		Order("id asc").
+		Limit(limit).
+		Find(&notifications).Error
+	return notifications, err
+}
+
+func MarkLotteryNotificationExternallyNotified(id int, notifiedAt int64) (bool, error) {
+	if id <= 0 || notifiedAt <= 0 {
+		return false, errors.New("invalid lottery notification")
+	}
+	result := DB.Model(&LotteryNotification{}).
+		Where("id = ? AND external_notified_at = ?", id, 0).
+		Update("external_notified_at", notifiedAt)
+	return result.RowsAffected == 1, result.Error
 }
 
 func ListLotteryParticipants(planId int) ([]LotteryParticipantView, error) {

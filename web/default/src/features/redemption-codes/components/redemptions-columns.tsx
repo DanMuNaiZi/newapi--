@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 
 import { MaskedValueDisplay } from '@/components/masked-value-display'
@@ -32,7 +32,7 @@ import { formatQuota, formatTimestampToDate } from '@/lib/format'
 
 import { REDEMPTION_FILTER_EXPIRED, REDEMPTION_STATUSES } from '../constants'
 import { isRedemptionExpired, isTimestampExpired } from '../lib'
-import { type Redemption } from '../types'
+import type { Redemption } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 
 export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
@@ -155,20 +155,64 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
       size: 320,
     },
     {
-      accessorKey: 'quota',
-      header: t('Quota'),
+      id: 'reward',
+      header: t('Reward'),
       cell: ({ row }) => {
-        const quota = row.getValue('quota') as number
+        const redemption = row.original
+        const label =
+          redemption.reward_type === 'subscription'
+            ? t('Subscription #{{id}}', {
+                id: redemption.subscription_plan_id,
+              })
+            : formatQuota(redemption.quota)
         return (
           <StatusBadge
-            label={formatQuota(quota)}
+            label={label}
             variant='neutral'
             copyable={false}
             className='-ml-1.5'
           />
         )
       },
-      size: 120,
+      size: 160,
+    },
+    {
+      id: 'metadata',
+      header: t('Source'),
+      meta: { mobileHidden: true },
+      cell: ({ row }) => {
+        const redemption = row.original
+        const metadata = [
+          redemption.batch && `${t('Batch')}: ${redemption.batch}`,
+          redemption.source_ref && `${t('Source')}: ${redemption.source_ref}`,
+          redemption.remark && `${t('Remark')}: ${redemption.remark}`,
+        ].filter(Boolean)
+        if (metadata.length === 0) {
+          return <span className='text-muted-foreground text-sm'>-</span>
+        }
+        return (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <StatusBadge
+                  label={redemption.batch || redemption.source_ref || t('View')}
+                  variant='neutral'
+                  copyable={false}
+                  className='cursor-help'
+                />
+              }
+            />
+            <TooltipContent>
+              <div className='space-y-1 text-xs'>
+                {metadata.map((item) => (
+                  <div key={item}>{item}</div>
+                ))}
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        )
+      },
+      size: 180,
     },
     {
       accessorKey: 'created_time',
@@ -233,7 +277,7 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
                   className='cursor-help'
                 />
               }
-            ></TooltipTrigger>
+            />
             <TooltipContent>
               <div className='space-y-1 text-xs'>
                 <div>

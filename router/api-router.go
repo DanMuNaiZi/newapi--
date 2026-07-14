@@ -268,6 +268,8 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			lotteryAdminRoute.GET("/plans", controller.AdminListLotteryPlans)
 			lotteryAdminRoute.POST("/plans", controller.AdminCreateLotteryPlan)
+			lotteryAdminRoute.PATCH("/plans/:id", controller.AdminUpdateLotteryPlan)
+			lotteryAdminRoute.POST("/plans/:id/cancel", controller.AdminCancelLotteryPlan)
 			lotteryAdminRoute.GET("/plans/:id/prizes", controller.AdminListLotteryPrizes)
 			lotteryAdminRoute.POST("/plans/:id/draw", controller.AdminDrawLotteryPlan)
 			lotteryAdminRoute.GET("/plans/:id/participants", controller.AdminListLotteryParticipants)

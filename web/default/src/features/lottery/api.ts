@@ -23,6 +23,7 @@ import type {
   LotteryParticipant,
   LotteryPlan,
   LotteryPlanCreatePayload,
+  LotteryPlanUpdatePayload,
   LotteryPrize,
   LotteryResult,
 } from './types'
@@ -64,24 +65,40 @@ export async function getAdminLotteryPlans(): Promise<
 }
 
 export async function createLotteryPlan(
-  payload: LotteryPlanCreatePayload
+  payload: LotteryPlanCreatePayload,
 ): Promise<ApiResponse<LotteryPlan>> {
   const response = await api.post('/api/lottery/admin/plans', payload)
   return response.data
 }
 
+export async function updateLotteryPlan(
+  planId: number,
+  payload: LotteryPlanUpdatePayload,
+): Promise<ApiResponse<LotteryPlan>> {
+  const response = await api.patch(
+    `/api/lottery/admin/plans/${planId}`,
+    payload,
+  )
+  return response.data
+}
+
+export async function cancelLotteryPlan(planId: number): Promise<ApiResponse> {
+  const response = await api.post(`/api/lottery/admin/plans/${planId}/cancel`)
+  return response.data
+}
+
 export async function getLotteryPrizes(
-  planId: number
+  planId: number,
 ): Promise<ApiResponse<LotteryPrize[]>> {
   const response = await api.get(`/api/lottery/admin/plans/${planId}/prizes`)
   return response.data
 }
 
 export async function getLotteryParticipants(
-  planId: number
+  planId: number,
 ): Promise<ApiResponse<LotteryParticipant[]>> {
   const response = await api.get(
-    `/api/lottery/admin/plans/${planId}/participants`
+    `/api/lottery/admin/plans/${planId}/participants`,
   )
   return response.data
 }
@@ -98,14 +115,14 @@ export async function updateLotteryParticipant(payload: {
       user_id: payload.userId,
       weight: payload.weight,
       preset_prize_id: payload.presetPrizeId,
-    }
+    },
   )
   return response.data
 }
 
 export async function drawLotteryPlan(
   planId: number,
-  reason: string
+  reason: string,
 ): Promise<ApiResponse> {
   const response = await api.post(`/api/lottery/admin/plans/${planId}/draw`, {
     reason,

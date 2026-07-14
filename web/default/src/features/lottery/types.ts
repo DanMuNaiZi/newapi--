@@ -93,6 +93,12 @@ export interface LotteryPlanCreatePayload {
   }>
 }
 
+export interface LotteryPlanUpdatePayload {
+  title?: string
+  description?: string
+  draw_time?: number
+}
+
 export interface ApiResponse<T = undefined> {
   success: boolean
   message: string

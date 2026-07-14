@@ -37,6 +37,10 @@ func (lotteryScheduleTaskHandler) Run(ctx context.Context, task *model.SystemTas
 		failSystemTask(task, runnerID, err)
 		return
 	}
+	if err := NotifyPendingLotteryWinners(); err != nil {
+		failSystemTask(task, runnerID, err)
+		return
+	}
 	_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, map[string]string{"status": "processed"}, "")
 }
 

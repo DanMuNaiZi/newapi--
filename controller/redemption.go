@@ -189,14 +189,57 @@ func UpdateRedemption(c *gin.Context) {
 		return
 	}
 	if statusOnly == "" {
+		if utf8.RuneCountInString(redemption.Name) == 0 || utf8.RuneCountInString(redemption.Name) > 20 {
+			common.ApiErrorI18n(c, i18n.MsgRedemptionNameLength)
+			return
+		}
 		if valid, msg := validateExpiredTime(c, redemption.ExpiredTime); !valid {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 			return
 		}
-		// If you add more fields, please also update redemption.Update()
+		rewardType := redemption.RewardType
+		if rewardType == "" {
+			rewardType = cleanRedemption.RewardType
+		}
+		if rewardType == "" {
+			rewardType = model.RedemptionRewardQuota
+		}
+		if rewardType != model.RedemptionRewardQuota && rewardType != model.RedemptionRewardSubscription {
+			common.ApiErrorMsg(c, "invalid redemption reward type")
+			return
+		}
+		if rewardType == model.RedemptionRewardQuota && redemption.Quota <= 0 {
+			common.ApiErrorMsg(c, "redemption quota must be positive")
+			return
+		}
 		cleanRedemption.Name = redemption.Name
 		cleanRedemption.Quota = redemption.Quota
 		cleanRedemption.ExpiredTime = redemption.ExpiredTime
+		cleanRedemption.RewardType = rewardType
+		cleanRedemption.Batch = redemption.Batch
+		cleanRedemption.SourceRef = redemption.SourceRef
+		cleanRedemption.Remark = redemption.Remark
+		if rewardType == model.RedemptionRewardSubscription {
+			if redemption.SubscriptionPlanId <= 0 {
+				common.ApiErrorMsg(c, "subscription plan is required")
+				return
+			}
+			plan, err := model.GetSubscriptionPlanById(redemption.SubscriptionPlanId)
+			if err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			snapshot, err := common.Marshal(plan)
+			if err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			cleanRedemption.SubscriptionPlanId = redemption.SubscriptionPlanId
+			cleanRedemption.SubscriptionSnapshot = string(snapshot)
+		} else {
+			cleanRedemption.SubscriptionPlanId = 0
+			cleanRedemption.SubscriptionSnapshot = ""
+		}
 	}
 	if statusOnly != "" {
 		cleanRedemption.Status = redemption.Status
@@ -205,6 +248,15 @@ func UpdateRedemption(c *gin.Context) {
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if statusOnly == "" {
+		recordManageAudit(c, "redemption.update", map[string]interface{}{
+			"redemption_id":        cleanRedemption.Id,
+			"reward_type":          cleanRedemption.RewardType,
+			"subscription_plan_id": cleanRedemption.SubscriptionPlanId,
+			"batch":                cleanRedemption.Batch,
+			"source_ref":           cleanRedemption.SourceRef,
+		})
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
