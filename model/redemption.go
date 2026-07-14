@@ -12,18 +12,36 @@ import (
 )
 
 type Redemption struct {
-	Id           int            `json:"id"`
-	UserId       int            `json:"user_id"`
-	Key          string         `json:"key" gorm:"type:char(32);uniqueIndex"`
-	Status       int            `json:"status" gorm:"default:1"`
-	Name         string         `json:"name" gorm:"index"`
-	Quota        int            `json:"quota" gorm:"default:100"`
-	CreatedTime  int64          `json:"created_time" gorm:"bigint"`
-	RedeemedTime int64          `json:"redeemed_time" gorm:"bigint"`
-	Count        int            `json:"count" gorm:"-:all"` // only for api request
-	UsedUserId   int            `json:"used_user_id"`
-	DeletedAt    gorm.DeletedAt `gorm:"index"`
-	ExpiredTime  int64          `json:"expired_time" gorm:"bigint"` // 过期时间，0 表示不过期
+	Id                   int            `json:"id"`
+	UserId               int            `json:"user_id"`
+	Key                  string         `json:"key" gorm:"type:char(32);uniqueIndex"`
+	Status               int            `json:"status" gorm:"default:1"`
+	Name                 string         `json:"name" gorm:"index"`
+	Quota                int            `json:"quota" gorm:"default:100"`
+	RewardType           string         `json:"reward_type" gorm:"type:varchar(32);index"`
+	SubscriptionPlanId   int            `json:"subscription_plan_id" gorm:"index"`
+	SubscriptionSnapshot string         `json:"subscription_snapshot" gorm:"type:text"`
+	Batch                string         `json:"batch" gorm:"type:varchar(64);index"`
+	SourceRef            string         `json:"source_ref" gorm:"type:varchar(128);index"`
+	Remark               string         `json:"remark" gorm:"type:varchar(255)"`
+	CreatedTime          int64          `json:"created_time" gorm:"bigint"`
+	RedeemedTime         int64          `json:"redeemed_time" gorm:"bigint"`
+	Count                int            `json:"count" gorm:"-:all"` // only for api request
+	UsedUserId           int            `json:"used_user_id"`
+	DeletedAt            gorm.DeletedAt `gorm:"index"`
+	ExpiredTime          int64          `json:"expired_time" gorm:"bigint"` // 过期时间，0 表示不过期
+}
+
+const (
+	RedemptionRewardQuota        = "quota"
+	RedemptionRewardSubscription = "subscription"
+)
+
+func (redemption *Redemption) normalizeRewardType() string {
+	if redemption.RewardType == "" {
+		return RedemptionRewardQuota
+	}
+	return redemption.RewardType
 }
 
 func GetAllRedemptions(startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
@@ -175,17 +193,45 @@ func Redeem(key string, userId int) (quota int, err error) {
 		if result.RowsAffected == 0 {
 			return errors.New("该兑换码已被使用")
 		}
-		return tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error
+		switch redemption.normalizeRewardType() {
+		case RedemptionRewardQuota:
+			if redemption.Quota <= 0 {
+				return errors.New("invalid redemption quota")
+			}
+			return tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error
+		case RedemptionRewardSubscription:
+			if redemption.SubscriptionSnapshot == "" {
+				return errors.New("subscription redemption snapshot is missing")
+			}
+			var plan SubscriptionPlan
+			if err := common.Unmarshal([]byte(redemption.SubscriptionSnapshot), &plan); err != nil {
+				return err
+			}
+			if plan.Id == 0 {
+				plan.Id = redemption.SubscriptionPlanId
+			}
+			_, err := CreateEarnedUserSubscriptionFromPlanTx(tx, userId, &plan, "redemption")
+			return err
+		default:
+			return errors.New("invalid redemption reward type")
+		}
 	})
 	if err != nil {
 		common.SysError("redemption failed: " + err.Error())
 		return 0, ErrRedeemFailed
+	}
+	if redemption.normalizeRewardType() == RedemptionRewardSubscription {
+		RecordLog(userId, LogTypeTopup, fmt.Sprintf("redeemed subscription code ID %d", redemption.Id))
+		return 0, nil
 	}
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(redemption.Quota), redemption.Id))
 	return redemption.Quota, nil
 }
 
 func (redemption *Redemption) Insert() error {
+	if redemption.RewardType == "" {
+		redemption.RewardType = RedemptionRewardQuota
+	}
 	var err error
 	err = DB.Create(redemption).Error
 	return err
@@ -199,7 +245,7 @@ func (redemption *Redemption) SelectUpdate() error {
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (redemption *Redemption) Update() error {
 	var err error
-	err = DB.Model(redemption).Select("name", "status", "quota", "redeemed_time", "expired_time").Updates(redemption).Error
+	err = DB.Model(redemption).Select("name", "status", "quota", "reward_type", "subscription_plan_id", "subscription_snapshot", "batch", "source_ref", "remark", "redeemed_time", "expired_time").Updates(redemption).Error
 	return err
 }
 

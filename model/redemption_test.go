@@ -179,3 +179,57 @@ func TestRedeemConcurrentSingleSuccess(t *testing.T) {
 	require.NoError(t, DB.First(&user, "id = ?", userId).Error)
 	assert.Equal(t, 300, user.Quota, "quota must be credited exactly once")
 }
+
+func TestRedeemSubscriptionCreatesEarnedInstanceDespitePurchaseLimit(t *testing.T) {
+	require.NoError(t, DB.AutoMigrate(&Redemption{}))
+	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&Redemption{}).Error)
+	require.NoError(t, DB.Exec("DELETE FROM user_subscriptions").Error)
+	require.NoError(t, DB.Exec("DELETE FROM subscription_plans").Error)
+	require.NoError(t, DB.Exec("DELETE FROM users").Error)
+	t.Cleanup(func() {
+		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&Redemption{}).Error)
+		require.NoError(t, DB.Exec("DELETE FROM user_subscriptions").Error)
+		require.NoError(t, DB.Exec("DELETE FROM subscription_plans").Error)
+		require.NoError(t, DB.Exec("DELETE FROM users").Error)
+	})
+
+	user := &User{Username: "redeem-subscription-user", Password: "password", Status: common.UserStatusEnabled}
+	require.NoError(t, DB.Create(user).Error)
+	plan := &SubscriptionPlan{
+		Title:              "Redeem subscription",
+		PriceAmount:        0,
+		DurationUnit:       "month",
+		DurationValue:      1,
+		Enabled:            true,
+		MaxPurchasePerUser: 1,
+		TotalAmount:        500,
+	}
+	plan.NormalizeDefaults()
+	require.NoError(t, DB.Create(plan).Error)
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		_, err := CreateUserSubscriptionFromPlanTx(tx, user.Id, plan, "order")
+		return err
+	}))
+	snapshot, err := common.Marshal(plan)
+	require.NoError(t, err)
+	code := &Redemption{
+		Name:                 "subscription redemption",
+		Key:                  "20000000000000000000000000000001",
+		Status:               common.RedemptionCodeStatusEnabled,
+		CreatedTime:          common.GetTimestamp(),
+		RewardType:           RedemptionRewardSubscription,
+		SubscriptionPlanId:   plan.Id,
+		SubscriptionSnapshot: string(snapshot),
+		Batch:                "subscription-batch",
+	}
+	require.NoError(t, DB.Create(code).Error)
+
+	quota, err := Redeem(code.Key, user.Id)
+	require.NoError(t, err)
+	assert.Zero(t, quota)
+
+	var subscriptions []UserSubscription
+	require.NoError(t, DB.Where("user_id = ? AND plan_id = ?", user.Id, plan.Id).Find(&subscriptions).Error)
+	require.Len(t, subscriptions, 2)
+	assert.Equal(t, "redemption", subscriptions[1].Source)
+}
