@@ -314,12 +314,13 @@ func TestProcessLotteryScheduleOpensAndDrawsDuePlans(t *testing.T) {
 		EligibilityMode:       LotteryEligibilityAll,
 		MaxParticipants:       2,
 		RegistrationStartTime: now - 3600,
-		DrawTime:              now - 1,
+		DrawTime:              now + 60,
 	}
 	prize := []*LotteryPrize{{Name: "Prize", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 100, FulfillmentMode: LotteryFulfillmentAuto}}
 	require.NoError(t, CreateLotteryPlan(openPlan, nil, nil, prize))
 	require.NoError(t, CreateLotteryPlan(duePlan, nil, nil, []*LotteryPrize{{Name: "Due prize", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 100, FulfillmentMode: LotteryFulfillmentAuto}}))
 	require.NoError(t, JoinLotteryPlan(duePlan.Id, userIDs[0]))
+	require.NoError(t, DB.Model(&LotteryPlan{}).Where("id = ?", duePlan.Id).Update("draw_time", now-1).Error)
 
 	require.NoError(t, ProcessLotterySchedule(now))
 	require.NoError(t, DB.First(&openPlan, openPlan.Id).Error)
