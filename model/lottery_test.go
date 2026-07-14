@@ -88,7 +88,7 @@ func TestLotteryDrawHonorsPresetPrizeAndNoRepeatWinner(t *testing.T) {
 		Title:                 "Draw lottery",
 		Status:                LotteryPlanStatusOpen,
 		EligibilityMode:       LotteryEligibilityAll,
-		MaxParticipants:       3,
+		MaxParticipants:       4,
 		RegistrationStartTime: common.GetTimestamp() - 60,
 		DrawTime:              common.GetTimestamp() + 3600,
 	}
@@ -143,7 +143,7 @@ func TestLotteryLeaveReleasesParticipantSlot(t *testing.T) {
 		Title:                 "Leave lottery",
 		Status:                LotteryPlanStatusOpen,
 		EligibilityMode:       LotteryEligibilityAll,
-		MaxParticipants:       1,
+		MaxParticipants:       2,
 		RegistrationStartTime: common.GetTimestamp() - 60,
 		DrawTime:              common.GetTimestamp() + 3600,
 	}
@@ -191,7 +191,7 @@ func TestLotteryAutoQuotaPrizeIsFulfilledAfterDraw(t *testing.T) {
 		Title:                 "Auto quota lottery",
 		Status:                LotteryPlanStatusOpen,
 		EligibilityMode:       LotteryEligibilityAll,
-		MaxParticipants:       1,
+		MaxParticipants:       2,
 		RegistrationStartTime: common.GetTimestamp() - 60,
 		DrawTime:              common.GetTimestamp() + 3600,
 	}
@@ -217,7 +217,7 @@ func TestLotterySelfClaimPrizeCreditsQuotaOnce(t *testing.T) {
 		Title:                 "Claim quota lottery",
 		Status:                LotteryPlanStatusOpen,
 		EligibilityMode:       LotteryEligibilityAll,
-		MaxParticipants:       1,
+		MaxParticipants:       2,
 		RegistrationStartTime: common.GetTimestamp() - 60,
 		DrawTime:              common.GetTimestamp() + 3600,
 	}
@@ -260,7 +260,7 @@ func TestLotterySubscriptionRewardUsesSnapshotAndIgnoresPurchaseLimit(t *testing
 		Title:                 "Subscription lottery",
 		Status:                LotteryPlanStatusOpen,
 		EligibilityMode:       LotteryEligibilityAll,
-		MaxParticipants:       1,
+		MaxParticipants:       2,
 		RegistrationStartTime: common.GetTimestamp() - 60,
 		DrawTime:              common.GetTimestamp() + 3600,
 	}
@@ -275,4 +275,55 @@ func TestLotterySubscriptionRewardUsesSnapshotAndIgnoresPurchaseLimit(t *testing
 	require.NoError(t, DB.Where("user_id = ? AND plan_id = ?", userIDs[0], plan.Id).Find(&subscriptions).Error)
 	require.Len(t, subscriptions, 2)
 	assert.Equal(t, "lottery", subscriptions[1].Source)
+}
+
+func TestLotteryJoiningMaximumParticipantsDrawsImmediately(t *testing.T) {
+	userIDs := setupLotteryFixture(t)
+	plan := &LotteryPlan{
+		Title:                 "Full lottery",
+		Status:                LotteryPlanStatusOpen,
+		EligibilityMode:       LotteryEligibilityAll,
+		MaxParticipants:       1,
+		RegistrationStartTime: common.GetTimestamp() - 60,
+		DrawTime:              common.GetTimestamp() + 3600,
+	}
+	require.NoError(t, CreateLotteryPlan(plan, nil, nil, []*LotteryPrize{
+		{Name: "Prize", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 100, FulfillmentMode: LotteryFulfillmentAuto},
+	}))
+	require.NoError(t, JoinLotteryPlan(plan.Id, userIDs[0]))
+
+	var stored LotteryPlan
+	require.NoError(t, DB.First(&stored, plan.Id).Error)
+	assert.Equal(t, LotteryPlanStatusFinished, stored.Status)
+}
+
+func TestProcessLotteryScheduleOpensAndDrawsDuePlans(t *testing.T) {
+	userIDs := setupLotteryFixture(t)
+	now := common.GetTimestamp()
+	openPlan := &LotteryPlan{
+		Title:                 "Scheduled open lottery",
+		Status:                LotteryPlanStatusScheduled,
+		EligibilityMode:       LotteryEligibilityAll,
+		MaxParticipants:       2,
+		RegistrationStartTime: now - 1,
+		DrawTime:              now + 3600,
+	}
+	duePlan := &LotteryPlan{
+		Title:                 "Scheduled draw lottery",
+		Status:                LotteryPlanStatusOpen,
+		EligibilityMode:       LotteryEligibilityAll,
+		MaxParticipants:       2,
+		RegistrationStartTime: now - 3600,
+		DrawTime:              now - 1,
+	}
+	prize := []*LotteryPrize{{Name: "Prize", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 100, FulfillmentMode: LotteryFulfillmentAuto}}
+	require.NoError(t, CreateLotteryPlan(openPlan, nil, nil, prize))
+	require.NoError(t, CreateLotteryPlan(duePlan, nil, nil, []*LotteryPrize{{Name: "Due prize", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 100, FulfillmentMode: LotteryFulfillmentAuto}}))
+	require.NoError(t, JoinLotteryPlan(duePlan.Id, userIDs[0]))
+
+	require.NoError(t, ProcessLotterySchedule(now))
+	require.NoError(t, DB.First(&openPlan, openPlan.Id).Error)
+	require.NoError(t, DB.First(&duePlan, duePlan.Id).Error)
+	assert.Equal(t, LotteryPlanStatusOpen, openPlan.Status)
+	assert.Equal(t, LotteryPlanStatusFinished, duePlan.Status)
 }

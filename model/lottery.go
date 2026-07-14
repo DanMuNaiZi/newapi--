@@ -266,7 +266,8 @@ func JoinLotteryPlan(planId int, userId int) error {
 	if planId <= 0 || userId <= 0 {
 		return errors.New("invalid lottery participant")
 	}
-	return DB.Transaction(func(tx *gorm.DB) error {
+	shouldDraw := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
 		var plan LotteryPlan
 		if err := lockForUpdate(tx).First(&plan, planId).Error; err != nil {
 			return err
@@ -318,6 +319,7 @@ func JoinLotteryPlan(planId int, userId int) error {
 		if joinedCount >= int64(plan.MaxParticipants) {
 			return errors.New("lottery participant limit reached")
 		}
+		shouldDraw = joinedCount+1 >= int64(plan.MaxParticipants)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return tx.Create(&LotteryParticipant{
 				PlanId:    plan.Id,
@@ -339,6 +341,13 @@ func JoinLotteryPlan(planId int, userId int) error {
 			"left_at":    0,
 		}).Error
 	})
+	if err != nil {
+		return err
+	}
+	if shouldDraw {
+		_, err = DrawLotteryPlan(planId, LotteryDrawTriggerFull, "")
+	}
+	return err
 }
 
 func LeaveLotteryPlan(planId int, userId int) error {
@@ -499,6 +508,30 @@ func DrawLotteryPlan(planId int, trigger LotteryDrawTrigger, reason string) (*Lo
 		}
 	}
 	return run, nil
+}
+
+// ProcessLotterySchedule advances plans that have reached registration or draw
+// time. Each draw re-checks the plan state transactionally, so concurrent
+// scheduler nodes can safely scan the same rows.
+func ProcessLotterySchedule(now int64) error {
+	if now <= 0 {
+		now = common.GetTimestamp()
+	}
+	if err := DB.Model(&LotteryPlan{}).
+		Where("status = ? AND registration_start_time <= ?", LotteryPlanStatusScheduled, now).
+		Update("status", LotteryPlanStatusOpen).Error; err != nil {
+		return err
+	}
+	var plans []LotteryPlan
+	if err := DB.Where("status = ? AND draw_time <= ?", LotteryPlanStatusOpen, now).Order("id asc").Find(&plans).Error; err != nil {
+		return err
+	}
+	for _, plan := range plans {
+		if _, err := DrawLotteryPlan(plan.Id, LotteryDrawTriggerScheduled, ""); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func lotteryResultFromPrize(planId int, userId int, prize LotteryPrize, now int64) LotteryResult {
