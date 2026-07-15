@@ -186,13 +186,7 @@ func main() {
 	middleware.SetUpLogger(server)
 	// Initialize session store
 	store := cookie.NewStore([]byte(common.SessionSecret))
-	store.Options(sessions.Options{
-		Path:     "/",
-		MaxAge:   2592000, // 30 days
-		HttpOnly: true,
-		Secure:   common.SessionCookieSecure,
-		SameSite: http.SameSiteStrictMode,
-	})
+	store.Options(sessionCookieOptions())
 	server.Use(sessions.Sessions("session", store))
 
 	InjectUmamiAnalytics()
@@ -242,6 +236,19 @@ func main() {
 		model.SaveQuotaDataCache()
 	}
 	common.SysLog("server exited")
+}
+
+// sessionCookieOptions keeps session state available on the top-level GET
+// callback from third-party OAuth providers while retaining CSRF protections
+// for cross-site subresource and unsafe requests.
+func sessionCookieOptions() sessions.Options {
+	return sessions.Options{
+		Path:     "/",
+		MaxAge:   2592000, // 30 days
+		HttpOnly: true,
+		Secure:   common.SessionCookieSecure,
+		SameSite: http.SameSiteLaxMode,
+	}
 }
 
 func InjectUmamiAnalytics() {
