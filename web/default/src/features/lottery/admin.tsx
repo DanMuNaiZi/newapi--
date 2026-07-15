@@ -16,83 +16,41 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Pencil, Play, Users, XCircle } from 'lucide-react'
 import { useState } from 'react'
-import { useFieldArray, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { z } from 'zod'
 
 import { SectionPageLayout } from '@/components/layout'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { getAdminPlans } from '@/features/subscriptions/api'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { Textarea } from '@/components/ui/textarea'
 
 import {
   cancelLotteryPlan,
-  createLotteryPlan,
   drawLotteryPlan,
   getAdminLotteryPlans,
   getLotteryParticipants,
   getLotteryPrizes,
-  updateLotteryPlan,
   updateLotteryParticipant,
+  updateLotteryPlan,
 } from './api'
-import type {
-  LotteryPlan,
-  LotteryPlanCreatePayload,
-  LotteryPlanUpdatePayload,
-} from './types'
+import { LotteryPlanForm } from './components/lottery-plan-form'
+import { localInputFromUnix, unixFromLocal } from './lib/admin-form'
+import { getLotteryPlanStatusLabel } from './lib/status'
+import type { LotteryPlan, LotteryPlanUpdatePayload } from './types'
 
-const prizeSchema = z.object({
-  name: z.string().min(1),
-  quantity: z.number().int().min(1),
-  reward_type: z.enum(['quota', 'subscription']),
-  quota: z.number().int().min(0),
-  subscription_plan_id: z.number().int().min(0),
-  fulfillment_mode: z.enum(['auto', 'self_claim', 'redemption_code']),
-  claim_expire_seconds: z.number().int().min(0),
-})
-
-const formSchema = z.object({
-  title: z.string().min(1),
-  description: z.string(),
-  eligibility_mode: z.enum(['all', 'groups', 'users']),
-  allow_list: z.string(),
-  max_participants: z.number().int().min(1),
-  registration_start: z.string().min(1),
-  draw_time: z.string().min(1),
-  prizes: z.array(prizeSchema).min(1),
-})
-
-type LotteryAdminForm = z.infer<typeof formSchema>
-
-const DEFAULT_PRIZE: LotteryAdminForm['prizes'][number] = {
-  name: '',
-  quantity: 1,
-  reward_type: 'quota',
-  quota: 100,
-  subscription_plan_id: 0,
-  fulfillment_mode: 'auto',
-  claim_expire_seconds: 604800,
-}
-
-function unixFromLocal(value: string): number {
-  return Math.floor(new Date(value).getTime() / 1000)
-}
-
-function localInputFromUnix(value: number): string {
-  const date = new Date(value * 1000)
-  date.setMinutes(date.getMinutes() - date.getTimezoneOffset())
-  return date.toISOString().slice(0, 16)
-}
-
-function splitAllowList(value: string): string[] {
-  return value
-    .split(/[\s,]+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
+function formatLotteryDate(value: number): string {
+  return new Date(value * 1000).toLocaleString()
 }
 
 export function LotteryAdmin() {
@@ -103,20 +61,7 @@ export function LotteryAdmin() {
   const [editTitle, setEditTitle] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editDrawTime, setEditDrawTime] = useState('')
-  const form = useForm<LotteryAdminForm>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
-      title: '',
-      description: '',
-      eligibility_mode: 'all',
-      allow_list: '',
-      max_participants: 10,
-      registration_start: '',
-      draw_time: '',
-      prizes: [DEFAULT_PRIZE],
-    },
-  })
-  const prizes = useFieldArray({ control: form.control, name: 'prizes' })
+
   const plansQuery = useQuery({
     queryKey: ['lottery', 'admin', 'plans'],
     queryFn: getAdminLotteryPlans,
@@ -131,31 +76,15 @@ export function LotteryAdmin() {
     queryFn: () => getLotteryPrizes(selectedPlanId ?? 0),
     enabled: Boolean(selectedPlanId),
   })
-  const subscriptionPlansQuery = useQuery({
-    queryKey: ['admin-subscription-plans'],
-    queryFn: getAdminPlans,
-  })
-  const createMutation = useMutation({
-    mutationFn: createLotteryPlan,
-    onSuccess: async (result) => {
-      if (!result.success) {
-        toast.error(result.message || t('Failed to create lottery plan'))
-        return
-      }
-      toast.success(t('Lottery plan created'))
-      form.reset()
-      await queryClient.invalidateQueries({
-        queryKey: ['lottery', 'admin', 'plans'],
-      })
-    },
-  })
+
   const participantMutation = useMutation({
     mutationFn: updateLotteryParticipant,
     onSuccess: async (result) => {
       if (!result.success) {
-        toast.error(result.message || t('Failed to update lottery participant'))
+        toast.error(t('Failed to update lottery participant'))
         return
       }
+      toast.success(t('Lottery participant updated'))
       await queryClient.invalidateQueries({
         queryKey: ['lottery', 'admin', 'participants', selectedPlanId],
       })
@@ -166,7 +95,7 @@ export function LotteryAdmin() {
       drawLotteryPlan(planId, reason),
     onSuccess: async (result) => {
       if (!result.success) {
-        toast.error(result.message || t('Failed to draw lottery'))
+        toast.error(t('Failed to draw lottery'))
         return
       }
       toast.success(t('Lottery draw completed'))
@@ -185,7 +114,7 @@ export function LotteryAdmin() {
     }) => updateLotteryPlan(planId, payload),
     onSuccess: async (result) => {
       if (!result.success) {
-        toast.error(result.message || t('Failed to update lottery plan'))
+        toast.error(t('Failed to update lottery plan'))
         return
       }
       toast.success(t('Lottery plan updated'))
@@ -199,7 +128,7 @@ export function LotteryAdmin() {
     mutationFn: cancelLotteryPlan,
     onSuccess: async (result) => {
       if (!result.success) {
-        toast.error(result.message || t('Failed to cancel lottery plan'))
+        toast.error(t('Failed to cancel lottery plan'))
         return
       }
       toast.success(t('Lottery plan cancelled'))
@@ -210,24 +139,26 @@ export function LotteryAdmin() {
     },
   })
 
-  const submit = (values: LotteryAdminForm): void => {
-    const allowList = splitAllowList(values.allow_list)
-    const payload: LotteryPlanCreatePayload = {
-      title: values.title,
-      description: values.description,
-      status: 'scheduled',
-      eligibility_mode: values.eligibility_mode,
-      max_participants: values.max_participants,
-      registration_start_time: unixFromLocal(values.registration_start),
-      draw_time: unixFromLocal(values.draw_time),
-      user_ids:
-        values.eligibility_mode === 'users'
-          ? allowList.map((item) => Number(item)).filter(Number.isInteger)
-          : [],
-      groups: values.eligibility_mode === 'groups' ? allowList : [],
-      prizes: values.prizes,
+  const plans = plansQuery.data?.success ? (plansQuery.data.data ?? []) : []
+  const selectedPlan = plans.find((plan) => plan.id === selectedPlanId)
+  const participants = participantsQuery.data?.success
+    ? (participantsQuery.data.data ?? [])
+    : []
+  const selectedPlanPrizes = selectedPlanPrizesQuery.data?.success
+    ? (selectedPlanPrizesQuery.data.data ?? [])
+    : []
+
+  const getEligibilityLabel = (
+    mode: LotteryPlan['eligibility_mode']
+  ): string => {
+    switch (mode) {
+      case 'all':
+        return t('All users')
+      case 'groups':
+        return t('Selected groups')
+      case 'users':
+        return t('Selected users')
     }
-    createMutation.mutate(payload)
   }
 
   const beginEditing = (plan: LotteryPlan): void => {
@@ -245,8 +176,8 @@ export function LotteryAdmin() {
       return
     }
     const payload: LotteryPlanUpdatePayload = {
-      title: editTitle,
-      description: editDescription,
+      title: editTitle.trim(),
+      description: editDescription.trim(),
     }
     if (drawTime > editingPlan.draw_time) {
       payload.draw_time = drawTime
@@ -259,12 +190,8 @@ export function LotteryAdmin() {
 
   const requestManualDraw = (planId: number): void => {
     const reason = window.prompt(t('Enter the reason for the early draw'))
-    if (!reason?.trim()) {
-      return
-    }
-    if (!window.confirm(t('Confirm early draw? This cannot be undone.'))) {
-      return
-    }
+    if (!reason?.trim()) return
+    if (!window.confirm(t('Confirm early draw? This cannot be undone.'))) return
     drawMutation.mutate({ planId, reason: reason.trim() })
   }
 
@@ -274,219 +201,183 @@ export function LotteryAdmin() {
         {t('Lottery Management')}
       </SectionPageLayout.Title>
       <SectionPageLayout.Content>
-        <div className='grid gap-6'>
-          <form
-            className='grid gap-4 rounded-lg border p-4'
-            onSubmit={form.handleSubmit(submit)}
-          >
-            <div className='grid gap-3 md:grid-cols-2'>
-              <Input
-                placeholder={t('Lottery title')}
-                {...form.register('title')}
-              />
-              <Input
-                type='number'
-                min={1}
-                {...form.register('max_participants', { valueAsNumber: true })}
-              />
-              <Input
-                type='datetime-local'
-                {...form.register('registration_start')}
-              />
-              <Input type='datetime-local' {...form.register('draw_time')} />
-              <select
-                className='h-9 rounded-md border px-3 text-sm'
-                {...form.register('eligibility_mode')}
-              >
-                <option value='all'>{t('All users')}</option>
-                <option value='groups'>{t('Groups')}</option>
-                <option value='users'>{t('User allow list')}</option>
-              </select>
-              <Input
-                placeholder={t('Groups or user IDs')}
-                {...form.register('allow_list')}
-              />
+        <div className='grid gap-8'>
+          <LotteryPlanForm />
+
+          <section className='grid gap-4'>
+            <div>
+              <h3 className='text-base font-semibold'>{t('Lottery plans')}</h3>
+              <p className='text-muted-foreground mt-1 text-sm'>
+                {t(
+                  'Review schedules, participation rules, and management actions.'
+                )}
+              </p>
             </div>
-            <textarea
-              className='min-h-20 rounded-md border p-3 text-sm'
-              placeholder={t('Lottery description')}
-              {...form.register('description')}
-            />
-            <div className='grid gap-3'>
-              {prizes.fields.map((field, index) => (
-                <div
-                  key={field.id}
-                  className='grid gap-2 rounded-md border p-3 md:grid-cols-4'
-                >
-                  <Input
-                    placeholder={t('Prize name')}
-                    {...form.register(`prizes.${index}.name`)}
-                  />
-                  <Input
-                    type='number'
-                    min={1}
-                    {...form.register(`prizes.${index}.quantity`, {
-                      valueAsNumber: true,
-                    })}
-                  />
-                  <select
-                    className='h-9 rounded-md border px-3 text-sm'
-                    {...form.register(`prizes.${index}.reward_type`)}
+
+            {plans.length === 0 ? (
+              <div className='text-muted-foreground border-border border-y py-10 text-center text-sm'>
+                {t('No lottery plans')}
+              </div>
+            ) : (
+              <div className='border-border divide-border divide-y border-y'>
+                {plans.map((plan) => (
+                  <article
+                    key={plan.id}
+                    className='grid gap-4 py-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center'
                   >
-                    <option value='quota'>{t('Quota')}</option>
-                    <option value='subscription'>{t('Subscription')}</option>
-                  </select>
-                  <Input
-                    type='number'
-                    min={0}
-                    {...form.register(`prizes.${index}.quota`, {
-                      valueAsNumber: true,
-                    })}
-                  />
-                  <select
-                    className='h-9 rounded-md border px-3 text-sm'
-                    {...form.register(`prizes.${index}.subscription_plan_id`, {
-                      valueAsNumber: true,
-                    })}
-                  >
-                    <option value='0'>{t('Select a subscription plan')}</option>
-                    {(subscriptionPlansQuery.data?.success
-                      ? (subscriptionPlansQuery.data.data ?? [])
-                      : []
-                    ).map(({ plan }) => (
-                      <option key={plan.id} value={plan.id}>
-                        #{plan.id} {plan.title}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className='h-9 rounded-md border px-3 text-sm'
-                    {...form.register(`prizes.${index}.fulfillment_mode`)}
-                  >
-                    <option value='auto'>{t('Automatic')}</option>
-                    <option value='self_claim'>{t('Self claim')}</option>
-                    <option value='redemption_code'>
-                      {t('Redemption code')}
-                    </option>
-                  </select>
-                  <Input
-                    type='number'
-                    min={0}
-                    {...form.register(`prizes.${index}.claim_expire_seconds`, {
-                      valueAsNumber: true,
-                    })}
-                  />
-                  <Button
-                    type='button'
-                    variant='outline'
-                    onClick={() => prizes.remove(index)}
-                    disabled={prizes.fields.length === 1}
-                  >
-                    {t('Remove')}
-                  </Button>
+                    <div className='min-w-0'>
+                      <div className='flex flex-wrap items-center gap-2'>
+                        <h4 className='truncate font-medium'>{plan.title}</h4>
+                        <Badge variant='outline'>
+                          {getLotteryPlanStatusLabel(t, plan.status)}
+                        </Badge>
+                      </div>
+                      {plan.description && (
+                        <p className='text-muted-foreground mt-1 line-clamp-2 text-sm'>
+                          {plan.description}
+                        </p>
+                      )}
+                      <dl className='text-muted-foreground mt-3 grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-4'>
+                        <div>
+                          <dt className='font-medium'>
+                            {t('Registration start time')}
+                          </dt>
+                          <dd>
+                            {formatLotteryDate(plan.registration_start_time)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className='font-medium'>{t('Draw time')}</dt>
+                          <dd>{formatLotteryDate(plan.draw_time)}</dd>
+                        </div>
+                        <div>
+                          <dt className='font-medium'>
+                            {t('Maximum participants')}
+                          </dt>
+                          <dd>{plan.max_participants}</dd>
+                        </div>
+                        <div>
+                          <dt className='font-medium'>
+                            {t('Eligible participants')}
+                          </dt>
+                          <dd>{getEligibilityLabel(plan.eligibility_mode)}</dd>
+                        </div>
+                      </dl>
+                    </div>
+                    <div className='flex flex-wrap gap-2 xl:justify-end'>
+                      <Button
+                        size='sm'
+                        variant='outline'
+                        onClick={() => beginEditing(plan)}
+                        disabled={
+                          plan.status !== 'scheduled' && plan.status !== 'open'
+                        }
+                      >
+                        <Pencil />
+                        {t('Edit')}
+                      </Button>
+                      <Button
+                        size='sm'
+                        variant={
+                          selectedPlanId === plan.id ? 'secondary' : 'outline'
+                        }
+                        onClick={() => setSelectedPlanId(plan.id)}
+                      >
+                        <Users />
+                        {t('Participants')}
+                      </Button>
+                      <Button
+                        size='sm'
+                        variant='outline'
+                        disabled={
+                          drawMutation.isPending || plan.status !== 'open'
+                        }
+                        onClick={() => requestManualDraw(plan.id)}
+                      >
+                        <Play />
+                        {t('Draw now')}
+                      </Button>
+                      <Button
+                        size='sm'
+                        variant='destructive'
+                        disabled={
+                          cancelPlanMutation.isPending ||
+                          (plan.status !== 'scheduled' &&
+                            plan.status !== 'open')
+                        }
+                        onClick={() => {
+                          if (window.confirm(t('Cancel this lottery plan?'))) {
+                            cancelPlanMutation.mutate(plan.id)
+                          }
+                        }}
+                      >
+                        <XCircle />
+                        {t('Cancel')}
+                      </Button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {editingPlan && (
+            <section className='border-border grid gap-4 border-t pt-6'>
+              <div>
+                <h3 className='text-base font-semibold'>
+                  {t('Edit lottery plan')}
+                </h3>
+                <p className='text-muted-foreground mt-1 text-sm'>
+                  {t(
+                    'Published plans only allow text changes and a later draw time.'
+                  )}
+                </p>
+              </div>
+              <FieldGroup>
+                <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
+                  <Field className='lg:col-span-2'>
+                    <FieldLabel htmlFor='edit-lottery-title'>
+                      {t('Lottery title')}
+                    </FieldLabel>
+                    <Input
+                      id='edit-lottery-title'
+                      value={editTitle}
+                      onChange={(event) => setEditTitle(event.target.value)}
+                    />
+                  </Field>
+                  <Field className='lg:col-span-2'>
+                    <FieldLabel htmlFor='edit-lottery-description'>
+                      {t('Lottery description')}
+                    </FieldLabel>
+                    <Textarea
+                      id='edit-lottery-description'
+                      value={editDescription}
+                      onChange={(event) =>
+                        setEditDescription(event.target.value)
+                      }
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor='edit-lottery-draw-time'>
+                      {t('Draw time')}
+                    </FieldLabel>
+                    <Input
+                      id='edit-lottery-draw-time'
+                      type='datetime-local'
+                      value={editDrawTime}
+                      onChange={(event) => setEditDrawTime(event.target.value)}
+                    />
+                    <FieldDescription>
+                      {t('The draw time can only be postponed.')}
+                    </FieldDescription>
+                  </Field>
                 </div>
-              ))}
+              </FieldGroup>
               <div className='flex flex-wrap gap-2'>
                 <Button
                   type='button'
-                  variant='outline'
-                  onClick={() => prizes.append(DEFAULT_PRIZE)}
-                >
-                  {t('Add prize')}
-                </Button>
-                <Button type='submit' disabled={createMutation.isPending}>
-                  {t('Create lottery plan')}
-                </Button>
-              </div>
-            </div>
-          </form>
-
-          <div className='grid gap-3'>
-            {(plansQuery.data?.success ? plansQuery.data.data : []).map(
-              (plan) => (
-                <section
-                  key={plan.id}
-                  className='flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4'
-                >
-                  <div>
-                    <div className='font-medium'>{plan.title}</div>
-                    <div className='text-muted-foreground text-xs'>
-                      {plan.status}
-                    </div>
-                  </div>
-                  <div className='flex gap-2'>
-                    <Button
-                      size='sm'
-                      variant='outline'
-                      onClick={() => beginEditing(plan)}
-                      disabled={
-                        plan.status !== 'scheduled' && plan.status !== 'open'
-                      }
-                    >
-                      {t('Edit')}
-                    </Button>
-                    <Button
-                      size='sm'
-                      variant='outline'
-                      onClick={() => setSelectedPlanId(plan.id)}
-                    >
-                      {t('Participants')}
-                    </Button>
-                    <Button
-                      size='sm'
-                      variant='outline'
-                      disabled={
-                        drawMutation.isPending || plan.status !== 'open'
-                      }
-                      onClick={() => requestManualDraw(plan.id)}
-                    >
-                      {t('Draw now')}
-                    </Button>
-                    <Button
-                      size='sm'
-                      variant='destructive'
-                      disabled={
-                        cancelPlanMutation.isPending ||
-                        (plan.status !== 'scheduled' && plan.status !== 'open')
-                      }
-                      onClick={() => {
-                        if (window.confirm(t('Cancel this lottery plan?'))) {
-                          cancelPlanMutation.mutate(plan.id)
-                        }
-                      }}
-                    >
-                      {t('Cancel')}
-                    </Button>
-                  </div>
-                </section>
-              ),
-            )}
-          </div>
-
-          {editingPlan && (
-            <section className='grid gap-3 rounded-lg border p-4'>
-              <div className='font-medium'>{t('Edit lottery plan')}</div>
-              <Input
-                value={editTitle}
-                onChange={(event) => setEditTitle(event.target.value)}
-                placeholder={t('Lottery title')}
-              />
-              <textarea
-                className='min-h-20 rounded-md border p-3 text-sm'
-                value={editDescription}
-                onChange={(event) => setEditDescription(event.target.value)}
-                placeholder={t('Lottery description')}
-              />
-              <Input
-                type='datetime-local'
-                value={editDrawTime}
-                onChange={(event) => setEditDrawTime(event.target.value)}
-              />
-              <div className='flex gap-2'>
-                <Button
-                  type='button'
                   onClick={submitPlanUpdate}
-                  disabled={updatePlanMutation.isPending}
+                  disabled={updatePlanMutation.isPending || !editTitle.trim()}
                 >
                   {t('Save changes')}
                 </Button>
@@ -502,55 +393,100 @@ export function LotteryAdmin() {
           )}
 
           {selectedPlanId && (
-            <div className='grid gap-2 rounded-lg border p-4'>
-              {(participantsQuery.data?.success
-                ? participantsQuery.data.data
-                : []
-              ).map((participant) => (
-                <div
-                  key={participant.id}
-                  className='flex flex-wrap items-center gap-2 border-b py-2 last:border-b-0'
-                >
-                  <span className='min-w-40 text-sm'>
-                    {participant.display_name || participant.username} #
-                    {participant.user_id}
-                  </span>
-                  <Input
-                    className='w-24'
-                    type='number'
-                    defaultValue={participant.weight}
-                    onBlur={(event) =>
-                      participantMutation.mutate({
-                        planId: selectedPlanId,
-                        userId: participant.user_id,
-                        weight: Number(event.target.value),
-                      })
-                    }
-                  />
-                  <select
-                    className='h-9 min-w-40 rounded-md border px-3 text-sm'
-                    defaultValue={String(participant.preset_prize_id || 0)}
-                    onChange={(event) =>
-                      participantMutation.mutate({
-                        planId: selectedPlanId,
-                        userId: participant.user_id,
-                        presetPrizeId: Number(event.target.value) || 0,
-                      })
-                    }
-                  >
-                    <option value='0'>{t('No preset prize')}</option>
-                    {(selectedPlanPrizesQuery.data?.success
-                      ? (selectedPlanPrizesQuery.data.data ?? [])
-                      : []
-                    ).map((prize) => (
-                      <option key={prize.id} value={prize.id}>
-                        #{prize.id} {prize.name}
-                      </option>
-                    ))}
-                  </select>
+            <section className='border-border grid gap-4 border-t pt-6'>
+              <div>
+                <h3 className='text-base font-semibold'>
+                  {t('Participants for {{title}}', {
+                    title: selectedPlan?.title ?? `#${selectedPlanId}`,
+                  })}
+                </h3>
+                <p className='text-muted-foreground mt-1 text-sm'>
+                  {t('Set each participant weight or assign a preset prize.')}
+                </p>
+              </div>
+
+              {participants.length === 0 ? (
+                <div className='text-muted-foreground border-border border-y py-8 text-center text-sm'>
+                  {t('No participants yet')}
                 </div>
-              ))}
-            </div>
+              ) : (
+                <div className='border-border divide-border divide-y border-y'>
+                  {participants.map((participant) => (
+                    <div
+                      key={participant.id}
+                      className='grid gap-3 py-4 lg:grid-cols-[minmax(220px,1fr)_160px_minmax(220px,320px)] lg:items-end'
+                    >
+                      <div className='min-w-0'>
+                        <div className='truncate text-sm font-medium'>
+                          {participant.display_name || participant.username}
+                        </div>
+                        <div className='text-muted-foreground truncate text-xs'>
+                          @{participant.username} | #{participant.user_id} |{' '}
+                          {participant.user_group}
+                        </div>
+                      </div>
+                      <Field>
+                        <FieldLabel
+                          htmlFor={`participant-${participant.id}-weight`}
+                        >
+                          {t('Lottery weight')}
+                        </FieldLabel>
+                        <Input
+                          id={`participant-${participant.id}-weight`}
+                          type='number'
+                          min={1}
+                          defaultValue={participant.weight}
+                          onBlur={(event) => {
+                            const weight = Number(event.target.value)
+                            if (!Number.isInteger(weight) || weight < 1) {
+                              toast.error(
+                                t('Lottery weight must be at least 1')
+                              )
+                              return
+                            }
+                            participantMutation.mutate({
+                              planId: selectedPlanId,
+                              userId: participant.user_id,
+                              weight,
+                            })
+                          }}
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel
+                          htmlFor={`participant-${participant.id}-prize`}
+                        >
+                          {t('Preset prize')}
+                        </FieldLabel>
+                        <NativeSelect
+                          id={`participant-${participant.id}-prize`}
+                          className='w-full'
+                          defaultValue={String(
+                            participant.preset_prize_id || 0
+                          )}
+                          onChange={(event) =>
+                            participantMutation.mutate({
+                              planId: selectedPlanId,
+                              userId: participant.user_id,
+                              presetPrizeId: Number(event.target.value) || 0,
+                            })
+                          }
+                        >
+                          <NativeSelectOption value='0'>
+                            {t('No preset prize')}
+                          </NativeSelectOption>
+                          {selectedPlanPrizes.map((prize) => (
+                            <NativeSelectOption key={prize.id} value={prize.id}>
+                              #{prize.id} {prize.name}
+                            </NativeSelectOption>
+                          ))}
+                        </NativeSelect>
+                      </Field>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
           )}
         </div>
       </SectionPageLayout.Content>

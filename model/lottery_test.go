@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -84,6 +85,40 @@ func TestLotteryPlanDefaultAlgorithmFitsLegacyColumn(t *testing.T) {
 	var stored LotteryPlan
 	require.NoError(t, DB.First(&stored, plan.Id).Error)
 	assert.Equal(t, plan.DrawAlgorithm, stored.DrawAlgorithm)
+}
+
+func TestLotteryCreateRejectsDatabaseIntOverflow(t *testing.T) {
+	if strconv.IntSize < 64 {
+		t.Skip("database INT overflow values do not fit in a 32-bit Go int")
+	}
+	setupLotteryFixture(t)
+	tests := []struct {
+		name            string
+		maxParticipants int
+		quantity        int
+		quota           int
+		wantError       string
+	}{
+		{name: "participant limit", maxParticipants: 2_147_483_648, quantity: 1, quota: 100, wantError: "max participants exceeds database limit"},
+		{name: "prize quantity", maxParticipants: 10, quantity: 2_147_483_648, quota: 100, wantError: "lottery prize quantity exceeds database limit"},
+		{name: "quota reward", maxParticipants: 10, quantity: 1, quota: 2_147_483_648, wantError: "lottery quota exceeds database limit"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			plan := &LotteryPlan{
+				Title:                 "Database limit",
+				Status:                LotteryPlanStatusScheduled,
+				EligibilityMode:       LotteryEligibilityAll,
+				MaxParticipants:       testCase.maxParticipants,
+				RegistrationStartTime: common.GetTimestamp() + 60,
+				DrawTime:              common.GetTimestamp() + 3600,
+			}
+			err := CreateLotteryPlan(plan, nil, nil, []*LotteryPrize{
+				{Name: "Prize", Quantity: testCase.quantity, RewardType: LotteryRewardQuota, Quota: testCase.quota, FulfillmentMode: LotteryFulfillmentAuto},
+			})
+			require.ErrorContains(t, err, testCase.wantError)
+		})
+	}
 }
 
 func TestLotteryExplicitAllowListRequiresSelfJoin(t *testing.T) {
@@ -209,6 +244,33 @@ func TestLotteryGroupEligibilityAndAdminExclusion(t *testing.T) {
 	}))
 	require.NoError(t, DB.Model(&User{}).Where("id = ?", userIDs[1]).Update("role", common.RoleAdminUser).Error)
 	require.Error(t, JoinLotteryPlan(adminPlan.Id, userIDs[1]))
+}
+
+func TestLotteryPresetCannotExceedPrizeQuantity(t *testing.T) {
+	userIDs := setupLotteryFixture(t)
+	plan := &LotteryPlan{
+		Title:                 "Preset capacity",
+		Status:                LotteryPlanStatusOpen,
+		EligibilityMode:       LotteryEligibilityAll,
+		MaxParticipants:       3,
+		RegistrationStartTime: common.GetTimestamp() - 60,
+		DrawTime:              common.GetTimestamp() + 3600,
+	}
+	require.NoError(t, CreateLotteryPlan(plan, nil, nil, []*LotteryPrize{
+		{Name: "Only prize", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 100, FulfillmentMode: LotteryFulfillmentAuto},
+	}))
+	require.NoError(t, JoinLotteryPlan(plan.Id, userIDs[0]))
+	require.NoError(t, JoinLotteryPlan(plan.Id, userIDs[1]))
+
+	var prize LotteryPrize
+	require.NoError(t, DB.Where("plan_id = ?", plan.Id).First(&prize).Error)
+	require.NoError(t, SetLotteryParticipantPreset(plan.Id, userIDs[0], prize.Id))
+	err := SetLotteryParticipantPreset(plan.Id, userIDs[1], prize.Id)
+	require.ErrorContains(t, err, "preset prize exceeds available slots")
+
+	var participant LotteryParticipant
+	require.NoError(t, DB.Where("plan_id = ? AND user_id = ?", plan.Id, userIDs[1]).First(&participant).Error)
+	assert.Zero(t, participant.PresetPrizeId)
 }
 
 func TestLotteryAutoQuotaPrizeIsFulfilledAfterDraw(t *testing.T) {

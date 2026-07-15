@@ -32,6 +32,10 @@ import {
   joinLotteryPlan,
   leaveLotteryPlan,
 } from './api'
+import {
+  getLotteryPlanStatusLabel,
+  getLotteryRewardStatusLabel,
+} from './lib/status'
 import type { LotteryPlan } from './types'
 
 const LOTTERY_QUERY_KEY = ['lottery', 'self'] as const
@@ -60,7 +64,7 @@ export function Lotteries() {
     mutationFn: joinLotteryPlan,
     onSuccess: async (result) => {
       if (!result.success) {
-        toast.error(result.message || t('Failed to join lottery'))
+        toast.error(t('Failed to join lottery'))
         return
       }
       toast.success(t('Joined lottery'))
@@ -71,7 +75,7 @@ export function Lotteries() {
     mutationFn: leaveLotteryPlan,
     onSuccess: async (result) => {
       if (!result.success) {
-        toast.error(result.message || t('Failed to leave lottery'))
+        toast.error(t('Failed to leave lottery'))
         return
       }
       toast.success(t('Left lottery'))
@@ -83,7 +87,7 @@ export function Lotteries() {
     mutationFn: claimLotteryResult,
     onSuccess: async (result) => {
       if (!result.success) {
-        toast.error(result.message || t('Failed to claim lottery reward'))
+        toast.error(t('Failed to claim lottery reward'))
         return
       }
       toast.success(t('Lottery reward claimed'))
@@ -149,7 +153,7 @@ export function Lotteries() {
                   </div>
                 ) : (
                   <span className='text-muted-foreground text-sm'>
-                    {t('Lottery status: {{status}}', { status: plan.status })}
+                    {getLotteryPlanStatusLabel(t, plan.status)}
                   </span>
                 )}
               </section>
@@ -187,7 +191,11 @@ export function Lotteries() {
                     </Button>
                   ) : (
                     <span className='text-muted-foreground max-w-52 truncate font-mono text-xs'>
-                      {result.redemption_code || result.fulfillment_status}
+                      {result.redemption_code ||
+                        getLotteryRewardStatusLabel(
+                          t,
+                          result.fulfillment_status
+                        )}
                     </span>
                   )}
                 </section>

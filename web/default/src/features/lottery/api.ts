@@ -16,8 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { t } from 'i18next'
+
+import { getGroups, searchUsers } from '@/features/users/api'
+import { USER_ROLE, USER_STATUS } from '@/features/users/constants'
+import type { User } from '@/features/users/types'
 import { api } from '@/lib/api'
 
+import { isEligibleLotteryUser } from './lib/user-options'
 import type {
   ApiResponse,
   LotteryParticipant,
@@ -64,8 +70,33 @@ export async function getAdminLotteryPlans(): Promise<
   return response.data
 }
 
+export async function getLotteryAdminGroups(): Promise<ApiResponse<string[]>> {
+  const result = await getGroups()
+  return {
+    success: result.success,
+    message: result.message ?? '',
+    data: result.data ?? [],
+  }
+}
+
+export async function searchLotteryAdminUsers(
+  keyword: string
+): Promise<User[]> {
+  const result = await searchUsers({
+    keyword: keyword.trim(),
+    role: String(USER_ROLE.USER),
+    status: String(USER_STATUS.ENABLED),
+    p: 1,
+    page_size: 50,
+  })
+  if (!result.success) {
+    throw new Error(t('Failed to load users'))
+  }
+  return (result.data?.items ?? []).filter(isEligibleLotteryUser)
+}
+
 export async function createLotteryPlan(
-  payload: LotteryPlanCreatePayload,
+  payload: LotteryPlanCreatePayload
 ): Promise<ApiResponse<LotteryPlan>> {
   const response = await api.post('/api/lottery/admin/plans', payload)
   return response.data
@@ -73,11 +104,11 @@ export async function createLotteryPlan(
 
 export async function updateLotteryPlan(
   planId: number,
-  payload: LotteryPlanUpdatePayload,
+  payload: LotteryPlanUpdatePayload
 ): Promise<ApiResponse<LotteryPlan>> {
   const response = await api.patch(
     `/api/lottery/admin/plans/${planId}`,
-    payload,
+    payload
   )
   return response.data
 }
@@ -88,17 +119,17 @@ export async function cancelLotteryPlan(planId: number): Promise<ApiResponse> {
 }
 
 export async function getLotteryPrizes(
-  planId: number,
+  planId: number
 ): Promise<ApiResponse<LotteryPrize[]>> {
   const response = await api.get(`/api/lottery/admin/plans/${planId}/prizes`)
   return response.data
 }
 
 export async function getLotteryParticipants(
-  planId: number,
+  planId: number
 ): Promise<ApiResponse<LotteryParticipant[]>> {
   const response = await api.get(
-    `/api/lottery/admin/plans/${planId}/participants`,
+    `/api/lottery/admin/plans/${planId}/participants`
   )
   return response.data
 }
@@ -115,14 +146,14 @@ export async function updateLotteryParticipant(payload: {
       user_id: payload.userId,
       weight: payload.weight,
       preset_prize_id: payload.presetPrizeId,
-    },
+    }
   )
   return response.data
 }
 
 export async function drawLotteryPlan(
   planId: number,
-  reason: string,
+  reason: string
 ): Promise<ApiResponse> {
   const response = await api.post(`/api/lottery/admin/plans/${planId}/draw`, {
     reason,

@@ -51,11 +51,12 @@ const (
 	LotteryFulfillmentRedemptionCode LotteryFulfillmentMode = "redemption_code"
 )
 
+const LotteryDrawAlgorithmWeightedWithoutReplacement = "weighted_without_replacement"
+const lotteryDatabaseIntMax = 1<<31 - 1
+
 type LotteryDrawTrigger string
 
 const (
-	LotteryDrawAlgorithmWeightedWithoutReplacement = "weighted_without_replacement"
-
 	LotteryDrawTriggerScheduled LotteryDrawTrigger = "scheduled"
 	LotteryDrawTriggerFull      LotteryDrawTrigger = "full"
 	LotteryDrawTriggerManual    LotteryDrawTrigger = "manual"
@@ -206,6 +207,9 @@ func CreateLotteryPlan(plan *LotteryPlan, userIds []int, groups []string, prizes
 	if plan.MaxParticipants <= 0 {
 		return errors.New("max participants must be positive")
 	}
+	if plan.MaxParticipants > lotteryDatabaseIntMax {
+		return errors.New("max participants exceeds database limit")
+	}
 	if plan.RegistrationStartTime <= 0 || plan.DrawTime <= plan.RegistrationStartTime {
 		return errors.New("invalid lottery schedule")
 	}
@@ -248,6 +252,9 @@ func CreateLotteryPlan(plan *LotteryPlan, userIds []int, groups []string, prizes
 			if prize == nil || strings.TrimSpace(prize.Name) == "" || prize.Quantity <= 0 {
 				return errors.New("invalid lottery prize")
 			}
+			if prize.Quantity > lotteryDatabaseIntMax {
+				return errors.New("lottery prize quantity exceeds database limit")
+			}
 			if prize.RewardType != LotteryRewardQuota && prize.RewardType != LotteryRewardSubscription {
 				return errors.New("invalid prize reward type")
 			}
@@ -256,6 +263,9 @@ func CreateLotteryPlan(plan *LotteryPlan, userIds []int, groups []string, prizes
 			}
 			if prize.RewardType == LotteryRewardQuota && prize.Quota <= 0 {
 				return errors.New("quota prize must be positive")
+			}
+			if prize.RewardType == LotteryRewardQuota && prize.Quota > lotteryDatabaseIntMax {
+				return errors.New("lottery quota exceeds database limit")
 			}
 			if prize.RewardType == LotteryRewardSubscription && prize.SubscriptionPlanId <= 0 && prize.SubscriptionSnapshot == "" {
 				return errors.New("subscription prize is required")
@@ -659,18 +669,33 @@ func SetLotteryParticipantPreset(planId int, userId int, prizeId int) error {
 		if plan.Status != LotteryPlanStatusOpen {
 			return errors.New("lottery plan is not open")
 		}
+		var participant LotteryParticipant
+		if err := lockForUpdate(tx).
+			Where("plan_id = ? AND user_id = ? AND status = ?", plan.Id, userId, LotteryParticipantStatusJoined).
+			First(&participant).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("user has not joined this lottery")
+			}
+			return err
+		}
 		if prizeId != 0 {
 			var prize LotteryPrize
-			if err := tx.Where("id = ? AND plan_id = ?", prizeId, plan.Id).First(&prize).Error; err != nil {
+			if err := lockForUpdate(tx).Where("id = ? AND plan_id = ?", prizeId, plan.Id).First(&prize).Error; err != nil {
 				return err
 			}
+			var presetCount int64
+			if err := tx.Model(&LotteryParticipant{}).
+				Where("plan_id = ? AND status = ? AND preset_prize_id = ? AND user_id != ?", plan.Id, LotteryParticipantStatusJoined, prize.Id, userId).
+				Count(&presetCount).Error; err != nil {
+				return err
+			}
+			if presetCount >= int64(prize.Quantity) {
+				return errors.New("preset prize exceeds available slots")
+			}
 		}
-		result := tx.Model(&LotteryParticipant{}).Where("plan_id = ? AND user_id = ? AND status = ?", plan.Id, userId, LotteryParticipantStatusJoined).Update("preset_prize_id", prizeId)
+		result := tx.Model(&LotteryParticipant{}).Where("id = ?", participant.Id).Update("preset_prize_id", prizeId)
 		if result.Error != nil {
 			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return errors.New("user has not joined this lottery")
 		}
 		return nil
 	})
