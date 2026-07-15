@@ -54,6 +54,8 @@ const (
 type LotteryDrawTrigger string
 
 const (
+	LotteryDrawAlgorithmWeightedWithoutReplacement = "weighted_without_replacement"
+
 	LotteryDrawTriggerScheduled LotteryDrawTrigger = "scheduled"
 	LotteryDrawTriggerFull      LotteryDrawTrigger = "full"
 	LotteryDrawTriggerManual    LotteryDrawTrigger = "manual"
@@ -75,7 +77,7 @@ type LotteryPlan struct {
 	MaxParticipants       int                    `json:"max_participants" gorm:"type:int;not null"`
 	RegistrationStartTime int64                  `json:"registration_start_time" gorm:"type:bigint;index"`
 	DrawTime              int64                  `json:"draw_time" gorm:"type:bigint;index"`
-	DrawAlgorithm         string                 `json:"draw_algorithm" gorm:"type:varchar(32);not null"`
+	DrawAlgorithm         string                 `json:"draw_algorithm" gorm:"type:varchar(64);not null"`
 	CreatedBy             int                    `json:"created_by" gorm:"index"`
 	CreatedAt             int64                  `json:"created_at" gorm:"type:bigint"`
 	UpdatedAt             int64                  `json:"updated_at" gorm:"type:bigint"`
@@ -87,7 +89,7 @@ func (plan *LotteryPlan) BeforeCreate(_ *gorm.DB) error {
 		plan.Status = LotteryPlanStatusDraft
 	}
 	if plan.DrawAlgorithm == "" {
-		plan.DrawAlgorithm = "weighted_random_without_replacement"
+		plan.DrawAlgorithm = LotteryDrawAlgorithmWeightedWithoutReplacement
 	}
 	if plan.CreatedAt == 0 {
 		plan.CreatedAt = now

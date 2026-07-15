@@ -66,6 +66,26 @@ func setupLotteryFixture(t *testing.T) []int {
 	return []int{users[0].Id, users[1].Id, users[2].Id}
 }
 
+func TestLotteryPlanDefaultAlgorithmFitsLegacyColumn(t *testing.T) {
+	setupLotteryFixture(t)
+	plan := &LotteryPlan{
+		Title:                 "Algorithm compatibility",
+		Status:                LotteryPlanStatusScheduled,
+		EligibilityMode:       LotteryEligibilityAll,
+		MaxParticipants:       10,
+		RegistrationStartTime: common.GetTimestamp() + 60,
+		DrawTime:              common.GetTimestamp() + 3600,
+	}
+	require.NoError(t, CreateLotteryPlan(plan, nil, nil, []*LotteryPrize{
+		{Name: "Prize", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 100, FulfillmentMode: LotteryFulfillmentAuto},
+	}))
+
+	require.LessOrEqual(t, len(plan.DrawAlgorithm), 32)
+	var stored LotteryPlan
+	require.NoError(t, DB.First(&stored, plan.Id).Error)
+	assert.Equal(t, plan.DrawAlgorithm, stored.DrawAlgorithm)
+}
+
 func TestLotteryExplicitAllowListRequiresSelfJoin(t *testing.T) {
 	userIDs := setupLotteryFixture(t)
 	plan := &LotteryPlan{
