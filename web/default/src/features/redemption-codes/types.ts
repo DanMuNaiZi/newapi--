@@ -29,7 +29,10 @@ export const redemptionSchema = z.object({
   key: z.string(),
   status: z.number(), // 1: enabled, 2: disabled, 3: used
   quota: z.number(),
-  reward_type: z.enum(['quota', 'subscription']).optional().default('quota'),
+  reward_type: z.preprocess(
+    (value) => (value === '' || value == null ? undefined : value),
+    z.enum(['quota', 'subscription']).default('quota')
+  ),
   subscription_plan_id: z.number().optional().default(0),
   batch: z.string().optional().default(''),
   source_ref: z.string().optional().default(''),

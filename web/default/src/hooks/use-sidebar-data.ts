@@ -30,13 +30,14 @@ import {
   ServerCog,
   Settings,
   Ticket,
+  Trophy,
   User,
   Users,
   Wallet,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { type SidebarData } from '@/components/layout/types'
+import type { SidebarData } from '@/components/layout/types'
 import { ROLE } from '@/lib/roles'
 
 /**
@@ -138,6 +139,11 @@ export function useSidebarData(): SidebarData {
             title: t('Redemption Codes'),
             url: '/redemption-codes',
             icon: Ticket,
+          },
+          {
+            title: t('Lottery Management'),
+            url: '/lotteries/admin',
+            icon: Trophy,
           },
           {
             title: t('Subscriptions'),

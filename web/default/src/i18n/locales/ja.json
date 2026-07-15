@@ -2498,6 +2498,7 @@
     "Logo URL": "ロゴURL",
     "Logs": "ログ",
     "Look for a special ratio rule matching this user group and this billing group. If one exists, use its ratio. Otherwise use the billing group base ratio from the pricing table.": "このユーザーグループと課金グループに一致する特別倍率ルールを探します。あればその倍率を、なければ料金表の課金グループの基本倍率を使います。",
+    "Lottery Management": "抽選管理",
     "Low balance": "残高不足",
     "Lowest median first-token latency": "最初のトークンまでの中央値レイテンシの最小値",
     "m": "m",
