@@ -28,6 +28,7 @@ import {
 
 const BASE_FORM: LotteryAdminFormValues = {
   title: 'July lottery',
+  icon: 'https://cdn.example.com/lottery.png',
   description: 'Monthly campaign',
   eligibility_mode: 'all',
   selected_groups: [],
@@ -108,6 +109,26 @@ describe('buildLotteryPlanPayload', () => {
 
     assert.deepEqual(payload.groups, ['vip', 'partner'])
     assert.deepEqual(payload.user_ids, [])
+  })
+
+  test('includes a valid lottery icon URL in the payload', () => {
+    const payload = buildLotteryPlanPayload(BASE_FORM)
+
+    assert.equal(payload.icon, 'https://cdn.example.com/lottery.png')
+  })
+
+  test('rejects unsafe lottery icon URLs', () => {
+    const result = lotteryAdminFormSchema.safeParse({
+      ...BASE_FORM,
+      icon: 'javascript:alert(1)',
+    })
+
+    assert.equal(result.success, false)
+    if (result.success) return
+    assert.equal(
+      result.error.issues.find((issue) => issue.path[0] === 'icon')?.message,
+      'Icon URL must start with http:// or https://'
+    )
   })
 
   test('keeps only selected users for user eligibility', () => {

@@ -48,6 +48,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { updateLotteryPlan } from '../api'
 import { localInputFromUnix, unixFromLocal } from '../lib/admin-form'
 import type { LotteryPlan, LotteryPlanUpdatePayload } from '../types'
+import { LotteryIcon } from './lottery-icon'
 
 type LotteryPlanEditDrawerProps = {
   open: boolean
@@ -59,12 +60,14 @@ export function LotteryPlanEditDrawer(props: LotteryPlanEditDrawerProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [title, setTitle] = useState('')
+  const [icon, setIcon] = useState('')
   const [description, setDescription] = useState('')
   const [drawTime, setDrawTime] = useState('')
 
   useEffect(() => {
     if (!props.open || !props.plan) return
     setTitle(props.plan.title)
+    setIcon(props.plan.icon || '')
     setDescription(props.plan.description)
     setDrawTime(localInputFromUnix(props.plan.draw_time))
   }, [props.open, props.plan])
@@ -99,6 +102,7 @@ export function LotteryPlanEditDrawer(props: LotteryPlanEditDrawerProps) {
     }
     const payload: LotteryPlanUpdatePayload = {
       title: title.trim(),
+      icon: icon.trim(),
       description: description.trim(),
     }
     if (nextDrawTime > props.plan.draw_time) {
@@ -129,6 +133,24 @@ export function LotteryPlanEditDrawer(props: LotteryPlanEditDrawerProps) {
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
               />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor='edit-lottery-icon'>
+                {t('Icon URL')}
+              </FieldLabel>
+              <div className='flex items-center gap-3'>
+                <LotteryIcon src={icon} size='md' />
+                <Input
+                  id='edit-lottery-icon'
+                  type='url'
+                  placeholder={t('https://example.com/logo.png')}
+                  value={icon}
+                  onChange={(event) => setIcon(event.target.value)}
+                />
+              </div>
+              <FieldDescription>
+                {t('Optional image URL for this lottery.')}
+              </FieldDescription>
             </Field>
             <Field>
               <FieldLabel htmlFor='edit-lottery-description'>

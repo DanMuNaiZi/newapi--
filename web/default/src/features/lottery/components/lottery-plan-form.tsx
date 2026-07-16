@@ -51,6 +51,7 @@ import {
   lotteryAdminFormSchema,
   type LotteryAdminFormValues,
 } from '../lib/admin-form'
+import { LotteryIcon } from './lottery-icon'
 import { LotteryUserMultiSelect } from './lottery-user-multi-select'
 
 type LotteryPlanFormProps = {
@@ -79,6 +80,7 @@ export function LotteryPlanForm(props: LotteryPlanFormProps) {
     control: form.control,
     name: 'selected_groups',
   })
+  const iconValue = useWatch({ control: form.control, name: 'icon' })
 
   const groupsQuery = useQuery({
     queryKey: ['lottery', 'admin', 'groups'],
@@ -177,6 +179,31 @@ export function LotteryPlanForm(props: LotteryPlanFormProps) {
               <FieldError>
                 {form.formState.errors.max_participants?.message
                   ? t(form.formState.errors.max_participants.message)
+                  : null}
+              </FieldError>
+            </Field>
+
+            <Field
+              className='lg:col-span-2'
+              data-invalid={Boolean(form.formState.errors.icon)}
+            >
+              <FieldLabel htmlFor='lottery-icon'>{t('Icon URL')}</FieldLabel>
+              <div className='flex items-center gap-3'>
+                <LotteryIcon src={iconValue} size='md' />
+                <Input
+                  id='lottery-icon'
+                  type='url'
+                  placeholder={t('https://example.com/logo.png')}
+                  aria-invalid={Boolean(form.formState.errors.icon)}
+                  {...form.register('icon')}
+                />
+              </div>
+              <FieldDescription>
+                {t('Optional image URL for this lottery.')}
+              </FieldDescription>
+              <FieldError>
+                {form.formState.errors.icon?.message
+                  ? t(form.formState.errors.icon.message)
                   : null}
               </FieldError>
             </Field>

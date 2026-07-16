@@ -19,12 +19,13 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import dayjs from 'dayjs'
-import { Gift, Timer } from 'lucide-react'
+import { Gift, Timer, Trophy, Users } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
 
 import { getLotteryPlansForSelf } from '../api'
+import { LotteryIcon } from './lottery-icon'
 
 export function LotteryDashboardPanel() {
   const { t } = useTranslation()
@@ -52,15 +53,26 @@ export function LotteryDashboardPanel() {
         {plans.slice(0, 3).map((plan) => (
           <div
             key={plan.id}
-            className='bg-muted/35 flex items-center justify-between gap-3 rounded-md px-3 py-2'
+            className='bg-muted/35 flex items-center gap-3 rounded-md px-3 py-2'
           >
-            <span className='min-w-0 truncate text-sm font-medium'>
-              {plan.title}
-            </span>
-            <span className='text-muted-foreground flex shrink-0 items-center gap-1 text-xs'>
-              <Timer className='size-3' aria-hidden='true' />
-              {dayjs.unix(plan.draw_time).format('MM-DD HH:mm')}
-            </span>
+            <LotteryIcon src={plan.icon} size='sm' />
+            <div className='min-w-0 flex-1'>
+              <div className='truncate text-sm font-medium'>{plan.title}</div>
+              <div className='text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs'>
+                <span className='flex items-center gap-1'>
+                  <Timer className='size-3' aria-hidden='true' />
+                  {dayjs.unix(plan.draw_time).format('MM-DD HH:mm')}
+                </span>
+                <span className='flex items-center gap-1'>
+                  <Users className='size-3' aria-hidden='true' />
+                  {plan.participant_count ?? 0}
+                </span>
+                <span className='flex items-center gap-1'>
+                  <Trophy className='size-3' aria-hidden='true' />
+                  {plan.winner_count ?? 0}
+                </span>
+              </div>
+            </div>
           </div>
         ))}
       </div>

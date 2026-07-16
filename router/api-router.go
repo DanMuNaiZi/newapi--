@@ -257,6 +257,8 @@ func SetApiRouter(router *gin.Engine) {
 		lotteryRoute.Use(middleware.UserAuth())
 		{
 			lotteryRoute.GET("/self", controller.GetLotteryPlansForSelf)
+			lotteryRoute.GET("/plans/:id/participants", controller.GetLotteryParticipantsForSelf)
+			lotteryRoute.GET("/plans/:id/results", controller.GetLotteryPlanResultsForSelf)
 			lotteryRoute.GET("/results/self", controller.GetLotteryResultsForSelf)
 			lotteryRoute.GET("/notifications/self", controller.GetLotteryNotificationsForSelf)
 			lotteryRoute.POST("/:id/join", controller.JoinLotteryPlanForSelf)

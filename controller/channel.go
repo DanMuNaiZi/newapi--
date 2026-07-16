@@ -471,6 +471,11 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 	}
 
 	// 如果是添加操作，检查 channel 和 key 是否为空
+	channel.Icon = strings.TrimSpace(channel.Icon)
+	if err := common.ValidateImageURL(channel.Icon); err != nil {
+		return err
+	}
+
 	if isAdd {
 		if channel == nil || channel.Key == "" {
 			return fmt.Errorf("channel cannot be empty")
@@ -1046,10 +1051,19 @@ func UpdateChannel(c *gin.Context) {
 			// 覆盖模式：直接使用新密钥（默认行为，不需要特殊处理）
 		}
 	}
+	requestedIcon := channel.Icon
+	_, iconProvided := requestData["icon"]
 	err = channel.Update()
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if iconProvided {
+		if err := model.DB.Model(&model.Channel{}).Where("id = ?", channel.Id).Update("icon", requestedIcon).Error; err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		channel.Icon = requestedIcon
 	}
 	model.InitChannelCache()
 	service.ResetProxyClientCache()
@@ -1063,6 +1077,9 @@ func UpdateChannel(c *gin.Context) {
 	}
 	if channel.Type != originChannel.Type {
 		changedFields = append(changedFields, "type")
+	}
+	if channel.Icon != originChannel.Icon {
+		changedFields = append(changedFields, "icon")
 	}
 	if !equalStringPtr(channel.BaseURL, originChannel.BaseURL) {
 		changedFields = append(changedFields, "base_url")

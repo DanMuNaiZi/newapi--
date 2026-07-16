@@ -122,6 +122,33 @@ func TestValidateRedirectURL(t *testing.T) {
 	}
 }
 
+func TestValidateImageURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		url         string
+		wantError   bool
+		errorDetail string
+	}{
+		{name: "empty is optional", url: ""},
+		{name: "https image", url: "https://cdn.example.com/icon.png"},
+		{name: "http image", url: "http://cdn.example.com/icon.webp"},
+		{name: "javascript scheme", url: "javascript:alert(1)", wantError: true, errorDetail: "http and https"},
+		{name: "missing host", url: "https:///icon.png", wantError: true, errorDetail: "host"},
+		{name: "too long", url: "https://example.com/" + strings.Repeat("a", 1025), wantError: true, errorDetail: "1024"},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := ValidateImageURL(testCase.url)
+			if testCase.wantError {
+				require.ErrorContains(t, err, testCase.errorDetail)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
 func resetSessionCookieSettingsAfterTest(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {

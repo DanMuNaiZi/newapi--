@@ -11,6 +11,7 @@ import (
 
 type lotteryPlanRequest struct {
 	Title                 string                       `json:"title"`
+	Icon                  string                       `json:"icon"`
 	Description           string                       `json:"description"`
 	Status                model.LotteryPlanStatus      `json:"status"`
 	EligibilityMode       model.LotteryEligibilityMode `json:"eligibility_mode"`
@@ -28,6 +29,7 @@ type lotteryManualDrawRequest struct {
 
 type lotteryPlanUpdateRequest struct {
 	Title       *string `json:"title"`
+	Icon        *string `json:"icon"`
 	Description *string `json:"description"`
 	DrawTime    *int64  `json:"draw_time"`
 }
@@ -48,6 +50,34 @@ func GetLotteryPlansForSelf(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, plans)
+}
+
+func GetLotteryParticipantsForSelf(c *gin.Context) {
+	planId, err := lotteryPathID(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	participants, err := model.ListLotteryParticipantsForUser(planId, c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, participants)
+}
+
+func GetLotteryPlanResultsForSelf(c *gin.Context) {
+	planId, err := lotteryPathID(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	results, err := model.ListLotteryResultsForUserPlan(planId, c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, results)
 }
 
 func JoinLotteryPlanForSelf(c *gin.Context) {
@@ -122,6 +152,7 @@ func AdminCreateLotteryPlan(c *gin.Context) {
 	}
 	plan := &model.LotteryPlan{
 		Title:                 req.Title,
+		Icon:                  req.Icon,
 		Description:           req.Description,
 		Status:                req.Status,
 		EligibilityMode:       req.EligibilityMode,
@@ -192,6 +223,7 @@ func AdminUpdateLotteryPlan(c *gin.Context) {
 	}
 	plan, err := model.UpdatePublishedLotteryPlan(planId, model.LotteryPlanPublishedUpdate{
 		Title:       req.Title,
+		Icon:        req.Icon,
 		Description: req.Description,
 		DrawTime:    req.DrawTime,
 	})

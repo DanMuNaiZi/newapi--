@@ -19,11 +19,13 @@ For commercial licensing, please contact support@quantumnous.com
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
 
+import { RemoteIcon } from './remote-icon'
 import { StatusBadge, type StatusBadgeProps } from './status-badge'
 
 type ProviderBadgeProps = Omit<StatusBadgeProps, 'children' | 'label'> & {
   iconKey?: string | null
   iconSize?: number
+  iconUrl?: string | null
   label: string
   /** Color the label text by provider name. Set false for a neutral label. */
   colorText?: boolean
@@ -33,11 +35,22 @@ export function ProviderBadge({
   className,
   iconKey,
   iconSize = 14,
+  iconUrl,
   label,
   colorText = true,
   ...badgeProps
 }: ProviderBadgeProps) {
-  const icon = iconKey ? getLobeIcon(iconKey, iconSize) : null
+  const providerIcon = iconKey ? getLobeIcon(iconKey, iconSize) : null
+  const icon = iconUrl ? (
+    <RemoteIcon
+      src={iconUrl}
+      className='rounded-sm'
+      style={{ width: iconSize, height: iconSize }}
+      fallback={providerIcon}
+    />
+  ) : (
+    providerIcon
+  )
 
   return (
     <div

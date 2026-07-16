@@ -70,6 +70,14 @@ const prizeSchema = z
 export const lotteryAdminFormSchema = z
   .object({
     title: z.string().trim().min(1, 'Lottery title is required'),
+    icon: z
+      .string()
+      .trim()
+      .max(1024)
+      .refine(
+        (value) => !value || /^https?:\/\//i.test(value),
+        'Icon URL must start with http:// or https://'
+      ),
     description: z.string(),
     eligibility_mode: z.enum(['all', 'groups', 'users']),
     selected_groups: z.array(z.string()),
@@ -139,6 +147,7 @@ export const DEFAULT_LOTTERY_PRIZE: LotteryAdminFormValues['prizes'][number] = {
 
 export const DEFAULT_LOTTERY_FORM: LotteryAdminFormValues = {
   title: '',
+  icon: '',
   description: '',
   eligibility_mode: 'all',
   selected_groups: [],
@@ -179,6 +188,7 @@ export function buildLotteryPlanPayload(
 ): LotteryPlanCreatePayload {
   return {
     title: values.title.trim(),
+    icon: values.icon.trim(),
     description: values.description.trim(),
     status: 'scheduled',
     eligibility_mode: values.eligibility_mode,

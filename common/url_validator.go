@@ -37,3 +37,24 @@ func ValidateRedirectURL(rawURL string) error {
 
 	return fmt.Errorf("domain %s is not in the trusted domains list", domain)
 }
+
+func ValidateImageURL(rawURL string) error {
+	trimmedURL := strings.TrimSpace(rawURL)
+	if trimmedURL == "" {
+		return nil
+	}
+	if len(trimmedURL) > 1024 {
+		return fmt.Errorf("image URL cannot exceed 1024 characters")
+	}
+	parsedURL, err := url.Parse(trimmedURL)
+	if err != nil {
+		return fmt.Errorf("invalid image URL format: %s", err.Error())
+	}
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return fmt.Errorf("image URL must use http and https")
+	}
+	if parsedURL.Hostname() == "" {
+		return fmt.Errorf("image URL must include a host")
+	}
+	return nil
+}

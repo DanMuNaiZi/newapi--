@@ -200,6 +200,41 @@ func TestListLotteryResultsForPlanIncludesWinnerAndPrizeNames(t *testing.T) {
 	assert.Equal(t, "Grand prize", results[0].PrizeName)
 }
 
+func TestLotteryPublicDetailsExposeNamesOnlyToVisibleUsers(t *testing.T) {
+	userIDs := setupLotteryFixture(t)
+	plan := &LotteryPlan{
+		Title:                 "Private public details",
+		Status:                LotteryPlanStatusOpen,
+		EligibilityMode:       LotteryEligibilityUsers,
+		MaxParticipants:       2,
+		RegistrationStartTime: common.GetTimestamp() - 60,
+		DrawTime:              common.GetTimestamp() + 3600,
+	}
+	require.NoError(t, CreateLotteryPlan(plan, []int{userIDs[0]}, nil, []*LotteryPrize{
+		{Name: "Visible prize", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 100, FulfillmentMode: LotteryFulfillmentAuto},
+	}))
+	require.NoError(t, JoinLotteryPlan(plan.Id, userIDs[0]))
+	require.NoError(t, SetLotteryParticipantWeight(plan.Id, userIDs[0], 500))
+	_, err := DrawLotteryPlan(plan.Id, LotteryDrawTriggerManual, "verify public details")
+	require.NoError(t, err)
+
+	participants, err := ListLotteryParticipantsForUser(plan.Id, userIDs[0])
+	require.NoError(t, err)
+	require.Len(t, participants, 1)
+	assert.Equal(t, "lottery-a", participants[0].Username)
+
+	results, err := ListLotteryResultsForUserPlan(plan.Id, userIDs[0])
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "lottery-a", results[0].Username)
+	assert.Equal(t, "Visible prize", results[0].PrizeName)
+
+	_, err = ListLotteryParticipantsForUser(plan.Id, userIDs[1])
+	require.ErrorContains(t, err, "not visible")
+	_, err = ListLotteryResultsForUserPlan(plan.Id, userIDs[1])
+	require.ErrorContains(t, err, "not visible")
+}
+
 func TestLotteryDrawRecordsEmptyCompletion(t *testing.T) {
 	setupLotteryFixture(t)
 	plan := &LotteryPlan{
@@ -558,6 +593,31 @@ func TestListLotteryPlansForUserOnlyReturnsEligibleAndParticipatedPlans(t *testi
 	assert.Equal(t, publicPlan.Id, visibleToOther[0].Id)
 }
 
+func TestLotteryPlanViewIncludesIconCountsAndJoinState(t *testing.T) {
+	userIDs := setupLotteryFixture(t)
+	plan := &LotteryPlan{
+		Title:                 "Icon lottery",
+		Icon:                  "https://cdn.example.com/lottery.png",
+		Status:                LotteryPlanStatusOpen,
+		EligibilityMode:       LotteryEligibilityAll,
+		MaxParticipants:       3,
+		RegistrationStartTime: common.GetTimestamp() - 60,
+		DrawTime:              common.GetTimestamp() + 3600,
+	}
+	require.NoError(t, CreateLotteryPlan(plan, nil, nil, []*LotteryPrize{
+		{Name: "Prize", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 100, FulfillmentMode: LotteryFulfillmentAuto},
+	}))
+	require.NoError(t, JoinLotteryPlan(plan.Id, userIDs[0]))
+
+	plans, err := ListLotteryPlansForUser(userIDs[0])
+	require.NoError(t, err)
+	require.Len(t, plans, 1)
+	assert.Equal(t, plan.Icon, plans[0].Icon)
+	assert.True(t, plans[0].Joined)
+	assert.Equal(t, int64(1), plans[0].ParticipantCount)
+	assert.Zero(t, plans[0].WinnerCount)
+}
+
 func TestSetLotteryParticipantWeightRejectsInvalidValues(t *testing.T) {
 	userIDs := setupLotteryFixture(t)
 	plan := &LotteryPlan{Title: "Weight lottery", Status: LotteryPlanStatusOpen, EligibilityMode: LotteryEligibilityAll, MaxParticipants: 2, RegistrationStartTime: common.GetTimestamp() - 60, DrawTime: common.GetTimestamp() + 3600}
@@ -594,11 +654,13 @@ func TestPublishedLotteryPlanOnlyAllowsCopyAndDelayedDrawOrCancellation(t *testi
 
 	updated, err := UpdatePublishedLotteryPlan(plan.Id, LotteryPlanPublishedUpdate{
 		Title:       stringPointer("Updated lottery"),
+		Icon:        stringPointer("https://cdn.example.com/updated-lottery.png"),
 		Description: stringPointer("Updated copy"),
 		DrawTime:    int64Pointer(now + 7200),
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "Updated lottery", updated.Title)
+	assert.Equal(t, "https://cdn.example.com/updated-lottery.png", updated.Icon)
 	assert.Equal(t, "Updated copy", updated.Description)
 	assert.Equal(t, now+7200, updated.DrawTime)
 
@@ -606,6 +668,10 @@ func TestPublishedLotteryPlanOnlyAllowsCopyAndDelayedDrawOrCancellation(t *testi
 		DrawTime: int64Pointer(now + 3600),
 	})
 	require.Error(t, err)
+	_, err = UpdatePublishedLotteryPlan(plan.Id, LotteryPlanPublishedUpdate{
+		Icon: stringPointer("javascript:alert(1)"),
+	})
+	require.ErrorContains(t, err, "http and https")
 
 	require.NoError(t, CancelLotteryPlan(plan.Id))
 	var stored LotteryPlan

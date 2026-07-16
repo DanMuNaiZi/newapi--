@@ -38,9 +38,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { formatQuota } from '@/lib/format'
 
 import {
+  getAdminLotteryResults,
   getLotteryParticipants,
   getLotteryPrizes,
-  getLotteryResults,
   updateLotteryParticipant,
 } from '../api'
 import {
@@ -48,6 +48,7 @@ import {
   getLotteryRewardStatusLabel,
 } from '../lib/status'
 import type { LotteryPlan } from '../types'
+import { LotteryIcon } from './lottery-icon'
 import {
   LotteryParticipantEditor,
   type LotteryParticipantUpdate,
@@ -107,7 +108,7 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
   })
   const resultsQuery = useQuery({
     queryKey: ['lottery', 'admin', 'results', planId],
-    queryFn: () => getLotteryResults(planId),
+    queryFn: () => getAdminLotteryResults(planId),
     enabled: props.open && planId > 0 && tab === 'results',
   })
   const participantMutation = useMutation({
@@ -160,19 +161,26 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
     <Sheet open={props.open} onOpenChange={props.onOpenChange}>
       <SheetContent className={sideDrawerContentClassName('sm:max-w-[820px]')}>
         <SheetHeader className={sideDrawerHeaderClassName()}>
-          <div className='flex flex-wrap items-center gap-2 pr-8'>
-            <SheetTitle>{props.plan?.title ?? t('Lottery details')}</SheetTitle>
-            {props.plan && (
-              <StatusBadge
-                label={getLotteryPlanStatusLabel(t, props.plan.status)}
-                variant={getStatusVariant(props.plan.status)}
-                copyable={false}
-              />
-            )}
+          <div className='flex items-start gap-3 pr-8'>
+            <LotteryIcon src={props.plan?.icon} size='md' />
+            <div className='min-w-0 flex-1'>
+              <div className='flex flex-wrap items-center gap-2'>
+                <SheetTitle>
+                  {props.plan?.title ?? t('Lottery details')}
+                </SheetTitle>
+                {props.plan && (
+                  <StatusBadge
+                    label={getLotteryPlanStatusLabel(t, props.plan.status)}
+                    variant={getStatusVariant(props.plan.status)}
+                    copyable={false}
+                  />
+                )}
+              </div>
+              <SheetDescription className='mt-1'>
+                {t('Review plan settings, prizes, and participants.')}
+              </SheetDescription>
+            </div>
           </div>
-          <SheetDescription>
-            {t('Review plan settings, prizes, and participants.')}
-          </SheetDescription>
         </SheetHeader>
 
         <Tabs

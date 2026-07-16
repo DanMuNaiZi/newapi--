@@ -65,6 +65,7 @@ import {
 } from '@/components/drawer-layout'
 import { JsonEditor } from '@/components/json-editor'
 import { MultiSelect } from '@/components/multi-select'
+import { RemoteIcon } from '@/components/remote-icon'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -429,6 +430,22 @@ function ChannelTypeLogo(props: {
   )
 }
 
+function ChannelDisplayLogo(props: {
+  icon?: string
+  type: number
+  size?: number
+}) {
+  const size = props.size ?? 18
+  return (
+    <RemoteIcon
+      src={props.icon}
+      className='rounded-sm'
+      style={{ width: size, height: size }}
+      fallback={<ChannelTypeLogo type={props.type} size={size} />}
+    />
+  )
+}
+
 function getSectionStatusIcon(status: ChannelEditorSectionStatus): ReactNode {
   if (status === 'error') {
     return <AlertCircle className='h-3.5 w-3.5' aria-hidden='true' />
@@ -707,6 +724,7 @@ export function ChannelMutateDrawer({
   const currentOther = form.watch('other')
   const currentModels = form.watch('models')
   const currentName = form.watch('name')
+  const currentIcon = form.watch('icon')
   const currentModelMapping = form.watch('model_mapping')
   const awsKeyType = form.watch('aws_key_type')
   const vertexKeyType = form.watch('vertex_key_type')
@@ -1909,7 +1927,11 @@ export function ChannelMutateDrawer({
                 <div className='grid gap-5 lg:grid-cols-[13rem_minmax(0,1fr)] lg:items-start'>
                   <ChannelEditorNav
                     providerLogo={
-                      <ChannelTypeLogo type={currentType} size={18} />
+                      <ChannelDisplayLogo
+                        icon={currentIcon}
+                        type={currentType}
+                        size={18}
+                      />
                     }
                     providerLabel={t(currentTypeLabel)}
                     statusLabel={t(currentStatusLabel)}
@@ -1999,6 +2021,36 @@ export function ChannelMutateDrawer({
                             )}
                           />
                         </div>
+
+                        <FormField
+                          control={form.control}
+                          name='icon'
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('Icon URL')}</FormLabel>
+                              <div className='flex items-center gap-3'>
+                                <ChannelDisplayLogo
+                                  icon={field.value}
+                                  type={currentType}
+                                  size={40}
+                                />
+                                <FormControl>
+                                  <Input
+                                    type='url'
+                                    placeholder={t(
+                                      'https://example.com/logo.png'
+                                    )}
+                                    {...field}
+                                  />
+                                </FormControl>
+                              </div>
+                              <FormDescription>
+                                {t('Optional image URL for this channel.')}
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
 
                         {!isEditing && (
                           <FormField

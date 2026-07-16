@@ -38,6 +38,7 @@ import {
 } from '../lib/admin-list'
 import { getLotteryPlanStatusLabel } from '../lib/status'
 import type { LotteryPlan } from '../types'
+import { LotteryIcon } from './lottery-icon'
 import type { LotteryDetailsTab } from './lottery-plan-details-drawer'
 import { LotteryPlanRowActions } from './lottery-plan-row-actions'
 
@@ -107,13 +108,16 @@ export function LotteryPlansTable(props: LotteryPlansTableProps) {
         header: t('Lottery title'),
         meta: { mobileTitle: true },
         cell: ({ row }) => (
-          <div className='max-w-[420px] min-w-[220px]'>
-            <div className='truncate font-medium'>{row.original.title}</div>
-            {row.original.description && (
-              <div className='text-muted-foreground mt-0.5 line-clamp-1 text-xs'>
-                {row.original.description}
-              </div>
-            )}
+          <div className='flex max-w-[420px] min-w-[220px] items-center gap-2.5'>
+            <LotteryIcon src={row.original.icon} size='sm' />
+            <div className='min-w-0 flex-1'>
+              <div className='truncate font-medium'>{row.original.title}</div>
+              {row.original.description && (
+                <div className='text-muted-foreground mt-0.5 line-clamp-1 text-xs'>
+                  {row.original.description}
+                </div>
+              )}
+            </div>
           </div>
         ),
         size: 320,

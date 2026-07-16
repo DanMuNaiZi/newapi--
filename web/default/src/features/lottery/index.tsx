@@ -18,7 +18,16 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import dayjs from 'dayjs'
-import { CalendarClock, Gift, LogIn, LogOut } from 'lucide-react'
+import {
+  CalendarClock,
+  Eye,
+  Gift,
+  LogIn,
+  LogOut,
+  Trophy,
+  Users,
+} from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -32,6 +41,8 @@ import {
   joinLotteryPlan,
   leaveLotteryPlan,
 } from './api'
+import { LotteryIcon } from './components/lottery-icon'
+import { LotteryUserDetailsDrawer } from './components/lottery-user-details-drawer'
 import {
   getLotteryPlanStatusLabel,
   getLotteryRewardStatusLabel,
@@ -47,6 +58,7 @@ function planTime(timestamp: number): string {
 export function Lotteries() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  const [selectedPlan, setSelectedPlan] = useState<LotteryPlan | null>(null)
   const plansQuery = useQuery({
     queryKey: LOTTERY_QUERY_KEY,
     queryFn: getLotteryPlansForSelf,
@@ -117,45 +129,72 @@ export function Lotteries() {
                 key={plan.id}
                 className='bg-card flex flex-col gap-4 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between'
               >
-                <div className='min-w-0 space-y-1'>
-                  <h2 className='truncate text-base font-semibold'>
-                    {plan.title}
-                  </h2>
-                  {plan.description && (
-                    <p className='text-muted-foreground text-sm'>
-                      {plan.description}
-                    </p>
-                  )}
-                  <p className='text-muted-foreground flex items-center gap-1.5 text-xs'>
-                    <CalendarClock className='size-3.5' aria-hidden='true' />
-                    {t('Draw time')}: {planTime(plan.draw_time)}
-                  </p>
-                </div>
-                {isOpen ? (
-                  <div className='flex shrink-0 gap-2'>
-                    <Button
-                      size='sm'
-                      disabled={pending}
-                      onClick={() => handleJoin(plan)}
-                    >
-                      <LogIn data-icon='inline-start' />
-                      {t('Join lottery')}
-                    </Button>
-                    <Button
-                      size='sm'
-                      variant='outline'
-                      disabled={pending}
-                      onClick={() => handleLeave(plan)}
-                    >
-                      <LogOut data-icon='inline-start' />
-                      {t('Leave lottery')}
-                    </Button>
+                <div className='flex min-w-0 items-start gap-3'>
+                  <LotteryIcon src={plan.icon} size='md' />
+                  <div className='min-w-0 space-y-1.5'>
+                    <div className='flex flex-wrap items-center gap-2'>
+                      <h2 className='truncate text-base font-semibold'>
+                        {plan.title}
+                      </h2>
+                      <span className='text-muted-foreground text-xs'>
+                        {getLotteryPlanStatusLabel(t, plan.status)}
+                      </span>
+                    </div>
+                    {plan.description && (
+                      <p className='text-muted-foreground line-clamp-2 text-sm'>
+                        {plan.description}
+                      </p>
+                    )}
+                    <div className='text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1 text-xs'>
+                      <span className='flex items-center gap-1.5'>
+                        <CalendarClock
+                          className='size-3.5'
+                          aria-hidden='true'
+                        />
+                        {t('Draw time')}: {planTime(plan.draw_time)}
+                      </span>
+                      <span className='flex items-center gap-1.5'>
+                        <Users className='size-3.5' aria-hidden='true' />
+                        {plan.participant_count ?? 0}/{plan.max_participants}
+                      </span>
+                      <span className='flex items-center gap-1.5'>
+                        <Trophy className='size-3.5' aria-hidden='true' />
+                        {plan.winner_count ?? 0}
+                      </span>
+                    </div>
                   </div>
-                ) : (
-                  <span className='text-muted-foreground text-sm'>
-                    {getLotteryPlanStatusLabel(t, plan.status)}
-                  </span>
-                )}
+                </div>
+                <div className='flex shrink-0 flex-wrap gap-2'>
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    onClick={() => setSelectedPlan(plan)}
+                  >
+                    <Eye data-icon='inline-start' />
+                    {t('View details')}
+                  </Button>
+                  {isOpen &&
+                    (plan.joined ? (
+                      <Button
+                        size='sm'
+                        variant='outline'
+                        disabled={pending}
+                        onClick={() => handleLeave(plan)}
+                      >
+                        <LogOut data-icon='inline-start' />
+                        {t('Leave lottery')}
+                      </Button>
+                    ) : (
+                      <Button
+                        size='sm'
+                        disabled={pending}
+                        onClick={() => handleJoin(plan)}
+                      >
+                        <LogIn data-icon='inline-start' />
+                        {t('Join lottery')}
+                      </Button>
+                    ))}
+                </div>
               </section>
             )
           })}
@@ -204,6 +243,13 @@ export function Lotteries() {
           )}
         </div>
       </SectionPageLayout.Content>
+      <LotteryUserDetailsDrawer
+        open={selectedPlan !== null}
+        plan={selectedPlan}
+        onOpenChange={(open) => {
+          if (!open) setSelectedPlan(null)
+        }}
+      />
     </SectionPageLayout>
   )
 }

@@ -72,6 +72,7 @@ const (
 type LotteryPlan struct {
 	Id                    int                    `json:"id"`
 	Title                 string                 `json:"title" gorm:"type:varchar(128);not null"`
+	Icon                  string                 `json:"icon" gorm:"type:varchar(1024)"`
 	Description           string                 `json:"description" gorm:"type:text"`
 	Status                LotteryPlanStatus      `json:"status" gorm:"type:varchar(32);index"`
 	EligibilityMode       LotteryEligibilityMode `json:"eligibility_mode" gorm:"type:varchar(32);not null"`
@@ -198,11 +199,33 @@ type LotteryResultView struct {
 	PrizeName   string `json:"prize_name"`
 }
 
+type LotteryPlanView struct {
+	LotteryPlan
+	ParticipantCount int64 `json:"participant_count"`
+	WinnerCount      int64 `json:"winner_count"`
+	Joined           bool  `json:"joined"`
+}
+
+type LotteryPublicParticipantView struct {
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	JoinedAt    int64  `json:"joined_at"`
+}
+
+type LotteryPublicResultView struct {
+	Username    string            `json:"username"`
+	DisplayName string            `json:"display_name"`
+	PrizeName   string            `json:"prize_name"`
+	RewardType  LotteryRewardType `json:"reward_type"`
+	CreatedAt   int64             `json:"created_at"`
+}
+
 // LotteryPlanPublishedUpdate contains the only mutable settings once a plan
 // is visible to eligible users. Qualification rules, prizes, capacity, and
 // the draw algorithm remain immutable after publication.
 type LotteryPlanPublishedUpdate struct {
 	Title       *string
+	Icon        *string
 	Description *string
 	DrawTime    *int64
 }
@@ -210,6 +233,10 @@ type LotteryPlanPublishedUpdate struct {
 func CreateLotteryPlan(plan *LotteryPlan, userIds []int, groups []string, prizes []*LotteryPrize) error {
 	if plan == nil || strings.TrimSpace(plan.Title) == "" {
 		return errors.New("lottery plan title is required")
+	}
+	plan.Icon = strings.TrimSpace(plan.Icon)
+	if err := common.ValidateImageURL(plan.Icon); err != nil {
+		return err
 	}
 	if plan.MaxParticipants <= 0 {
 		return errors.New("max participants must be positive")
@@ -302,7 +329,7 @@ func UpdatePublishedLotteryPlan(planId int, update LotteryPlanPublishedUpdate) (
 	if planId <= 0 {
 		return nil, errors.New("invalid lottery plan")
 	}
-	if update.Title == nil && update.Description == nil && update.DrawTime == nil {
+	if update.Title == nil && update.Icon == nil && update.Description == nil && update.DrawTime == nil {
 		return nil, errors.New("lottery plan update is empty")
 	}
 	updated := &LotteryPlan{}
@@ -321,6 +348,13 @@ func UpdatePublishedLotteryPlan(planId int, update LotteryPlanPublishedUpdate) (
 				return errors.New("lottery plan title is required")
 			}
 			updates["title"] = title
+		}
+		if update.Icon != nil {
+			icon := strings.TrimSpace(*update.Icon)
+			if err := common.ValidateImageURL(icon); err != nil {
+				return err
+			}
+			updates["icon"] = icon
 		}
 		if update.Description != nil {
 			updates["description"] = *update.Description
@@ -361,7 +395,7 @@ func CancelLotteryPlan(planId int) error {
 	})
 }
 
-func ListLotteryPlansForUser(userId int) ([]LotteryPlan, error) {
+func ListLotteryPlansForUser(userId int) ([]LotteryPlanView, error) {
 	if userId <= 0 {
 		return nil, errors.New("invalid user id")
 	}
@@ -387,28 +421,62 @@ func ListLotteryPlansForUser(userId int) ([]LotteryPlan, error) {
 	}
 	visible := make([]LotteryPlan, 0, len(plans))
 	for _, plan := range plans {
-		if isAdministrator {
-			if plan.Status != LotteryPlanStatusDraft {
-				visible = append(visible, plan)
-			}
-			continue
-		}
-		if _, ok := participated[plan.Id]; ok {
-			visible = append(visible, plan)
-			continue
-		}
-		if plan.Status != LotteryPlanStatusScheduled && plan.Status != LotteryPlanStatusOpen {
-			continue
-		}
-		eligible, err := isUserEligibleForLotteryPlan(plan.Id, plan.EligibilityMode, user.Id, user.Group)
+		_, hasParticipated := participated[plan.Id]
+		isVisible, err := isLotteryPlanVisibleToUser(plan, user, isAdministrator, hasParticipated)
 		if err != nil {
 			return nil, err
 		}
-		if eligible {
+		if isVisible {
 			visible = append(visible, plan)
 		}
 	}
-	return visible, nil
+	if len(visible) == 0 {
+		return []LotteryPlanView{}, nil
+	}
+
+	planIds := make([]int, 0, len(visible))
+	for _, plan := range visible {
+		planIds = append(planIds, plan.Id)
+	}
+	type planCount struct {
+		PlanId int
+		Count  int64
+	}
+	var participantCounts []planCount
+	if err := DB.Model(&LotteryParticipant{}).
+		Select("plan_id, COUNT(*) AS count").
+		Where("plan_id IN ? AND status = ?", planIds, LotteryParticipantStatusJoined).
+		Group("plan_id").
+		Scan(&participantCounts).Error; err != nil {
+		return nil, err
+	}
+	var winnerCounts []planCount
+	if err := DB.Model(&LotteryResult{}).
+		Select("plan_id, COUNT(*) AS count").
+		Where("plan_id IN ?", planIds).
+		Group("plan_id").
+		Scan(&winnerCounts).Error; err != nil {
+		return nil, err
+	}
+	participantsByPlan := make(map[int]int64, len(participantCounts))
+	for _, count := range participantCounts {
+		participantsByPlan[count.PlanId] = count.Count
+	}
+	winnersByPlan := make(map[int]int64, len(winnerCounts))
+	for _, count := range winnerCounts {
+		winnersByPlan[count.PlanId] = count.Count
+	}
+	views := make([]LotteryPlanView, 0, len(visible))
+	for _, plan := range visible {
+		_, joined := participated[plan.Id]
+		views = append(views, LotteryPlanView{
+			LotteryPlan:      plan,
+			ParticipantCount: participantsByPlan[plan.Id],
+			WinnerCount:      winnersByPlan[plan.Id],
+			Joined:           joined,
+		})
+	}
+	return views, nil
 }
 
 func ListLotteryPlansForAdmin() ([]LotteryPlan, error) {
@@ -489,6 +557,49 @@ func ListLotteryResultsForPlan(planId int) ([]LotteryResultView, error) {
 	return views, nil
 }
 
+func ListLotteryParticipantsForUser(planId int, userId int) ([]LotteryPublicParticipantView, error) {
+	if err := ensureLotteryPlanVisibleToUser(planId, userId); err != nil {
+		return nil, err
+	}
+	participants, err := ListLotteryParticipants(planId)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]LotteryPublicParticipantView, 0, len(participants))
+	for _, participant := range participants {
+		if participant.Status != LotteryParticipantStatusJoined {
+			continue
+		}
+		views = append(views, LotteryPublicParticipantView{
+			Username:    participant.Username,
+			DisplayName: participant.DisplayName,
+			JoinedAt:    participant.JoinedAt,
+		})
+	}
+	return views, nil
+}
+
+func ListLotteryResultsForUserPlan(planId int, userId int) ([]LotteryPublicResultView, error) {
+	if err := ensureLotteryPlanVisibleToUser(planId, userId); err != nil {
+		return nil, err
+	}
+	results, err := ListLotteryResultsForPlan(planId)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]LotteryPublicResultView, 0, len(results))
+	for _, result := range results {
+		views = append(views, LotteryPublicResultView{
+			Username:    result.Username,
+			DisplayName: result.DisplayName,
+			PrizeName:   result.PrizeName,
+			RewardType:  result.RewardType,
+			CreatedAt:   result.CreatedAt,
+		})
+	}
+	return views, nil
+}
+
 func ListLotteryNotificationsForUser(userId int) ([]LotteryNotification, error) {
 	if userId <= 0 {
 		return nil, errors.New("invalid user id")
@@ -555,6 +666,48 @@ func ListLotteryParticipants(planId int) ([]LotteryParticipantView, error) {
 		})
 	}
 	return views, nil
+}
+
+func ensureLotteryPlanVisibleToUser(planId int, userId int) error {
+	if planId <= 0 || userId <= 0 {
+		return errors.New("invalid lottery visibility request")
+	}
+	var plan LotteryPlan
+	if err := DB.First(&plan, planId).Error; err != nil {
+		return err
+	}
+	var user User
+	if err := DB.First(&user, userId).Error; err != nil {
+		return err
+	}
+	var participantCount int64
+	if err := DB.Model(&LotteryParticipant{}).
+		Where("plan_id = ? AND user_id = ? AND status = ?", plan.Id, user.Id, LotteryParticipantStatusJoined).
+		Count(&participantCount).Error; err != nil {
+		return err
+	}
+	isAdministrator := user.Role == common.RoleAdminUser || user.Role == common.RoleRootUser
+	visible, err := isLotteryPlanVisibleToUser(plan, user, isAdministrator, participantCount > 0)
+	if err != nil {
+		return err
+	}
+	if !visible {
+		return errors.New("lottery plan is not visible to this user")
+	}
+	return nil
+}
+
+func isLotteryPlanVisibleToUser(plan LotteryPlan, user User, isAdministrator bool, participated bool) (bool, error) {
+	if isAdministrator {
+		return plan.Status != LotteryPlanStatusDraft, nil
+	}
+	if participated {
+		return true, nil
+	}
+	if plan.Status != LotteryPlanStatusScheduled && plan.Status != LotteryPlanStatusOpen {
+		return false, nil
+	}
+	return isUserEligibleForLotteryPlan(plan.Id, plan.EligibilityMode, user.Id, user.Group)
 }
 
 func isUserEligibleForLotteryPlan(planId int, mode LotteryEligibilityMode, userId int, userGroup string) (bool, error) {

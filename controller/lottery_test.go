@@ -126,13 +126,43 @@ func TestLotterySelfActionsJoinLeaveAndClaim(t *testing.T) {
 	assert.Equal(t, 100, storedUser.Quota)
 }
 
+func TestLotteryPublicDetailsEndpointsReturnParticipantAndWinnerNames(t *testing.T) {
+	db := setupLotteryControllerTestDB(t)
+	user := &model.User{Username: "lottery-public-user", DisplayName: "Public Winner", Password: "password", Status: common.UserStatusEnabled, AffCode: "lottery-public-user"}
+	require.NoError(t, db.Create(user).Error)
+	now := common.GetTimestamp()
+	plan := &model.LotteryPlan{Title: "Public details", Status: model.LotteryPlanStatusOpen, EligibilityMode: model.LotteryEligibilityAll, MaxParticipants: 2, RegistrationStartTime: now - 60, DrawTime: now + 3600}
+	require.NoError(t, model.CreateLotteryPlan(plan, nil, nil, []*model.LotteryPrize{{Name: "Public prize", Quantity: 1, RewardType: model.LotteryRewardQuota, Quota: 100, FulfillmentMode: model.LotteryFulfillmentAuto}}))
+	require.NoError(t, model.JoinLotteryPlan(plan.Id, user.Id))
+	_, err := model.DrawLotteryPlan(plan.Id, model.LotteryDrawTriggerManual, "verify public endpoints")
+	require.NoError(t, err)
+
+	participantsRecorder := httptest.NewRecorder()
+	participantsContext, _ := gin.CreateTestContext(participantsRecorder)
+	participantsContext.Params = gin.Params{{Key: "id", Value: fmt.Sprint(plan.Id)}}
+	participantsContext.Set("id", user.Id)
+	GetLotteryParticipantsForSelf(participantsContext)
+	require.Contains(t, participantsRecorder.Body.String(), `"username":"lottery-public-user"`)
+	require.NotContains(t, participantsRecorder.Body.String(), `"weight"`)
+	require.NotContains(t, participantsRecorder.Body.String(), `"preset_prize_id"`)
+
+	resultsRecorder := httptest.NewRecorder()
+	resultsContext, _ := gin.CreateTestContext(resultsRecorder)
+	resultsContext.Params = gin.Params{{Key: "id", Value: fmt.Sprint(plan.Id)}}
+	resultsContext.Set("id", user.Id)
+	GetLotteryPlanResultsForSelf(resultsContext)
+	require.Contains(t, resultsRecorder.Body.String(), `"username":"lottery-public-user"`)
+	require.Contains(t, resultsRecorder.Body.String(), `"prize_name":"Public prize"`)
+	require.NotContains(t, resultsRecorder.Body.String(), `"redemption_code"`)
+}
+
 func TestAdminCreateLotteryPlanPersistsPrizeAndAllowList(t *testing.T) {
 	db := setupLotteryControllerTestDB(t)
 	admin := &model.User{Username: "lottery-controller-admin", Password: "password", Status: common.UserStatusEnabled, Group: "default", AffCode: "lottery-controller-admin"}
 	allowedUser := &model.User{Username: "lottery-controller-allowed-user", Password: "password", Status: common.UserStatusEnabled, Group: "vip", AffCode: "lottery-controller-allowed"}
 	require.NoError(t, db.Create([]*model.User{admin, allowedUser}).Error)
 	now := common.GetTimestamp()
-	body := fmt.Sprintf(`{"title":"Admin plan","status":"scheduled","eligibility_mode":"users","max_participants":5,"registration_start_time":%d,"draw_time":%d,"user_ids":[%d],"prizes":[{"name":"Prize","quantity":1,"reward_type":"quota","quota":100,"fulfillment_mode":"auto"}]}`, now+60, now+3600, allowedUser.Id)
+	body := fmt.Sprintf(`{"title":"Admin plan","icon":"https://cdn.example.com/lottery.png","status":"scheduled","eligibility_mode":"users","max_participants":5,"registration_start_time":%d,"draw_time":%d,"user_ids":[%d],"prizes":[{"name":"Prize","quantity":1,"reward_type":"quota","quota":100,"fulfillment_mode":"auto"}]}`, now+60, now+3600, allowedUser.Id)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/lottery/admin/plans", bytes.NewBufferString(body))
@@ -145,6 +175,7 @@ func TestAdminCreateLotteryPlanPersistsPrizeAndAllowList(t *testing.T) {
 	var plan model.LotteryPlan
 	require.NoError(t, db.Where("title = ?", "Admin plan").First(&plan).Error)
 	assert.Equal(t, model.LotteryPlanStatusScheduled, plan.Status)
+	assert.Equal(t, "https://cdn.example.com/lottery.png", plan.Icon)
 	var allowListCount int64
 	require.NoError(t, db.Model(&model.LotteryPlanUser{}).Where("plan_id = ? AND user_id = ?", plan.Id, allowedUser.Id).Count(&allowListCount).Error)
 	assert.Equal(t, int64(1), allowListCount)

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -31,10 +32,12 @@ func TestChannelHasSensitiveChanges(t *testing.T) {
 		updated := PatchChannel{Channel: *origin}
 		updated.Models = "gpt-4o,gpt-4o-mini"
 		updated.Group = "vip"
+		updated.Icon = "https://cdn.example.com/channel.png"
 
 		assert.False(t, channelHasSensitiveChanges(&updated, origin, map[string]any{
 			"models": updated.Models,
 			"group":  updated.Group,
+			"icon":   updated.Icon,
 		}))
 	})
 
@@ -149,6 +152,42 @@ func TestUpdateChannelRejectsStatusField(t *testing.T) {
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.False(t, response.Success)
+}
+
+func TestUpdateChannelCanClearIcon(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	channel := model.Channel{
+		Type:   1,
+		Key:    "test-key",
+		Status: common.ChannelStatusEnabled,
+		Name:   "icon-channel",
+		Icon:   "https://cdn.example.com/channel.png",
+		Models: "gpt-4o",
+		Group:  "default",
+	}
+	require.NoError(t, db.Create(&channel).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(
+		http.MethodPut,
+		"/api/channel/",
+		bytes.NewBufferString(`{"id":`+strconv.Itoa(channel.Id)+`,"icon":""}`),
+	)
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	UpdateChannel(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool `json:"success"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success, recorder.Body.String())
+
+	var updated model.Channel
+	require.NoError(t, db.First(&updated, channel.Id).Error)
+	assert.Empty(t, updated.Icon)
 }
 
 func TestChannelStatusValidation(t *testing.T) {

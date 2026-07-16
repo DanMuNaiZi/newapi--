@@ -34,6 +34,7 @@ function createPlan(
   return {
     id,
     title,
+    icon: '',
     description,
     status,
     eligibility_mode: 'all',

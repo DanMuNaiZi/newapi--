@@ -28,12 +28,16 @@ export type LotteryPlanStatus =
 export interface LotteryPlan {
   id: number
   title: string
+  icon: string
   description: string
   status: LotteryPlanStatus
   eligibility_mode: 'all' | 'groups' | 'users'
   max_participants: number
   registration_start_time: number
   draw_time: number
+  participant_count?: number
+  winner_count?: number
+  joined?: boolean
 }
 
 export interface LotteryResult {
@@ -56,6 +60,20 @@ export interface LotteryResultView extends LotteryResult {
   username: string
   display_name: string
   prize_name: string
+}
+
+export interface LotteryPublicParticipant {
+  username: string
+  display_name: string
+  joined_at: number
+}
+
+export interface LotteryPublicResult {
+  username: string
+  display_name: string
+  prize_name: string
+  reward_type: 'quota' | 'subscription'
+  created_at: number
 }
 
 export interface LotteryPrize {
@@ -84,6 +102,7 @@ export interface LotteryParticipant {
 
 export interface LotteryPlanCreatePayload {
   title: string
+  icon: string
   description: string
   status: 'draft' | 'scheduled' | 'open'
   eligibility_mode: 'all' | 'groups' | 'users'
@@ -105,6 +124,7 @@ export interface LotteryPlanCreatePayload {
 
 export interface LotteryPlanUpdatePayload {
   title?: string
+  icon?: string
   description?: string
   draw_time?: number
 }

@@ -111,6 +111,14 @@ func TestSelectChannelsForAutomaticTestScheduledSkipsManualDisabled(t *testing.T
 	require.Equal(t, 2, selected[1].Id)
 }
 
+func TestValidateChannelIconURL(t *testing.T) {
+	channel := &model.Channel{Icon: "https://cdn.example.com/channel.png"}
+	require.NoError(t, validateChannel(channel, false))
+
+	channel.Icon = "javascript:alert(1)"
+	require.ErrorContains(t, validateChannel(channel, false), "http and https")
+}
+
 func TestTestAllChannelsRejectsExistingActiveTask(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.SystemTask{}, &model.SystemTaskLock{}))
