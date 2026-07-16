@@ -175,6 +175,31 @@ func TestLotteryDrawHonorsPresetPrizeAndNoRepeatWinner(t *testing.T) {
 	assert.NotEqual(t, results[0].UserId, results[1].UserId)
 }
 
+func TestListLotteryResultsForPlanIncludesWinnerAndPrizeNames(t *testing.T) {
+	userIDs := setupLotteryFixture(t)
+	plan := &LotteryPlan{
+		Title:                 "Visible draw results",
+		Status:                LotteryPlanStatusOpen,
+		EligibilityMode:       LotteryEligibilityAll,
+		MaxParticipants:       2,
+		RegistrationStartTime: common.GetTimestamp() - 60,
+		DrawTime:              common.GetTimestamp() + 3600,
+	}
+	require.NoError(t, CreateLotteryPlan(plan, nil, nil, []*LotteryPrize{
+		{Name: "Grand prize", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 100, FulfillmentMode: LotteryFulfillmentAuto},
+	}))
+	require.NoError(t, JoinLotteryPlan(plan.Id, userIDs[0]))
+	_, err := DrawLotteryPlan(plan.Id, LotteryDrawTriggerManual, "verify winners")
+	require.NoError(t, err)
+
+	results, err := ListLotteryResultsForPlan(plan.Id)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, userIDs[0], results[0].UserId)
+	assert.Equal(t, "lottery-a", results[0].Username)
+	assert.Equal(t, "Grand prize", results[0].PrizeName)
+}
+
 func TestLotteryDrawRecordsEmptyCompletion(t *testing.T) {
 	setupLotteryFixture(t)
 	plan := &LotteryPlan{

@@ -32,6 +32,7 @@ import type {
   LotteryPlanUpdatePayload,
   LotteryPrize,
   LotteryResult,
+  LotteryResultView,
 } from './types'
 
 export async function getLotteryPlansForSelf(): Promise<
@@ -122,6 +123,13 @@ export async function getLotteryPrizes(
   planId: number
 ): Promise<ApiResponse<LotteryPrize[]>> {
   const response = await api.get(`/api/lottery/admin/plans/${planId}/prizes`)
+  return response.data
+}
+
+export async function getLotteryResults(
+  planId: number
+): Promise<ApiResponse<LotteryResultView[]>> {
+  const response = await api.get(`/api/lottery/admin/plans/${planId}/results`)
   return response.data
 }
 

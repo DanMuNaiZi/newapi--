@@ -191,6 +191,13 @@ type LotteryParticipantView struct {
 	DisplayName string `json:"display_name"`
 }
 
+type LotteryResultView struct {
+	LotteryResult
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	PrizeName   string `json:"prize_name"`
+}
+
 // LotteryPlanPublishedUpdate contains the only mutable settings once a plan
 // is visible to eligible users. Qualification rules, prizes, capacity, and
 // the draw algorithm remain immutable after publication.
@@ -432,6 +439,54 @@ func ListLotteryResultsForUser(userId int) ([]LotteryResult, error) {
 		return nil, err
 	}
 	return results, nil
+}
+
+func ListLotteryResultsForPlan(planId int) ([]LotteryResultView, error) {
+	if planId <= 0 {
+		return nil, errors.New("invalid lottery plan")
+	}
+	var results []LotteryResult
+	if err := DB.Where("plan_id = ?", planId).Order("created_at asc, id asc").Find(&results).Error; err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return []LotteryResultView{}, nil
+	}
+
+	userIds := make([]int, 0, len(results))
+	prizeIds := make([]int, 0, len(results))
+	for _, result := range results {
+		userIds = append(userIds, result.UserId)
+		prizeIds = append(prizeIds, result.PrizeId)
+	}
+	var users []User
+	if err := DB.Where("id IN ?", userIds).Find(&users).Error; err != nil {
+		return nil, err
+	}
+	var prizes []LotteryPrize
+	if err := DB.Where("id IN ?", prizeIds).Find(&prizes).Error; err != nil {
+		return nil, err
+	}
+	usersById := make(map[int]User, len(users))
+	for _, user := range users {
+		usersById[user.Id] = user
+	}
+	prizesById := make(map[int]LotteryPrize, len(prizes))
+	for _, prize := range prizes {
+		prizesById[prize.Id] = prize
+	}
+	views := make([]LotteryResultView, 0, len(results))
+	for _, result := range results {
+		user := usersById[result.UserId]
+		prize := prizesById[result.PrizeId]
+		views = append(views, LotteryResultView{
+			LotteryResult: result,
+			Username:      user.Username,
+			DisplayName:   user.DisplayName,
+			PrizeName:     prize.Name,
+		})
+	}
+	return views, nil
 }
 
 func ListLotteryNotificationsForUser(userId int) ([]LotteryNotification, error) {

@@ -40,16 +40,24 @@ import { formatQuota } from '@/lib/format'
 import {
   getLotteryParticipants,
   getLotteryPrizes,
+  getLotteryResults,
   updateLotteryParticipant,
 } from '../api'
-import { getLotteryPlanStatusLabel } from '../lib/status'
+import {
+  getLotteryPlanStatusLabel,
+  getLotteryRewardStatusLabel,
+} from '../lib/status'
 import type { LotteryPlan } from '../types'
 import {
   LotteryParticipantEditor,
   type LotteryParticipantUpdate,
 } from './lottery-participant-editor'
 
-export type LotteryDetailsTab = 'overview' | 'prizes' | 'participants'
+export type LotteryDetailsTab =
+  | 'overview'
+  | 'prizes'
+  | 'participants'
+  | 'results'
 
 type LotteryPlanDetailsDrawerProps = {
   initialTab: LotteryDetailsTab
@@ -97,6 +105,11 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
     queryFn: () => getLotteryParticipants(planId),
     enabled: props.open && planId > 0,
   })
+  const resultsQuery = useQuery({
+    queryKey: ['lottery', 'admin', 'results', planId],
+    queryFn: () => getLotteryResults(planId),
+    enabled: props.open && planId > 0 && tab === 'results',
+  })
   const participantMutation = useMutation({
     mutationFn: updateLotteryParticipant,
   })
@@ -127,6 +140,9 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
   const prizes = prizesQuery.data?.success ? (prizesQuery.data.data ?? []) : []
   const participants = participantsQuery.data?.success
     ? (participantsQuery.data.data ?? [])
+    : []
+  const results = resultsQuery.data?.success
+    ? (resultsQuery.data.data ?? [])
     : []
 
   const eligibilityLabel = (() => {
@@ -164,13 +180,14 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
           onValueChange={(value) => setTab(value as LotteryDetailsTab)}
           className='min-h-0 flex-1 gap-0'
         >
-          <div className='border-border/70 shrink-0 border-b px-4 sm:px-6'>
+          <div className='border-border/70 shrink-0 overflow-x-auto border-b px-4 sm:px-6'>
             <TabsList variant='line'>
               <TabsTrigger value='overview'>{t('Overview')}</TabsTrigger>
               <TabsTrigger value='prizes'>{t('Prizes')}</TabsTrigger>
               <TabsTrigger value='participants'>
                 {t('Participants')}
               </TabsTrigger>
+              <TabsTrigger value='results'>{t('Lottery results')}</TabsTrigger>
             </TabsList>
           </div>
 
@@ -325,6 +342,72 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
                     onUpdate={updateParticipant}
                   />
                 ))}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent
+            value='results'
+            className='min-h-0 overflow-y-auto px-4 py-5 sm:px-6'
+          >
+            {resultsQuery.isLoading && (
+              <div className='flex justify-center py-12'>
+                <Spinner />
+              </div>
+            )}
+            {!resultsQuery.isLoading && results.length === 0 && (
+              <div className='text-muted-foreground py-12 text-center text-sm'>
+                {t('No lottery results yet')}
+              </div>
+            )}
+            {!resultsQuery.isLoading && results.length > 0 && (
+              <div className='border-border/70 divide-border/70 divide-y border-y'>
+                {results.map((result) => {
+                  const winnerName =
+                    result.display_name ||
+                    result.username ||
+                    `#${result.user_id}`
+                  const rewardLabel =
+                    result.reward_type === 'subscription'
+                      ? t('Subscription #{{id}}', {
+                          id: result.subscription_plan_id,
+                        })
+                      : formatQuota(result.quota)
+
+                  return (
+                    <article
+                      key={result.id}
+                      className='grid gap-3 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(180px,auto)] sm:items-center'
+                    >
+                      <div className='min-w-0'>
+                        <div className='truncate font-medium'>{winnerName}</div>
+                        <div className='text-muted-foreground mt-1 text-xs'>
+                          {result.display_name && result.username
+                            ? `@${result.username} · `
+                            : ''}
+                          {t('User ID')} #{result.user_id}
+                        </div>
+                      </div>
+                      <div className='min-w-0 text-sm sm:text-right'>
+                        <div className='font-medium'>
+                          {result.prize_name || `#${result.prize_id}`}
+                        </div>
+                        <div className='text-muted-foreground mt-1 text-xs'>
+                          {rewardLabel} ·{' '}
+                          {getLotteryRewardStatusLabel(
+                            t,
+                            result.fulfillment_status
+                          )}
+                        </div>
+                        {result.redemption_code && (
+                          <div className='mt-1 truncate font-mono text-xs'>
+                            {result.redemption_code}
+                          </div>
+                        )}
+                      </div>
+                    </article>
+                  )
+                })}
               </div>
             )}
           </TabsContent>

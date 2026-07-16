@@ -174,6 +174,36 @@ func TestAdminDrawLotteryPlanRequiresReasonAndFinishesPlan(t *testing.T) {
 	assert.Equal(t, model.LotteryPlanStatusFinished, stored.Status)
 }
 
+func TestAdminListLotteryResultsReturnsWinnerDetails(t *testing.T) {
+	db := setupLotteryControllerTestDB(t)
+	participant := &model.User{Username: "lottery-result-participant", DisplayName: "Result Winner", Password: "password", Status: common.UserStatusEnabled, AffCode: "lottery-result-participant"}
+	require.NoError(t, db.Create(participant).Error)
+	now := common.GetTimestamp()
+	plan := &model.LotteryPlan{Title: "Result details", Status: model.LotteryPlanStatusOpen, EligibilityMode: model.LotteryEligibilityAll, MaxParticipants: 2, RegistrationStartTime: now - 60, DrawTime: now + 3600}
+	require.NoError(t, model.CreateLotteryPlan(plan, nil, nil, []*model.LotteryPrize{{Name: "Result prize", Quantity: 1, RewardType: model.LotteryRewardQuota, Quota: 100, FulfillmentMode: model.LotteryFulfillmentAuto}}))
+	require.NoError(t, model.JoinLotteryPlan(plan.Id, participant.Id))
+	_, err := model.DrawLotteryPlan(plan.Id, model.LotteryDrawTriggerManual, "verify result endpoint")
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/lottery/admin/plans/1/results", nil)
+	ctx.Params = gin.Params{{Key: "id", Value: fmt.Sprint(plan.Id)}}
+	AdminListLotteryResults(ctx)
+
+	response := struct {
+		Success bool                      `json:"success"`
+		Data    []model.LotteryResultView `json:"data"`
+	}{}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.True(t, response.Success)
+	require.Len(t, response.Data, 1)
+	assert.Equal(t, participant.Id, response.Data[0].UserId)
+	assert.Equal(t, participant.Username, response.Data[0].Username)
+	assert.Equal(t, participant.DisplayName, response.Data[0].DisplayName)
+	assert.Equal(t, "Result prize", response.Data[0].PrizeName)
+}
+
 func TestAdminUpdateLotteryParticipantUpdatesWeight(t *testing.T) {
 	db := setupLotteryControllerTestDB(t)
 	admin := &model.User{Username: "lottery-weight-admin", Password: "password", Status: common.UserStatusEnabled, AffCode: "lottery-weight-admin"}

@@ -53,14 +53,23 @@ export function LotteryAdmin() {
   const drawMutation = useMutation({
     mutationFn: ({ planId, reason }: { planId: number; reason: string }) =>
       drawLotteryPlan(planId, reason),
-    onSuccess: async (result) => {
+    onSuccess: async (result, variables) => {
       if (!result.success) {
         toast.error(t('Failed to draw lottery'))
         return
       }
       toast.success(t('Lottery draw completed'))
+      const drawnPlan = plans.find((plan) => plan.id === variables.planId)
+      if (drawnPlan) {
+        setSelectedPlan({ ...drawnPlan, status: 'finished' })
+        setDetailsTab('results')
+        setDetailsOpen(true)
+      }
       await queryClient.invalidateQueries({
         queryKey: ['lottery', 'admin', 'plans'],
+      })
+      await queryClient.invalidateQueries({
+        queryKey: ['lottery', 'admin', 'results', variables.planId],
       })
     },
   })

@@ -165,6 +165,20 @@ func AdminListLotteryPrizes(c *gin.Context) {
 	common.ApiSuccess(c, prizes)
 }
 
+func AdminListLotteryResults(c *gin.Context) {
+	planId, err := lotteryPathID(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	results, err := model.ListLotteryResultsForPlan(planId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, results)
+}
+
 func AdminUpdateLotteryPlan(c *gin.Context) {
 	planId, err := lotteryPathID(c)
 	if err != nil {

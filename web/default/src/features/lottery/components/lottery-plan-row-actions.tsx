@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Eye, Pencil, Play, Users, XCircle } from 'lucide-react'
+import { Eye, Pencil, Play, Trophy, Users, XCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { DataTableRowActionMenu } from '@/components/data-table'
@@ -81,6 +81,22 @@ export function LotteryPlanRowActions(props: LotteryPlanRowActionsProps) {
           <Users />
         </TooltipTrigger>
         <TooltipContent>{t('Participants')}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant='ghost'
+              size='icon-sm'
+              disabled={props.plan.status !== 'finished'}
+              onClick={() => props.onView(props.plan, 'results')}
+              aria-label={t('Lottery results')}
+            />
+          }
+        >
+          <Trophy />
+        </TooltipTrigger>
+        <TooltipContent>{t('Lottery results')}</TooltipContent>
       </Tooltip>
 
       <DataTableRowActionMenu ariaLabel={t('Open menu')} modal={false}>

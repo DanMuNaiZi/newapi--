@@ -39,13 +39,23 @@ export interface LotteryPlan {
 export interface LotteryResult {
   id: number
   plan_id: number
+  user_id: number
   prize_id: number
   reward_type: 'quota' | 'subscription'
   quota: number
+  subscription_plan_id: number
   fulfillment_mode: 'auto' | 'self_claim' | 'redemption_code'
   fulfillment_status: string
   claim_expires_at: number
+  claimed_at: number
   redemption_code: string
+  created_at: number
+}
+
+export interface LotteryResultView extends LotteryResult {
+  username: string
+  display_name: string
+  prize_name: string
 }
 
 export interface LotteryPrize {
