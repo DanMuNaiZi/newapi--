@@ -128,9 +128,10 @@ func setupRedeemFixture(t *testing.T, quota int) (userId int, key string) {
 func TestRedeemCreditsQuotaExactlyOnce(t *testing.T) {
 	userId, key := setupRedeemFixture(t, 500)
 
-	quota, err := Redeem(key, userId)
+	outcome, err := Redeem(key, userId)
 	require.NoError(t, err)
-	assert.Equal(t, 500, quota)
+	assert.Equal(t, RedemptionRewardQuota, outcome.RewardType)
+	assert.Equal(t, 500, outcome.Quota)
 
 	var user User
 	require.NoError(t, DB.First(&user, "id = ?", userId).Error)
@@ -224,9 +225,12 @@ func TestRedeemSubscriptionCreatesEarnedInstanceDespitePurchaseLimit(t *testing.
 	}
 	require.NoError(t, DB.Create(code).Error)
 
-	quota, err := Redeem(code.Key, user.Id)
+	outcome, err := Redeem(code.Key, user.Id)
 	require.NoError(t, err)
-	assert.Zero(t, quota)
+	assert.Equal(t, RedemptionRewardSubscription, outcome.RewardType)
+	assert.Zero(t, outcome.Quota)
+	assert.Equal(t, plan.Id, outcome.SubscriptionPlanId)
+	assert.NotZero(t, outcome.SubscriptionId)
 
 	var subscriptions []UserSubscription
 	require.NoError(t, DB.Where("user_id = ? AND plan_id = ?", user.Id, plan.Id).Find(&subscriptions).Error)

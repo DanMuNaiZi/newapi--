@@ -216,7 +216,7 @@ func TestLotteryLeaveReleasesParticipantSlot(t *testing.T) {
 	require.NoError(t, JoinLotteryPlan(plan.Id, userIDs[1]))
 }
 
-func TestLotteryGroupEligibilityAndAdminExclusion(t *testing.T) {
+func TestLotteryGroupEligibility(t *testing.T) {
 	userIDs := setupLotteryFixture(t)
 	groupPlan := &LotteryPlan{
 		Title:                 "Group lottery",
@@ -230,20 +230,59 @@ func TestLotteryGroupEligibilityAndAdminExclusion(t *testing.T) {
 	require.NoError(t, CreateLotteryPlan(groupPlan, nil, []string{"vip"}, prizes))
 	require.NoError(t, JoinLotteryPlan(groupPlan.Id, userIDs[0]))
 	require.Error(t, JoinLotteryPlan(groupPlan.Id, userIDs[2]))
+}
 
-	adminPlan := &LotteryPlan{
-		Title:                 "Admin lottery",
-		Status:                LotteryPlanStatusOpen,
-		EligibilityMode:       LotteryEligibilityAll,
+func TestLotteryAdminCanViewPublishedPlansAndOptInManually(t *testing.T) {
+	userIDs := setupLotteryFixture(t)
+	now := common.GetTimestamp()
+	draftPlan := &LotteryPlan{
+		Title:                 "Draft lottery",
+		Status:                LotteryPlanStatusDraft,
+		EligibilityMode:       LotteryEligibilityUsers,
 		MaxParticipants:       3,
-		RegistrationStartTime: common.GetTimestamp() - 60,
-		DrawTime:              common.GetTimestamp() + 3600,
+		RegistrationStartTime: now - 60,
+		DrawTime:              now + 3600,
 	}
-	require.NoError(t, CreateLotteryPlan(adminPlan, nil, nil, []*LotteryPrize{
+	openPlan := &LotteryPlan{
+		Title:                 "Restricted open lottery",
+		Status:                LotteryPlanStatusOpen,
+		EligibilityMode:       LotteryEligibilityUsers,
+		MaxParticipants:       3,
+		RegistrationStartTime: now - 60,
+		DrawTime:              now + 3600,
+	}
+	finishedPlan := &LotteryPlan{
+		Title:                 "Finished lottery",
+		Status:                LotteryPlanStatusFinished,
+		EligibilityMode:       LotteryEligibilityUsers,
+		MaxParticipants:       3,
+		RegistrationStartTime: now - 7200,
+		DrawTime:              now - 3600,
+	}
+	require.NoError(t, CreateLotteryPlan(draftPlan, []int{userIDs[0]}, nil, []*LotteryPrize{
+		{Name: "Draft prize", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 100, FulfillmentMode: LotteryFulfillmentAuto},
+	}))
+	require.NoError(t, CreateLotteryPlan(openPlan, []int{userIDs[0]}, nil, []*LotteryPrize{
 		{Name: "Prize", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 100, FulfillmentMode: LotteryFulfillmentAuto},
 	}))
-	require.NoError(t, DB.Model(&User{}).Where("id = ?", userIDs[1]).Update("role", common.RoleAdminUser).Error)
-	require.Error(t, JoinLotteryPlan(adminPlan.Id, userIDs[1]))
+	require.NoError(t, CreateLotteryPlan(finishedPlan, []int{userIDs[0]}, nil, []*LotteryPrize{
+		{Name: "History prize", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 100, FulfillmentMode: LotteryFulfillmentAuto},
+	}))
+
+	adminID := userIDs[2]
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", adminID).Update("role", common.RoleAdminUser).Error)
+	plans, err := ListLotteryPlansForUser(adminID)
+	require.NoError(t, err)
+	require.Len(t, plans, 2)
+	assert.Equal(t, openPlan.Id, plans[0].Id)
+	assert.Equal(t, finishedPlan.Id, plans[1].Id)
+
+	var participantCount int64
+	require.NoError(t, DB.Model(&LotteryParticipant{}).Where("plan_id = ? AND user_id = ?", openPlan.Id, adminID).Count(&participantCount).Error)
+	assert.Zero(t, participantCount)
+
+	require.NoError(t, JoinLotteryPlan(openPlan.Id, adminID))
+	require.NoError(t, LeaveLotteryPlan(openPlan.Id, adminID))
 }
 
 func TestLotteryPresetCannotExceedPrizeQuantity(t *testing.T) {
@@ -354,9 +393,10 @@ func TestLotteryRedemptionCodePrizeCreatesRedeemableCode(t *testing.T) {
 	require.NoError(t, DB.Where("plan_id = ? AND user_id = ?", plan.Id, userIDs[0]).First(&result).Error)
 	require.NotEmpty(t, result.RedemptionCode)
 	assert.Equal(t, "issued", result.FulfillmentStatus)
-	quota, err := Redeem(result.RedemptionCode, userIDs[0])
+	outcome, err := Redeem(result.RedemptionCode, userIDs[0])
 	require.NoError(t, err)
-	assert.Equal(t, 222, quota)
+	assert.Equal(t, RedemptionRewardQuota, outcome.RewardType)
+	assert.Equal(t, 222, outcome.Quota)
 }
 
 func TestLotterySubscriptionRewardUsesSnapshotAndIgnoresPurchaseLimit(t *testing.T) {

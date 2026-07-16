@@ -37,6 +37,13 @@ const (
 	RedemptionRewardSubscription = "subscription"
 )
 
+type RedemptionOutcome struct {
+	RewardType         string
+	Quota              int
+	SubscriptionPlanId int
+	SubscriptionId     int
+}
+
 func (redemption *Redemption) normalizeRewardType() string {
 	if redemption.RewardType == "" {
 		return RedemptionRewardQuota
@@ -152,12 +159,12 @@ func GetRedemptionById(id int) (*Redemption, error) {
 	return &redemption, err
 }
 
-func Redeem(key string, userId int) (quota int, err error) {
+func Redeem(key string, userId int) (outcome RedemptionOutcome, err error) {
 	if key == "" {
-		return 0, errors.New("未提供兑换码")
+		return outcome, errors.New("未提供兑换码")
 	}
 	if userId == 0 {
-		return 0, errors.New("无效的 user id")
+		return outcome, errors.New("无效的 user id")
 	}
 	redemption := &Redemption{}
 
@@ -193,11 +200,13 @@ func Redeem(key string, userId int) (quota int, err error) {
 		if result.RowsAffected == 0 {
 			return errors.New("该兑换码已被使用")
 		}
-		switch redemption.normalizeRewardType() {
+		outcome.RewardType = redemption.normalizeRewardType()
+		switch outcome.RewardType {
 		case RedemptionRewardQuota:
 			if redemption.Quota <= 0 {
 				return errors.New("invalid redemption quota")
 			}
+			outcome.Quota = redemption.Quota
 			return tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error
 		case RedemptionRewardSubscription:
 			if redemption.SubscriptionSnapshot == "" {
@@ -210,7 +219,11 @@ func Redeem(key string, userId int) (quota int, err error) {
 			if plan.Id == 0 {
 				plan.Id = redemption.SubscriptionPlanId
 			}
-			_, err := CreateEarnedUserSubscriptionFromPlanTx(tx, userId, &plan, "redemption")
+			subscription, err := CreateEarnedUserSubscriptionFromPlanTx(tx, userId, &plan, "redemption")
+			if err == nil {
+				outcome.SubscriptionPlanId = plan.Id
+				outcome.SubscriptionId = subscription.Id
+			}
 			return err
 		default:
 			return errors.New("invalid redemption reward type")
@@ -218,14 +231,14 @@ func Redeem(key string, userId int) (quota int, err error) {
 	})
 	if err != nil {
 		common.SysError("redemption failed: " + err.Error())
-		return 0, ErrRedeemFailed
+		return RedemptionOutcome{}, ErrRedeemFailed
 	}
-	if redemption.normalizeRewardType() == RedemptionRewardSubscription {
+	if outcome.RewardType == RedemptionRewardSubscription {
 		RecordLog(userId, LogTypeTopup, fmt.Sprintf("redeemed subscription code ID %d", redemption.Id))
-		return 0, nil
+		return outcome, nil
 	}
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(redemption.Quota), redemption.Id))
-	return redemption.Quota, nil
+	return outcome, nil
 }
 
 func (redemption *Redemption) Insert() error {

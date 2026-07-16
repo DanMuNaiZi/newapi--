@@ -96,3 +96,73 @@ func TestAddRedemptionCreatesSubscriptionSnapshot(t *testing.T) {
 		assert.Equal(t, "admin", redemption.SourceRef)
 	}
 }
+
+func TestTopUpSubscriptionReturnsSubscriptionOutcome(t *testing.T) {
+	confirmPaymentComplianceForTest(t)
+	db := setupLotteryControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(
+		&model.Redemption{},
+		&model.SubscriptionPlan{},
+		&model.UserSubscription{},
+	))
+	user := &model.User{
+		Username: "subscription-topup-user",
+		Password: "password",
+		Status:   common.UserStatusEnabled,
+		AffCode:  "subscription-topup-user",
+	}
+	require.NoError(t, db.Create(user).Error)
+	plan := &model.SubscriptionPlan{
+		Title:         "Subscription topup plan",
+		DurationUnit:  "month",
+		DurationValue: 1,
+		Enabled:       true,
+		TotalAmount:   500,
+	}
+	plan.NormalizeDefaults()
+	require.NoError(t, db.Create(plan).Error)
+	snapshot, err := common.Marshal(plan)
+	require.NoError(t, err)
+	redemption := &model.Redemption{
+		Name:                 "Subscription topup code",
+		Key:                  "30000000000000000000000000000001",
+		Status:               common.RedemptionCodeStatusEnabled,
+		RewardType:           model.RedemptionRewardSubscription,
+		SubscriptionPlanId:   plan.Id,
+		SubscriptionSnapshot: string(snapshot),
+		CreatedTime:          common.GetTimestamp(),
+	}
+	require.NoError(t, db.Create(redemption).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/api/user/topup",
+		bytes.NewBufferString(fmt.Sprintf(`{"key":%q}`, redemption.Key)),
+	)
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set("id", user.Id)
+
+	TopUp(ctx)
+
+	response := struct {
+		Success            bool   `json:"success"`
+		Data               int    `json:"data"`
+		RewardType         string `json:"reward_type"`
+		SubscriptionPlanId int    `json:"subscription_plan_id"`
+		SubscriptionId     int    `json:"subscription_id"`
+	}{}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.True(t, response.Success)
+	assert.Zero(t, response.Data)
+	assert.Equal(t, model.RedemptionRewardSubscription, response.RewardType)
+	assert.Equal(t, plan.Id, response.SubscriptionPlanId)
+	assert.NotZero(t, response.SubscriptionId)
+
+	var subscription model.UserSubscription
+	require.NoError(t, db.First(&subscription, response.SubscriptionId).Error)
+	assert.Equal(t, user.Id, subscription.UserId)
+	assert.Equal(t, plan.Id, subscription.PlanId)
+	assert.Equal(t, "redemption", subscription.Source)
+}

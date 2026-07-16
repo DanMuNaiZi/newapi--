@@ -174,20 +174,29 @@ const TopUp = () => {
       const res = await API.post('/api/user/topup', {
         key: redemptionCode,
       });
-      const { success, message, data } = res.data;
+      const { success, message, data, reward_type: rewardType } = res.data;
       if (success) {
         showSuccess(t('兑换成功！'));
-        Modal.success({
-          title: t('兑换成功！'),
-          content: t('成功兑换额度：') + renderQuota(data),
-          centered: true,
-        });
-        if (userState.user) {
-          const updatedUser = {
-            ...userState.user,
-            quota: userState.user.quota + data,
-          };
-          userDispatch({ type: 'login', payload: updatedUser });
+        if (rewardType === 'subscription') {
+          Modal.success({
+            title: t('兑换成功！'),
+            content: t('兑换成功！'),
+            centered: true,
+          });
+          await getSubscriptionSelf();
+        } else {
+          Modal.success({
+            title: t('兑换成功！'),
+            content: t('成功兑换额度：') + renderQuota(data),
+            centered: true,
+          });
+          if (userState.user) {
+            const updatedUser = {
+              ...userState.user,
+              quota: userState.user.quota + data,
+            };
+            userDispatch({ type: 'login', payload: updatedUser });
+          }
         }
         setRedemptionCode('');
       } else {

@@ -362,9 +362,7 @@ func ListLotteryPlansForUser(userId int) ([]LotteryPlan, error) {
 	if err := DB.First(&user, userId).Error; err != nil {
 		return nil, err
 	}
-	if user.Role == common.RoleAdminUser || user.Role == common.RoleRootUser {
-		return []LotteryPlan{}, nil
-	}
+	isAdministrator := user.Role == common.RoleAdminUser || user.Role == common.RoleRootUser
 
 	var plans []LotteryPlan
 	if err := DB.Order("draw_time desc, id desc").Find(&plans).Error; err != nil {
@@ -382,6 +380,12 @@ func ListLotteryPlansForUser(userId int) ([]LotteryPlan, error) {
 	}
 	visible := make([]LotteryPlan, 0, len(plans))
 	for _, plan := range plans {
+		if isAdministrator {
+			if plan.Status != LotteryPlanStatusDraft {
+				visible = append(visible, plan)
+			}
+			continue
+		}
 		if _, ok := participated[plan.Id]; ok {
 			visible = append(visible, plan)
 			continue
@@ -536,28 +540,28 @@ func JoinLotteryPlan(planId int, userId int) error {
 		if err := lockForUpdate(tx).First(&user, userId).Error; err != nil {
 			return err
 		}
-		if user.Role == common.RoleAdminUser || user.Role == common.RoleRootUser {
-			return errors.New("administrators cannot join lotteries")
-		}
 		if user.Status != common.UserStatusEnabled {
 			return errors.New("user is not enabled")
 		}
-		switch plan.EligibilityMode {
-		case LotteryEligibilityGroups:
-			var count int64
-			if err := tx.Model(&LotteryPlanGroup{}).Where("plan_id = ? AND "+commonGroupCol+" = ?", plan.Id, user.Group).Count(&count).Error; err != nil {
-				return err
-			}
-			if count == 0 {
-				return errors.New("user is not eligible for this lottery")
-			}
-		case LotteryEligibilityUsers:
-			var count int64
-			if err := tx.Model(&LotteryPlanUser{}).Where("plan_id = ? AND user_id = ?", plan.Id, userId).Count(&count).Error; err != nil {
-				return err
-			}
-			if count == 0 {
-				return errors.New("user is not eligible for this lottery")
+		isAdministrator := user.Role == common.RoleAdminUser || user.Role == common.RoleRootUser
+		if !isAdministrator {
+			switch plan.EligibilityMode {
+			case LotteryEligibilityGroups:
+				var count int64
+				if err := tx.Model(&LotteryPlanGroup{}).Where("plan_id = ? AND "+commonGroupCol+" = ?", plan.Id, user.Group).Count(&count).Error; err != nil {
+					return err
+				}
+				if count == 0 {
+					return errors.New("user is not eligible for this lottery")
+				}
+			case LotteryEligibilityUsers:
+				var count int64
+				if err := tx.Model(&LotteryPlanUser{}).Where("plan_id = ? AND user_id = ?", plan.Id, userId).Count(&count).Error; err != nil {
+					return err
+				}
+				if count == 0 {
+					return errors.New("user is not eligible for this lottery")
+				}
 			}
 		}
 		var joinedCount int64

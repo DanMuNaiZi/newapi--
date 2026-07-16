@@ -24,6 +24,7 @@ import { getSelf } from '@/lib/api'
 import { formatQuota } from '@/lib/format'
 
 import { redeemTopupCode } from '../api'
+import { parseRedemptionOutcome } from '../lib/redemption-result'
 
 // ============================================================================
 // Redemption Hook
@@ -42,11 +43,16 @@ export function useRedemption() {
       setRedeeming(true)
       const response = await redeemTopupCode({ key: code })
 
-      if (response.success && response.data) {
-        const quotaAdded = response.data
+      const outcome = parseRedemptionOutcome(response)
+      if (outcome?.type === 'subscription') {
+        toast.success(i18next.t('Subscription purchased successfully'))
+        await getSelf()
+        return true
+      }
+      if (outcome?.type === 'quota') {
         toast.success(
           i18next.t('Redemption successful! Added: {{quota}}', {
-            quota: formatQuota(quotaAdded),
+            quota: formatQuota(outcome.quota),
           })
         )
         await getSelf()
@@ -55,7 +61,7 @@ export function useRedemption() {
 
       toast.error(response.message || i18next.t('Redemption failed'))
       return false
-    } catch (_error) {
+    } catch {
       toast.error(i18next.t('Redemption failed'))
       return false
     } finally {
