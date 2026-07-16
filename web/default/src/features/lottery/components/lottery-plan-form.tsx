@@ -40,6 +40,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { Textarea } from '@/components/ui/textarea'
 import { getAdminPlans } from '@/features/subscriptions/api'
 import type { User } from '@/features/users/types'
+import { cn } from '@/lib/utils'
 
 import { createLotteryPlan, getLotteryAdminGroups } from '../api'
 import {
@@ -52,7 +53,15 @@ import {
 } from '../lib/admin-form'
 import { LotteryUserMultiSelect } from './lottery-user-multi-select'
 
-export function LotteryPlanForm() {
+type LotteryPlanFormProps = {
+  className?: string
+  drawer?: boolean
+  formId?: string
+  onCancel?: () => void
+  onCreated?: () => void
+}
+
+export function LotteryPlanForm(props: LotteryPlanFormProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [selectedUsers, setSelectedUsers] = useState<User[]>([])
@@ -100,6 +109,7 @@ export function LotteryPlanForm() {
       await queryClient.invalidateQueries({
         queryKey: ['lottery', 'admin', 'plans'],
       })
+      props.onCreated?.()
     },
   })
 
@@ -110,7 +120,13 @@ export function LotteryPlanForm() {
 
   return (
     <form
-      className='border-border grid gap-6 border-b pb-6'
+      id={props.formId}
+      className={cn(
+        props.drawer
+          ? 'flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5'
+          : 'border-border grid gap-6 border-b pb-6',
+        props.className
+      )}
       onSubmit={form.handleSubmit(submit)}
     >
       <section className='grid gap-4'>
@@ -562,7 +578,13 @@ export function LotteryPlanForm() {
             )
           })}
         </div>
-        <div className='flex flex-wrap items-center justify-between gap-3'>
+        <div
+          className={cn(
+            'flex flex-wrap items-center justify-between gap-3',
+            props.drawer &&
+              'bg-background sticky bottom-0 z-10 -mx-4 -mb-4 border-t px-4 py-3 sm:-mx-6 sm:-mb-5 sm:px-6 sm:py-4'
+          )}
+        >
           <Button
             type='button'
             variant='outline'
@@ -571,10 +593,17 @@ export function LotteryPlanForm() {
             <Plus />
             {t('Add prize')}
           </Button>
-          <Button type='submit' disabled={createMutation.isPending}>
-            {createMutation.isPending && <Spinner />}
-            {t('Create lottery plan')}
-          </Button>
+          <div className='flex items-center gap-2'>
+            {props.onCancel && (
+              <Button type='button' variant='outline' onClick={props.onCancel}>
+                {t('Close')}
+              </Button>
+            )}
+            <Button type='submit' disabled={createMutation.isPending}>
+              {createMutation.isPending && <Spinner />}
+              {t('Create lottery plan')}
+            </Button>
+          </div>
         </div>
       </section>
     </form>
