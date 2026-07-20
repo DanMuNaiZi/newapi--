@@ -513,6 +513,36 @@ export function SubscriptionsMutateDrawer({
                 )}
               />
 
+              <FormField
+                control={form.control}
+                name='consume_priority'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Consumption Priority')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={1}
+                        max={9999}
+                        value={field.value ?? ''}
+                        onChange={(e) => {
+                          const value = e.target.value
+                          field.onChange(
+                            value === '' ? null : Number.parseInt(value, 10)
+                          )
+                        }}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Lower values are consumed first. Leave empty to use expiry order.'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
               <div className='flex flex-col gap-3'>
                 <FormField
                   control={form.control}

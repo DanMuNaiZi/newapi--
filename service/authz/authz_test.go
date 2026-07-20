@@ -41,9 +41,10 @@ func TestInitSeedsBuiltInRolesAndPoliciesOnce(t *testing.T) {
 
 	var roles []model.AuthzRole
 	require.NoError(t, db.Order("sort asc").Find(&roles).Error)
-	require.Len(t, roles, 2)
+	require.Len(t, roles, 3)
 	assert.Equal(t, BuiltInRoleRoot, roles[0].Key)
-	assert.Equal(t, BuiltInRoleAdmin, roles[1].Key)
+	assert.Equal(t, BuiltInRoleAuthorizedAdmin, roles[1].Key)
+	assert.Equal(t, BuiltInRoleAdmin, roles[2].Key)
 
 	assert.True(t, Can(1, common.RoleRootUser, ChannelSensitiveWrite))
 	assert.True(t, Can(2, common.RoleAdminUser, ChannelRead))
@@ -97,15 +98,13 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 
 	assert.True(t, Can(42, common.RoleAdminUser, ChannelSensitiveWrite))
 	assert.False(t, Can(42, common.RoleAdminUser, ChannelWrite))
-	assert.Equal(t, PermissionsMap{
-		ResourceChannel: {
-			ActionRead:           true,
-			ActionOperate:        true,
-			ActionWrite:          false,
-			ActionSensitiveWrite: true,
-			ActionSecretView:     false,
-		},
-	}, ExplicitUserPermissions(42))
+	assert.Equal(t, map[string]bool{
+		ActionRead:           true,
+		ActionOperate:        true,
+		ActionWrite:          false,
+		ActionSensitiveWrite: true,
+		ActionSecretView:     false,
+	}, ExplicitUserPermissions(42)[ResourceChannel])
 	assert.Equal(t, PermissionsMap{
 		ResourceChannel: {
 			ActionSensitiveWrite: true,
@@ -125,15 +124,13 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 		ActionSecretView:     false,
 	}}))
 	assert.False(t, Can(42, common.RoleAdminUser, ChannelSensitiveWrite))
-	assert.Equal(t, PermissionsMap{
-		ResourceChannel: {
-			ActionRead:           true,
-			ActionOperate:        true,
-			ActionWrite:          true,
-			ActionSensitiveWrite: false,
-			ActionSecretView:     false,
-		},
-	}, ExplicitUserPermissions(42))
+	assert.Equal(t, map[string]bool{
+		ActionRead:           true,
+		ActionOperate:        true,
+		ActionWrite:          true,
+		ActionSensitiveWrite: false,
+		ActionSecretView:     false,
+	}, ExplicitUserPermissions(42)[ResourceChannel])
 	assert.Empty(t, ExplicitUserOverrides(42))
 }
 
@@ -226,4 +223,32 @@ func TestCapabilitiesUseCatalogShape(t *testing.T) {
 	assert.True(t, capabilities[ResourceChannel][ActionWrite])
 	assert.False(t, capabilities[ResourceChannel][ActionSensitiveWrite])
 	assert.False(t, capabilities[ResourceChannel][ActionSecretView])
+}
+
+func TestAuthorizedAdminRequiresExplicitPermission(t *testing.T) {
+	db := newAuthzTestDB(t)
+	require.NoError(t, Init(db))
+
+	assert.False(t, Can(91, common.RoleAuthorizedAdmin, ChannelRead))
+	require.NoError(t, SetUserPermissionsForRole(91, common.RoleAuthorizedAdmin, PermissionsMap{
+		ResourceChannel: {ActionRead: true},
+	}))
+
+	assert.True(t, Can(91, common.RoleAuthorizedAdmin, ChannelRead))
+	assert.False(t, Can(91, common.RoleAuthorizedAdmin, ChannelWrite))
+}
+
+func TestAuthorizedAdminSeparatesUsageLogAndActualModelPermissions(t *testing.T) {
+	db := newAuthzTestDB(t)
+	require.NoError(t, Init(db))
+
+	require.NoError(t, SetUserPermissionsForRole(92, common.RoleAuthorizedAdmin, PermissionsMap{
+		ResourceUsageLog: {
+			ActionRead:            true,
+			ActionActualModelView: false,
+		},
+	}))
+
+	assert.True(t, Can(92, common.RoleAuthorizedAdmin, UsageLogRead))
+	assert.False(t, Can(92, common.RoleAuthorizedAdmin, UsageLogActualModelView))
 }

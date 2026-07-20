@@ -158,7 +158,7 @@ func authHelper(c *gin.Context, minRole int) {
 	// 的写接口都会自动留痕（无需在路由上单独挂审计中间件，避免漏挂）。
 	// handler 内手动埋点者会设置 ContextKeyAuditLogged，finishAdminAudit 据此跳过。
 	var auditWriter *auditResponseWriter
-	if minRole >= common.RoleAdminUser {
+	if minRole >= common.RoleAuthorizedAdmin {
 		auditWriter = beginAdminAudit(c)
 	}
 
@@ -190,6 +190,14 @@ func AdminAuth() func(c *gin.Context) {
 	}
 }
 
+// ManagedAdminAuth permits both built-in administrators and authorized
+// administrators. Every route using it must also declare RequirePermission.
+func ManagedAdminAuth() func(c *gin.Context) {
+	return func(c *gin.Context) {
+		authHelper(c, common.RoleAuthorizedAdmin)
+	}
+}
+
 func RootAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		authHelper(c, common.RoleRootUser)
@@ -203,6 +211,24 @@ func RequirePermission(permission authz.Permission) func(c *gin.Context) {
 		if authz.Can(userID, role, permission) {
 			c.Next()
 			return
+		}
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"message": common.TranslateMessage(c, i18n.MsgAuthInsufficientPrivilege),
+		})
+		c.Abort()
+	}
+}
+
+func RequireAnyPermission(permissions ...authz.Permission) func(c *gin.Context) {
+	return func(c *gin.Context) {
+		role := c.GetInt("role")
+		userID := c.GetInt("id")
+		for _, permission := range permissions {
+			if authz.Can(userID, role, permission) {
+				c.Next()
+				return
+			}
 		}
 		c.JSON(http.StatusForbidden, gin.H{
 			"success": false,

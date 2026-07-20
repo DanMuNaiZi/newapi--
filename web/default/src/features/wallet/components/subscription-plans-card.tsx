@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Crown, RefreshCw, Sparkles, Check } from 'lucide-react'
+import { Crown, RefreshCw, Sparkles, Check, GripVertical, RotateCcw } from 'lucide-react'
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -47,11 +47,17 @@ import {
 } from '@/components/ui/tooltip'
 import {
   getPublicPlans,
+  resetSubscriptionConsumePriority,
   getSelfSubscriptionFull,
   updateBillingPreference,
+  updateSubscriptionConsumePriority,
 } from '@/features/subscriptions/api'
 import { SubscriptionPurchaseDialog } from '@/features/subscriptions/components/dialogs/subscription-purchase-dialog'
-import { formatDuration, formatResetPeriod } from '@/features/subscriptions/lib'
+import {
+  formatDuration,
+  formatResetPeriod,
+  reorderSubscriptionIds,
+} from '@/features/subscriptions/lib'
 import type {
   PlanRecord,
   UserSubscriptionRecord,
@@ -109,6 +115,10 @@ export function SubscriptionPlansCard({
   >([])
   const [billingPreference, setBillingPreference] =
     useState('subscription_first')
+  const [consumePriorityIds, setConsumePriorityIds] = useState<number[]>([])
+  const [draggedSubscriptionId, setDraggedSubscriptionId] = useState<number | null>(null)
+  const [consumePriorityDirty, setConsumePriorityDirty] = useState(false)
+  const [consumePrioritySaving, setConsumePrioritySaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -144,6 +154,12 @@ export function SubscriptionPlansCard({
         )
         setActiveSubscriptions(res.data.subscriptions || [])
         setAllSubscriptions(res.data.all_subscriptions || [])
+        setConsumePriorityIds(
+          (res.data.subscriptions || [])
+            .map((item) => item.subscription?.id)
+            .filter((id): id is number => typeof id === 'number')
+        )
+        setConsumePriorityDirty(false)
       }
     } catch {
       // ignore
@@ -233,6 +249,61 @@ export function SubscriptionPlansCard({
     const used = Number(sub?.subscription?.amount_used || 0)
     if (total <= 0) return 0
     return Math.round((used / total) * 100)
+  }
+
+  const orderedSubscriptions = useMemo(() => {
+    const activeById = new Map<number, UserSubscriptionRecord>()
+    const inactive: UserSubscriptionRecord[] = []
+    const now = Date.now() / 1000
+    for (const item of allSubscriptions) {
+      const subscription = item.subscription
+      if (subscription?.status === 'active' && subscription.end_time > now) {
+        activeById.set(subscription.id, item)
+      } else {
+        inactive.push(item)
+      }
+    }
+    const active = consumePriorityIds
+      .map((id) => activeById.get(id))
+      .filter((item): item is UserSubscriptionRecord => item !== undefined)
+    for (const [id, item] of activeById) {
+      if (!consumePriorityIds.includes(id)) active.push(item)
+    }
+    return [...active, ...inactive]
+  }, [allSubscriptions, consumePriorityIds])
+
+  const saveConsumePriority = async () => {
+    setConsumePrioritySaving(true)
+    try {
+      const result = await updateSubscriptionConsumePriority(consumePriorityIds)
+      if (!result.success) {
+        toast.error(result.message || t('Update failed'))
+        return
+      }
+      toast.success(t('Updated successfully'))
+      await fetchSelfSubscription()
+    } catch {
+      toast.error(t('Request failed'))
+    } finally {
+      setConsumePrioritySaving(false)
+    }
+  }
+
+  const resetConsumePriority = async () => {
+    setConsumePrioritySaving(true)
+    try {
+      const result = await resetSubscriptionConsumePriority()
+      if (!result.success) {
+        toast.error(result.message || t('Update failed'))
+        return
+      }
+      toast.success(t('Restored default consumption order'))
+      await fetchSelfSubscription()
+    } catch {
+      toast.error(t('Request failed'))
+    } finally {
+      setConsumePrioritySaving(false)
+    }
   }
 
   if (loading) {
@@ -395,8 +466,37 @@ export function SubscriptionPlansCard({
           {hasAny && (
             <>
               <Separator className='my-3' />
+              {hasActive && (
+                <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
+                  <p className='text-muted-foreground text-xs'>
+                    {t(
+                      'Drag active subscriptions to set their consumption order. Lower positions are consumed later.'
+                    )}
+                  </p>
+                  <div className='flex items-center gap-2'>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='sm'
+                      disabled={consumePrioritySaving}
+                      onClick={resetConsumePriority}
+                    >
+                      <RotateCcw data-icon='inline-start' />
+                      {t('Restore default')}
+                    </Button>
+                    <Button
+                      type='button'
+                      size='sm'
+                      disabled={!consumePriorityDirty || consumePrioritySaving}
+                      onClick={saveConsumePriority}
+                    >
+                      {t('Save order')}
+                    </Button>
+                  </div>
+                </div>
+              )}
               <div className='max-h-64 space-y-3 overflow-y-auto pr-1'>
-                {allSubscriptions.map((sub) => {
+                {orderedSubscriptions.map((sub) => {
                   const subscription = sub.subscription
                   const totalAmount = Number(subscription?.amount_total || 0)
                   const usedAmount = Number(subscription?.amount_used || 0)
@@ -415,10 +515,40 @@ export function SubscriptionPlansCard({
                   return (
                     <div
                       key={subscription?.id}
-                      className='bg-background rounded-md border p-3 text-xs'
+                      draggable={isActive}
+                      onDragStart={() =>
+                        setDraggedSubscriptionId(subscription?.id ?? null)
+                      }
+                      onDragOver={(event) => {
+                        if (isActive) event.preventDefault()
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault()
+                        if (!isActive || draggedSubscriptionId === null) return
+                        const next = reorderSubscriptionIds(
+                          consumePriorityIds,
+                          draggedSubscriptionId,
+                          subscription?.id ?? 0
+                        )
+                        setConsumePriorityIds(next)
+                        setConsumePriorityDirty(next !== consumePriorityIds)
+                        setDraggedSubscriptionId(null)
+                      }}
+                      onDragEnd={() => setDraggedSubscriptionId(null)}
+                      className={cn(
+                        'bg-background rounded-md border p-3 text-xs',
+                        isActive &&
+                          'cursor-grab active:cursor-grabbing hover:border-primary/50'
+                      )}
                     >
                       <div className='flex items-center justify-between'>
                         <div className='flex items-center gap-2'>
+                          {isActive && (
+                            <GripVertical
+                              className='text-muted-foreground size-3.5'
+                              aria-hidden='true'
+                            />
+                          )}
                           <span className='font-medium'>
                             {planTitle
                               ? `${planTitle} · ${t('Subscription')} #${subscription?.id}`

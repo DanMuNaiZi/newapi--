@@ -7,6 +7,18 @@ export type AdminCapabilities = AdminPermissionMatrix
 
 export const ADMIN_PERMISSION_RESOURCES = {
   CHANNEL: 'channel',
+  USER: 'user',
+  USAGE_LOG: 'usage_log',
+  MODEL: 'model',
+  DEPLOYMENT: 'deployment',
+  SUBSCRIPTION: 'subscription',
+  REDEMPTION: 'redemption',
+  LOTTERY: 'lottery',
+  SYSTEM_SETTINGS: 'system_settings',
+  PAYMENT: 'payment',
+  OAUTH: 'oauth',
+  SYSTEM_INFO: 'system_info',
+  TASK_LOG: 'task_log',
 } as const
 
 export const ADMIN_PERMISSION_ACTIONS = {
@@ -19,6 +31,7 @@ export const ADMIN_PERMISSION_ACTIONS = {
 
 // The role whose baseline grants are used as defaults in the permission editor.
 export const ADMIN_ROLE_KEY = 'admin'
+export const AUTHORIZED_ADMIN_ROLE_KEY = 'authorized_admin'
 
 // The permission catalog (resources, actions, labels and role baselines) is owned
 // by the backend authz package and fetched from GET /api/authz/catalog. It is
@@ -76,9 +89,10 @@ export function roleGrants(
 // value missing from `value` with the admin role's baseline grant.
 export function normalizeAdminPermissions(
   value: AdminPermissionMatrix | null | undefined,
-  catalog: PermissionCatalog
+  catalog: PermissionCatalog,
+  roleKey = ADMIN_ROLE_KEY
 ): AdminPermissionMatrix {
-  const baseline = roleGrants(catalog, ADMIN_ROLE_KEY)
+  const baseline = roleGrants(catalog, roleKey)
   const normalized: AdminPermissionMatrix = {}
   for (const resource of catalog.resources) {
     const actions: Record<string, boolean> = {}

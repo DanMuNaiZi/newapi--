@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -159,6 +160,9 @@ type SubscriptionPlan struct {
 
 	Enabled   bool `json:"enabled" gorm:"default:true"`
 	SortOrder int  `json:"sort_order" gorm:"type:int;default:0"`
+	// ConsumePriority is the administrator-defined default consumption order.
+	// A lower value is consumed first; nil preserves the legacy expiry ordering.
+	ConsumePriority *int `json:"consume_priority" gorm:"type:int"`
 
 	AllowBalancePay *bool `json:"allow_balance_pay"`
 
@@ -275,6 +279,10 @@ type UserSubscription struct {
 
 	// Whether wallet fallback is allowed after this subscription's quota is exhausted (snapshot from plan)
 	AllowWalletOverflow bool `json:"allow_wallet_overflow"`
+
+	// UserConsumePriority overrides the plan default for this user's active subscriptions.
+	// A lower value is consumed first; nil falls back to the plan default.
+	UserConsumePriority *int `json:"user_consume_priority" gorm:"type:int"`
 
 	CreatedAt int64 `json:"created_at" gorm:"bigint"`
 	UpdatedAt int64 `json:"updated_at" gorm:"bigint"`
@@ -838,9 +846,12 @@ func GetAllActiveUserSubscriptions(userId int) ([]SubscriptionSummary, error) {
 	now := common.GetTimestamp()
 	var subs []UserSubscription
 	err := DB.Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
-		Order("end_time desc, id desc").
+		Order("end_time asc, id asc").
 		Find(&subs).Error
 	if err != nil {
+		return nil, err
+	}
+	if err := sortUserSubscriptionsForConsume(DB, subs); err != nil {
 		return nil, err
 	}
 	return buildSubscriptionSummaries(subs), nil
@@ -1327,6 +1338,9 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 		if len(subs) == 0 {
 			return errors.New("no active subscription")
 		}
+		if err := sortUserSubscriptionsForConsume(tx, subs); err != nil {
+			return err
+		}
 		for _, candidate := range subs {
 			sub := candidate
 			plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
@@ -1382,6 +1396,117 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 		return nil, err
 	}
 	return returnValue, nil
+}
+
+// UpdateUserSubscriptionConsumePriorities persists a complete user-defined order
+// for the user's active subscriptions. Each active subscription must appear once.
+func UpdateUserSubscriptionConsumePriorities(userId int, subscriptionIds []int) error {
+	if userId <= 0 {
+		return errors.New("invalid userId")
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		now := GetDBTimestamp()
+		var subscriptions []UserSubscription
+		if err := lockForUpdate(tx).
+			Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
+			Order("id asc").
+			Find(&subscriptions).Error; err != nil {
+			return err
+		}
+		if len(subscriptions) != len(subscriptionIds) {
+			return errors.New("subscription priority must include every active subscription")
+		}
+		active := make(map[int]struct{}, len(subscriptions))
+		for _, subscription := range subscriptions {
+			active[subscription.Id] = struct{}{}
+		}
+		seen := make(map[int]struct{}, len(subscriptionIds))
+		for index, subscriptionId := range subscriptionIds {
+			if _, ok := active[subscriptionId]; !ok {
+				return errors.New("subscription priority contains an inactive subscription")
+			}
+			if _, exists := seen[subscriptionId]; exists {
+				return errors.New("subscription priority contains duplicate subscriptions")
+			}
+			seen[subscriptionId] = struct{}{}
+			priority := index + 1
+			if err := tx.Model(&UserSubscription{}).Where("id = ?", subscriptionId).Update("user_consume_priority", priority).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// ResetUserSubscriptionConsumePriority removes the user's explicit ordering so
+// active subscriptions resume the plan default and legacy fallback ordering.
+func ResetUserSubscriptionConsumePriority(userId int) error {
+	if userId <= 0 {
+		return errors.New("invalid userId")
+	}
+	now := GetDBTimestamp()
+	return DB.Model(&UserSubscription{}).
+		Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
+		Update("user_consume_priority", nil).Error
+}
+
+func sortUserSubscriptionsForConsume(tx *gorm.DB, subscriptions []UserSubscription) error {
+	if len(subscriptions) < 2 {
+		return nil
+	}
+	planIds := make([]int, 0, len(subscriptions))
+	seenPlanIds := make(map[int]struct{}, len(subscriptions))
+	for _, subscription := range subscriptions {
+		if _, exists := seenPlanIds[subscription.PlanId]; exists {
+			continue
+		}
+		seenPlanIds[subscription.PlanId] = struct{}{}
+		planIds = append(planIds, subscription.PlanId)
+	}
+	var plans []SubscriptionPlan
+	if err := tx.Where("id IN ?", planIds).Find(&plans).Error; err != nil {
+		return err
+	}
+	planPriorities := make(map[int]*int, len(plans))
+	for _, plan := range plans {
+		planPriorities[plan.Id] = plan.ConsumePriority
+	}
+	if len(planPriorities) != len(planIds) {
+		return errors.New("subscription plan not found")
+	}
+	sort.SliceStable(subscriptions, func(i, j int) bool {
+		left, right := subscriptions[i], subscriptions[j]
+		if left.UserConsumePriority != nil || right.UserConsumePriority != nil {
+			if left.UserConsumePriority == nil {
+				return false
+			}
+			if right.UserConsumePriority == nil {
+				return true
+			}
+			if *left.UserConsumePriority != *right.UserConsumePriority {
+				return *left.UserConsumePriority < *right.UserConsumePriority
+			}
+		} else {
+			leftPlanPriority := planPriorities[left.PlanId]
+			rightPlanPriority := planPriorities[right.PlanId]
+			if leftPlanPriority != nil || rightPlanPriority != nil {
+				if leftPlanPriority == nil {
+					return false
+				}
+				if rightPlanPriority == nil {
+					return true
+				}
+				if *leftPlanPriority != *rightPlanPriority {
+					return *leftPlanPriority < *rightPlanPriority
+				}
+			}
+		}
+		if left.EndTime != right.EndTime {
+			return left.EndTime < right.EndTime
+		}
+		return left.Id < right.Id
+	})
+	return nil
 }
 
 // RefundSubscriptionPreConsume is idempotent and refunds pre-consumed subscription quota by requestId.

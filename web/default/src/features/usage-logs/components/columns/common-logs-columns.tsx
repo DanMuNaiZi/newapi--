@@ -291,7 +291,10 @@ function buildTypeDetailSegments(
   return segments
 }
 
-export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
+export function useCommonLogsColumns(
+  isAdmin: boolean,
+  canSeeActualModel = false
+): ColumnDef<UsageLog>[] {
   const { t } = useTranslation()
   const columns: ColumnDef<UsageLog>[] = [
     {
@@ -605,7 +608,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         const log = row.original
         if (!isDisplayableLogType(log.type)) return null
 
-        const modelInfo = formatModelName(log, isAdmin)
+        const modelInfo = formatModelName(log, canSeeActualModel)
 
         return (
           <div className='flex w-fit flex-col gap-0.5'>
@@ -875,6 +878,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
             <DetailsDialog
               log={log}
               isAdmin={isAdmin}
+              canSeeActualModel={canSeeActualModel}
               open={dialogOpen}
               onOpenChange={setDialogOpen}
             />

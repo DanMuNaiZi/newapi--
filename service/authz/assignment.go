@@ -10,11 +10,20 @@ var resolveSubjectRoles = func(userID int, systemRole int) []string {
 		return []string{BuiltInRoleRoot}
 	case systemRole >= common.RoleAdminUser:
 		return []string{BuiltInRoleAdmin}
+	case systemRole >= common.RoleAuthorizedAdmin:
+		return []string{BuiltInRoleAuthorizedAdmin}
 	default:
 		return nil
 	}
 }
 
-// managedRoleKey is the role whose baseline per-user overrides are expressed
-// relative to.
-const managedRoleKey = BuiltInRoleAdmin
+func managedRoleKeyForSystemRole(systemRole int) (string, bool) {
+	switch {
+	case systemRole == common.RoleAuthorizedAdmin:
+		return BuiltInRoleAuthorizedAdmin, true
+	case systemRole == common.RoleAdminUser:
+		return BuiltInRoleAdmin, true
+	default:
+		return "", false
+	}
+}

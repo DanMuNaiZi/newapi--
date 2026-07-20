@@ -73,3 +73,17 @@ func TestFormatAdminLogsExposesRequestAndActualModel(t *testing.T) {
 	assert.Equal(t, "gpt-5.5", logs[0].ModelName)
 	assert.Equal(t, "gpt-5.4", logs[0].ActualModelName)
 }
+
+func TestHideActualModelNamesRemovesUpstreamModelFields(t *testing.T) {
+	logs := []*Log{{
+		ModelName:       "gpt-5.4",
+		ActualModelName: "gpt-5.4",
+		Other:           `{"upstream_model_name":"gpt-5.4","is_model_mapped":true}`,
+	}}
+
+	HideActualModelNames(logs)
+
+	assert.Empty(t, logs[0].ActualModelName)
+	assert.NotContains(t, logs[0].Other, "upstream_model_name")
+	assert.NotContains(t, logs[0].Other, "is_model_mapped")
+}

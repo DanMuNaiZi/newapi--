@@ -21,6 +21,7 @@ import { z } from 'zod'
 import {
   type PermissionCatalog,
   type AdminPermissionMatrix,
+  AUTHORIZED_ADMIN_ROLE_KEY,
   normalizeAdminPermissions,
 } from '@/lib/admin-permissions'
 import { quotaUnitsToDollars } from '@/lib/format'
@@ -87,10 +88,13 @@ export function transformFormDataToPayload(
   // Only send the permission matrix when the target is an admin and the catalog
   // is available; without the catalog we cannot build a full matrix, so we omit
   // the field (the backend then leaves existing permissions untouched).
-  if (role >= ROLE.ADMIN && catalog) {
+  if ((role === ROLE.ADMIN || role === ROLE.AUTHORIZED_ADMIN) && catalog) {
     payload.admin_permissions = normalizeAdminPermissions(
       data.admin_permissions as AdminPermissionMatrix | undefined,
-      catalog
+      catalog,
+      role === ROLE.AUTHORIZED_ADMIN
+        ? AUTHORIZED_ADMIN_ROLE_KEY
+        : undefined
     )
   }
 

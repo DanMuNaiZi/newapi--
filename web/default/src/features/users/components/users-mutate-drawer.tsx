@@ -65,6 +65,7 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
+  AUTHORIZED_ADMIN_ROLE_KEY,
   EMPTY_PERMISSION_CATALOG,
   hasPermission,
   normalizeAdminPermissions,
@@ -125,6 +126,7 @@ export function UsersMutateDrawer({
     queryKey: ['admin-permission-catalog'],
     queryFn: getPermissionCatalog,
     staleTime: 5 * 60 * 1000,
+    enabled: currentUser?.role === ROLE.SUPER_ADMIN,
   })
 
   const form = useForm<UserFormValues>({
@@ -154,7 +156,9 @@ export function UsersMutateDrawer({
   const currentQuotaRaw = form.watch('quota_dollars') || 0
   const selectedRole = form.watch('role')
   const canEditAdminPermissions = currentUser?.role === ROLE.SUPER_ADMIN
-  const targetIsAdmin = (selectedRole ?? currentRow?.role ?? 0) >= ROLE.ADMIN
+  const targetRole = selectedRole ?? currentRow?.role ?? 0
+  const targetIsAdmin =
+    targetRole === ROLE.ADMIN || targetRole === ROLE.AUTHORIZED_ADMIN
 
   const onSubmit = async (data: UserFormValues) => {
     if (!isUpdate) {
@@ -275,7 +279,15 @@ export function UsersMutateDrawer({
                         <Select
                           items={[
                             { value: '1', label: t('Common User') },
-                            { value: '10', label: t('Admin') },
+                            ...(canEditAdminPermissions
+                              ? [
+                                  {
+                                    value: String(ROLE.AUTHORIZED_ADMIN),
+                                    label: t('Authorized Admin'),
+                                  },
+                                  { value: '10', label: t('Admin') },
+                                ]
+                              : []),
                           ]}
                           onValueChange={(value) =>
                             value !== null && field.onChange(parseInt(value))
@@ -292,7 +304,16 @@ export function UsersMutateDrawer({
                               <SelectItem value='1'>
                                 {t('Common User')}
                               </SelectItem>
-                              <SelectItem value='10'>{t('Admin')}</SelectItem>
+                              {canEditAdminPermissions && (
+                                <SelectItem
+                                  value={String(ROLE.AUTHORIZED_ADMIN)}
+                                >
+                                  {t('Authorized Admin')}
+                                </SelectItem>
+                              )}
+                              {canEditAdminPermissions && (
+                                <SelectItem value='10'>{t('Admin')}</SelectItem>
+                              )}
                             </SelectGroup>
                           </SelectContent>
                         </Select>
@@ -468,7 +489,10 @@ export function UsersMutateDrawer({
                       render={({ field }) => {
                         const selected = normalizeAdminPermissions(
                           field.value,
-                          permissionCatalog
+                          permissionCatalog,
+                          targetRole === ROLE.AUTHORIZED_ADMIN
+                            ? AUTHORIZED_ADMIN_ROLE_KEY
+                            : undefined
                         )
                         return (
                           <FormItem>

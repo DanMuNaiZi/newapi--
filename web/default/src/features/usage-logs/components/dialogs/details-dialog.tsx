@@ -411,6 +411,7 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
 interface DetailsDialogProps {
   log: UsageLog
   isAdmin: boolean
+  canSeeActualModel?: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
 }
@@ -437,12 +438,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const showTiming = isTimingLogType(props.log.type)
   const showAdminIp =
     !!props.log.ip && (showTiming || (props.isAdmin && isTopup))
-  const requestModelName =
-    props.isAdmin && other?.request_model_name
-      ? other.request_model_name
-      : props.log.model_name
+  const requestModelName = other?.request_model_name ?? props.log.model_name
   let actualModelName = ''
-  if (props.isAdmin) {
+  if (props.canSeeActualModel) {
     if (props.log.actual_model_name) {
       actualModelName = props.log.actual_model_name
     } else if (other?.upstream_model_name) {
@@ -450,7 +448,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
     }
   }
   const showModelMapping =
-    props.isAdmin &&
+    props.canSeeActualModel &&
     actualModelName !== '' &&
     actualModelName !== requestModelName
   const adminInfo = other?.admin_info

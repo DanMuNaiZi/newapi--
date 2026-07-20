@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -31,6 +32,21 @@ var completionRatioMetaOptionKeys = []string{
 
 func isPaymentComplianceOptionKey(key string) bool {
 	return strings.HasPrefix(key, "payment_setting.compliance_")
+}
+
+func optionPermission(key string, action string) authz.Permission {
+	lowerKey := strings.ToLower(key)
+	if strings.Contains(lowerKey, "oauth") || strings.Contains(lowerKey, "oidc") || strings.Contains(lowerKey, "discord") || strings.Contains(lowerKey, "github") || strings.Contains(lowerKey, "telegram") || strings.Contains(lowerKey, "linuxdo") || strings.Contains(lowerKey, "wechat") {
+		return authz.Permission{Resource: authz.ResourceOAuth, Action: action}
+	}
+	if strings.Contains(lowerKey, "payment") || strings.Contains(lowerKey, "stripe") || strings.Contains(lowerKey, "epay") || strings.Contains(lowerKey, "creem") || strings.Contains(lowerKey, "waffo") || strings.Contains(lowerKey, "topup") {
+		return authz.Permission{Resource: authz.ResourcePayment, Action: action}
+	}
+	return authz.Permission{Resource: authz.ResourceSystemSettings, Action: action}
+}
+
+func canAccessOption(c *gin.Context, key string, action string) bool {
+	return authz.Can(c.GetInt("id"), c.GetInt("role"), optionPermission(key, action))
 }
 
 func isPositiveOptionValue(value string) bool {
@@ -80,6 +96,9 @@ func GetOptions(c *gin.Context) {
 	optionValues := make(map[string]string)
 	common.OptionMapRWMutex.Lock()
 	for k, v := range common.OptionMap {
+		if !canAccessOption(c, k, authz.ActionRead) {
+			continue
+		}
 		value := common.Interface2String(v)
 		isSensitiveKey := strings.HasSuffix(k, "Token") ||
 			strings.HasSuffix(k, "Secret") ||
@@ -101,10 +120,12 @@ func GetOptions(c *gin.Context) {
 		}
 	}
 	common.OptionMapRWMutex.Unlock()
-	options = append(options, &model.Option{
-		Key:   "CompletionRatioMeta",
-		Value: buildCompletionRatioMetaValue(optionValues),
-	})
+	if canAccessOption(c, "ModelRatio", authz.ActionRead) {
+		options = append(options, &model.Option{
+			Key:   "CompletionRatioMeta",
+			Value: buildCompletionRatioMetaValue(optionValues),
+		})
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -125,6 +146,10 @@ func UpdateOption(c *gin.Context) {
 			"success": false,
 			"message": "无效的参数",
 		})
+		return
+	}
+	if !canAccessOption(c, option.Key, authz.ActionWrite) {
+		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
 		return
 	}
 	switch option.Value.(type) {

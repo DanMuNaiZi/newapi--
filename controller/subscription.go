@@ -23,6 +23,10 @@ type BillingPreferenceRequest struct {
 	BillingPreference string `json:"billing_preference"`
 }
 
+type SubscriptionConsumePriorityRequest struct {
+	SubscriptionIds []int `json:"subscription_ids"`
+}
+
 type SubscriptionBalancePayRequest struct {
 	PlanId int `json:"plan_id"`
 }
@@ -95,6 +99,33 @@ func UpdateSubscriptionPreference(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, gin.H{"billing_preference": pref})
+}
+
+func UpdateSubscriptionConsumePriority(c *gin.Context) {
+	userId := c.GetInt("id")
+	var req SubscriptionConsumePriorityRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	if err := model.UpdateUserSubscriptionConsumePriorities(userId, req.SubscriptionIds); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAuditFor(c, userId, "subscription.priority_update", map[string]interface{}{
+		"subscription_ids": req.SubscriptionIds,
+	})
+	common.ApiSuccess(c, nil)
+}
+
+func ResetSubscriptionConsumePriority(c *gin.Context) {
+	userId := c.GetInt("id")
+	if err := model.ResetUserSubscriptionConsumePriority(userId); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAuditFor(c, userId, "subscription.priority_reset", nil)
+	common.ApiSuccess(c, nil)
 }
 
 func SubscriptionRequestBalancePay(c *gin.Context) {
@@ -185,6 +216,10 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorMsg(c, "总额度不能为负数")
 		return
 	}
+	if req.Plan.ConsumePriority != nil && (*req.Plan.ConsumePriority < 1 || *req.Plan.ConsumePriority > 9999) {
+		common.ApiErrorMsg(c, "消费优先级必须在 1 到 9999 之间")
+		return
+	}
 	req.Plan.UpgradeGroup = strings.TrimSpace(req.Plan.UpgradeGroup)
 	if req.Plan.UpgradeGroup != "" {
 		if _, ok := ratio_setting.GetGroupRatioCopy()[req.Plan.UpgradeGroup]; !ok {
@@ -259,6 +294,10 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorMsg(c, "总额度不能为负数")
 		return
 	}
+	if req.Plan.ConsumePriority != nil && (*req.Plan.ConsumePriority < 1 || *req.Plan.ConsumePriority > 9999) {
+		common.ApiErrorMsg(c, "消费优先级必须在 1 到 9999 之间")
+		return
+	}
 	req.Plan.UpgradeGroup = strings.TrimSpace(req.Plan.UpgradeGroup)
 	if req.Plan.UpgradeGroup != "" {
 		if _, ok := ratio_setting.GetGroupRatioCopy()[req.Plan.UpgradeGroup]; !ok {
@@ -291,6 +330,7 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			"custom_seconds":             req.Plan.CustomSeconds,
 			"enabled":                    req.Plan.Enabled,
 			"sort_order":                 req.Plan.SortOrder,
+			"consume_priority":           req.Plan.ConsumePriority,
 			"stripe_price_id":            req.Plan.StripePriceId,
 			"creem_product_id":           req.Plan.CreemProductId,
 			"waffo_pancake_product_id":   req.Plan.WaffoPancakeProductId,

@@ -233,6 +233,20 @@ export async function updateBillingPreference(
   return res.data
 }
 
+export async function updateSubscriptionConsumePriority(
+  subscriptionIds: number[]
+): Promise<ApiResponse> {
+  const res = await api.put('/api/subscription/self/consume-priority', {
+    subscription_ids: subscriptionIds,
+  })
+  return res.data
+}
+
+export async function resetSubscriptionConsumePriority(): Promise<ApiResponse> {
+  const res = await api.delete('/api/subscription/self/consume-priority')
+  return res.data
+}
+
 export async function getGroups(): Promise<ApiResponse<string[]>> {
   const res = await api.get('/api/group')
   return res.data

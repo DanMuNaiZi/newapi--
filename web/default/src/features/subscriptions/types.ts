@@ -35,6 +35,7 @@ export const subscriptionPlanSchema = z.object({
   quota_reset_custom_seconds: z.number().optional(),
   enabled: z.boolean(),
   sort_order: z.number(),
+  consume_priority: z.number().int().nullable().optional(),
   allow_balance_pay: z.boolean().optional().default(true),
   allow_wallet_overflow: z.boolean().optional().default(true),
   max_purchase_per_user: z.number(),
@@ -67,6 +68,7 @@ export const userSubscriptionSchema = z.object({
   amount_total: z.number(),
   amount_used: z.number(),
   next_reset_time: z.number().optional(),
+  user_consume_priority: z.number().int().nullable().optional(),
 })
 
 export type UserSubscription = z.infer<typeof userSubscriptionSchema>

@@ -37,8 +37,14 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import type { SidebarData } from '@/components/layout/types'
+import type { NavItem, SidebarData } from '@/components/layout/types'
+import {
+  ADMIN_PERMISSION_ACTIONS,
+  ADMIN_PERMISSION_RESOURCES,
+  hasPermission,
+} from '@/lib/admin-permissions'
 import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 /**
  * Root navigation groups for the application sidebar.
@@ -48,6 +54,118 @@ import { ROLE } from '@/lib/roles'
  */
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
+  const user = useAuthStore((state) => state.auth.user)
+  const isRoot = user?.role === ROLE.SUPER_ADMIN
+  const can = (resource: string, action = ADMIN_PERMISSION_ACTIONS.READ) =>
+    isRoot || hasPermission(user, resource, action)
+
+  const adminItems: NavItem[] = []
+  if (can(ADMIN_PERMISSION_RESOURCES.CHANNEL)) {
+    adminItems.push({
+      title: t('Channels'),
+      url: '/channels',
+      icon: Radio,
+    })
+  }
+  if (
+    can(ADMIN_PERMISSION_RESOURCES.MODEL) ||
+    can(ADMIN_PERMISSION_RESOURCES.DEPLOYMENT)
+  ) {
+    adminItems.push({
+      title: t('Models'),
+      url: '/models/metadata',
+      icon: Box,
+    })
+  }
+  if (can(ADMIN_PERMISSION_RESOURCES.USER)) {
+    adminItems.push({
+      title: t('Users'),
+      url: '/users',
+      icon: Users,
+    })
+  }
+  if (can(ADMIN_PERMISSION_RESOURCES.REDEMPTION)) {
+    adminItems.push({
+      title: t('Redemption Codes'),
+      url: '/redemption-codes',
+      icon: Ticket,
+    })
+  }
+  if (can(ADMIN_PERMISSION_RESOURCES.LOTTERY)) {
+    adminItems.push({
+      title: t('Lottery Management'),
+      url: '/lotteries/admin',
+      icon: Trophy,
+    })
+  }
+  if (can(ADMIN_PERMISSION_RESOURCES.SUBSCRIPTION)) {
+    adminItems.push({
+      title: t('Subscriptions'),
+      url: '/subscriptions',
+      icon: CreditCard,
+    })
+  }
+  if (can(ADMIN_PERMISSION_RESOURCES.SYSTEM_INFO)) {
+    adminItems.push({
+      title: t('System Info'),
+      url: '/system-info',
+      icon: ServerCog,
+    })
+  }
+  if (
+    can(ADMIN_PERMISSION_RESOURCES.SYSTEM_SETTINGS) ||
+    can(ADMIN_PERMISSION_RESOURCES.PAYMENT) ||
+    can(ADMIN_PERMISSION_RESOURCES.OAUTH)
+  ) {
+    adminItems.push({
+      title: t('System Settings'),
+      url: '/system-settings/site',
+      activeUrls: ['/system-settings'],
+      icon: Settings,
+    })
+  }
+
+  const generalItems: NavItem[] = [
+    {
+      title: t('Overview'),
+      url: '/dashboard/overview',
+      icon: Activity,
+    },
+    {
+      title: t('Dashboard'),
+      url: '/dashboard/models',
+      icon: LayoutDashboard,
+    },
+    {
+      title: t('API Keys'),
+      url: '/keys',
+      icon: Key,
+    },
+  ]
+  if (
+    isRoot ||
+    user?.role === ROLE.ADMIN ||
+    can(ADMIN_PERMISSION_RESOURCES.USAGE_LOG)
+  ) {
+    generalItems.push({
+      title: t('Usage Logs'),
+      url: '/usage-logs/common',
+      icon: FileText,
+    })
+  }
+  if (
+    isRoot ||
+    user?.role === ROLE.ADMIN ||
+    can(ADMIN_PERMISSION_RESOURCES.TASK_LOG)
+  ) {
+    generalItems.push({
+      title: t('Task Logs'),
+      url: '/usage-logs/task',
+      activeUrls: ['/usage-logs/drawing'],
+      configUrls: ['/usage-logs/drawing', '/usage-logs/task'],
+      icon: ListTodo,
+    })
+  }
 
   return {
     navGroups: [
@@ -70,35 +188,7 @@ export function useSidebarData(): SidebarData {
       {
         id: 'general',
         title: t('General'),
-        items: [
-          {
-            title: t('Overview'),
-            url: '/dashboard/overview',
-            icon: Activity,
-          },
-          {
-            title: t('Dashboard'),
-            url: '/dashboard/models',
-            icon: LayoutDashboard,
-          },
-          {
-            title: t('API Keys'),
-            url: '/keys',
-            icon: Key,
-          },
-          {
-            title: t('Usage Logs'),
-            url: '/usage-logs/common',
-            icon: FileText,
-          },
-          {
-            title: t('Task Logs'),
-            url: '/usage-logs/task',
-            activeUrls: ['/usage-logs/drawing'],
-            configUrls: ['/usage-logs/drawing', '/usage-logs/task'],
-            icon: ListTodo,
-          },
-        ],
+        items: generalItems,
       },
       {
         id: 'personal',
@@ -119,50 +209,7 @@ export function useSidebarData(): SidebarData {
       {
         id: 'admin',
         title: t('Admin'),
-        items: [
-          {
-            title: t('Channels'),
-            url: '/channels',
-            icon: Radio,
-          },
-          {
-            title: t('Models'),
-            url: '/models/metadata',
-            icon: Box,
-          },
-          {
-            title: t('Users'),
-            url: '/users',
-            icon: Users,
-          },
-          {
-            title: t('Redemption Codes'),
-            url: '/redemption-codes',
-            icon: Ticket,
-          },
-          {
-            title: t('Lottery Management'),
-            url: '/lotteries/admin',
-            icon: Trophy,
-          },
-          {
-            title: t('Subscriptions'),
-            url: '/subscriptions',
-            icon: CreditCard,
-          },
-          {
-            title: t('System Info'),
-            url: '/system-info',
-            icon: ServerCog,
-            requiredRole: ROLE.SUPER_ADMIN,
-          },
-          {
-            title: t('System Settings'),
-            url: '/system-settings/site',
-            activeUrls: ['/system-settings'],
-            icon: Settings,
-          },
-        ],
+        items: adminItems,
       },
     ],
   }

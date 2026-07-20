@@ -344,7 +344,13 @@ func SearchUsers(c *gin.Context) {
 }
 
 func canManageTargetRole(myRole int, targetRole int) bool {
-	return myRole == common.RoleRootUser || myRole > targetRole
+	if myRole == common.RoleRootUser {
+		return targetRole != common.RoleRootUser
+	}
+	if targetRole >= common.RoleAuthorizedAdmin {
+		return false
+	}
+	return myRole >= common.RoleAuthorizedAdmin && targetRole == common.RoleCommonUser
 }
 
 func GetUser(c *gin.Context) {
@@ -524,7 +530,7 @@ func calculateUserPermissions(userRole int) map[string]interface{} {
 		// 超级管理员不需要边栏设置功能
 		permissions["sidebar_settings"] = false
 		permissions["sidebar_modules"] = map[string]interface{}{}
-	} else if userRole == common.RoleAdminUser {
+	} else if userRole == common.RoleAdminUser || userRole == common.RoleAuthorizedAdmin {
 		// 管理员可以设置边栏，但不包含系统设置功能
 		permissions["sidebar_settings"] = true
 		permissions["sidebar_modules"] = map[string]interface{}{
@@ -911,7 +917,7 @@ func DeleteUser(c *gin.Context) {
 		return
 	}
 	myRole := c.GetInt("role")
-	if myRole <= originUser.Role {
+	if !canManageTargetRole(myRole, originUser.Role) {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
 		return
 	}
@@ -968,6 +974,10 @@ func CreateUser(c *gin.Context) {
 		user.DisplayName = user.Username
 	}
 	myRole := c.GetInt("role")
+	if myRole != common.RoleRootUser && user.Role != common.RoleCommonUser {
+		common.ApiErrorI18n(c, i18n.MsgUserCannotCreateHigherLevel)
+		return
+	}
 	if user.Role >= myRole {
 		common.ApiErrorI18n(c, i18n.MsgUserCannotCreateHigherLevel)
 		return
@@ -1020,10 +1030,10 @@ func updateAdminPermissionsForUserInTx(c *gin.Context, tx *gorm.DB, userID int, 
 	if c.GetInt("role") != common.RoleRootUser {
 		return false, fmt.Errorf("only root can update admin permissions")
 	}
-	if userRole < common.RoleAdminUser {
+	if userRole != common.RoleAdminUser && userRole != common.RoleAuthorizedAdmin {
 		return true, authz.ClearUserAuthorizationInTx(tx, userID)
 	}
-	return true, authz.SetUserPermissionsInTx(tx, userID, permissions)
+	return true, authz.SetUserPermissionsInTxForRole(tx, userID, userRole, permissions)
 }
 
 type ManageRequest struct {
@@ -1054,6 +1064,22 @@ func ManageUser(c *gin.Context) {
 	myRole := c.GetInt("role")
 	if !canManageTargetRole(myRole, user.Role) {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
+		return
+	}
+	permission := authz.UserWrite
+	switch req.Action {
+	case "disable", "enable":
+		permission = authz.UserSecurity
+	case "add_quota":
+		permission = authz.UserQuota
+	case "delete", "promote", "demote":
+		permission = authz.UserWrite
+	default:
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	if !authz.Can(c.GetInt("id"), myRole, permission) {
+		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
 		return
 	}
 	switch req.Action {

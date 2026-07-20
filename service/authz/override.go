@@ -18,9 +18,17 @@ type overridePolicy struct {
 }
 
 func SetUserPermissions(userID int, permissions PermissionsMap) error {
+	return SetUserPermissionsForRole(userID, common.RoleAdminUser, permissions)
+}
+
+func SetUserPermissionsForRole(userID int, systemRole int, permissions PermissionsMap) error {
 	e := currentEnforcer()
 	if e == nil {
 		return fmt.Errorf("authz enforcer is not initialized")
+	}
+	managedRole, ok := managedRoleKeyForSystemRole(systemRole)
+	if !ok {
+		return fmt.Errorf("system role cannot receive managed permissions")
 	}
 
 	for resource, actions := range permissions {
@@ -30,7 +38,7 @@ func SetUserPermissions(userID int, permissions PermissionsMap) error {
 		if _, err := e.RemoveFilteredPolicy(0, UserSubject(userID), resource); err != nil {
 			return err
 		}
-		for _, policy := range userOverridePolicies(e, resource, actions) {
+		for _, policy := range userOverridePolicies(e, managedRole, resource, actions) {
 			if _, err := e.AddPolicy(UserSubject(userID), policy.Resource, policy.Action, policy.Effect); err != nil {
 				return err
 			}
@@ -40,9 +48,17 @@ func SetUserPermissions(userID int, permissions PermissionsMap) error {
 }
 
 func SetUserPermissionsInTx(tx *gorm.DB, userID int, permissions PermissionsMap) error {
+	return SetUserPermissionsInTxForRole(tx, userID, common.RoleAdminUser, permissions)
+}
+
+func SetUserPermissionsInTxForRole(tx *gorm.DB, userID int, systemRole int, permissions PermissionsMap) error {
 	e := currentEnforcer()
 	if e == nil {
 		return fmt.Errorf("authz enforcer is not initialized")
+	}
+	managedRole, ok := managedRoleKeyForSystemRole(systemRole)
+	if !ok {
+		return fmt.Errorf("system role cannot receive managed permissions")
 	}
 
 	for resource, actions := range permissions {
@@ -52,7 +68,7 @@ func SetUserPermissionsInTx(tx *gorm.DB, userID int, permissions PermissionsMap)
 		if err := tx.Where("ptype = ? AND v0 = ? AND v1 = ?", "p", UserSubject(userID), resource).Delete(&model.CasbinRule{}).Error; err != nil {
 			return err
 		}
-		policies := userOverridePolicies(e, resource, actions)
+		policies := userOverridePolicies(e, managedRole, resource, actions)
 		if len(policies) == 0 {
 			continue
 		}
@@ -135,7 +151,7 @@ func ExplicitUserOverrides(userID int) PermissionsMap {
 
 // userOverridePolicies returns the override entries that differ from the managed
 // role baseline; entries matching the baseline are omitted.
-func userOverridePolicies(e *casbin.SyncedEnforcer, resource string, actions map[string]bool) []overridePolicy {
+func userOverridePolicies(e *casbin.SyncedEnforcer, managedRole string, resource string, actions map[string]bool) []overridePolicy {
 	overrides := make([]overridePolicy, 0, len(actions))
 	for _, action := range catalogActions(resource) {
 		desired, ok := actions[action.Action]
@@ -143,7 +159,7 @@ func userOverridePolicies(e *casbin.SyncedEnforcer, resource string, actions map
 			continue
 		}
 		permission := Permission{Resource: resource, Action: action.Action}
-		if desired == roleBaselineAllows(e, managedRoleKey, permission) {
+		if desired == roleBaselineAllows(e, managedRole, permission) {
 			continue
 		}
 		effect := EffectDeny

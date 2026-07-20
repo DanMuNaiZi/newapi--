@@ -160,6 +160,21 @@ func formatAdminLogs(logs []*Log) {
 	}
 }
 
+// HideActualModelNames preserves the operational log fields available to an
+// authorized administrator while removing the upstream model identity.
+func HideActualModelNames(logs []*Log) {
+	for i := range logs {
+		logs[i].ActualModelName = ""
+		otherMap, _ := common.StrToMap(logs[i].Other)
+		if otherMap == nil {
+			continue
+		}
+		delete(otherMap, "upstream_model_name")
+		delete(otherMap, "is_model_mapped")
+		logs[i].Other = common.MapToJsonStr(otherMap)
+	}
+}
+
 func GetLogByTokenId(tokenId int) (logs []*Log, err error) {
 	order := "id desc"
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
