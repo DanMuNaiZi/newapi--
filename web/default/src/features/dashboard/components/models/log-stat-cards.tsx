@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { Skeleton } from '@/components/ui/skeleton'
 import { getUserQuotaDates } from '@/features/dashboard/api'
 import { useModelStatCardsConfig } from '@/features/dashboard/hooks/use-dashboard-config'
+import { useReportAccess } from '@/features/dashboard/hooks/use-report-access'
 import {
   buildQueryParams,
   calculateDashboardStats,
@@ -35,7 +36,6 @@ import { toIntlLocale } from '@/i18n/languages'
 import { formatCompactNumber, formatNumber, formatQuota } from '@/lib/format'
 import { computeTimeRange } from '@/lib/time'
 import { cn } from '@/lib/utils'
-import { useAuthStore } from '@/stores/auth-store'
 
 interface LogStatCardsProps {
   filters?: DashboardFilters
@@ -60,8 +60,7 @@ function formatStatNumber(value: number, locale: Intl.LocalesArgument) {
 export function LogStatCards(props: LogStatCardsProps) {
   const { i18n } = useTranslation()
   const statCardsConfig = useModelStatCardsConfig()
-  const user = useAuthStore((state) => state.auth.user)
-  const isAdmin = !!(user?.role && user.role >= 10)
+  const { canViewGlobalReports } = useReportAccess()
   const [stats, setStats] = useState<{
     totalQuota: number
     totalCount: number
@@ -90,7 +89,10 @@ export function LogStatCards(props: LogStatCardsProps) {
     const timeDiff = (timeRange.end_timestamp - timeRange.start_timestamp) / 60
     setTimeRangeMinutes(timeDiff)
 
-    getUserQuotaDates(buildQueryParams(timeRange, filters), isAdmin)
+    getUserQuotaDates(
+      buildQueryParams(timeRange, filters),
+      canViewGlobalReports
+    )
       .then((res) => {
         if (abortController.signal.aborted) return
         const data = res?.data || []
@@ -112,7 +114,7 @@ export function LogStatCards(props: LogStatCardsProps) {
     return () => {
       abortController.abort()
     }
-  }, [filters, isAdmin, onDataUpdate])
+  }, [filters, canViewGlobalReports, onDataUpdate])
 
   const adaptedStats = {
     rpm: stats?.totalCount ?? 0,

@@ -60,6 +60,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { getFlowQuotaDates } from '@/features/dashboard/api'
+import { useReportAccess } from '@/features/dashboard/hooks/use-report-access'
 import {
   buildDashboardFlowData,
   buildFlowSankeySpec,
@@ -256,12 +257,12 @@ export function FlowCharts(props: FlowChartsProps) {
   const { resolvedTheme, themeReady } = useChartTheme()
   const chartInstanceRef = useRef<IVChart | null>(null)
   const user = useAuthStore((state) => state.auth.user)
+  const { canViewGlobalReports } = useReportAccess()
   const isRoot = Boolean(user?.role && user.role >= ROLE.SUPER_ADMIN)
-  const isAdmin = Boolean(user?.role && user.role >= ROLE.ADMIN)
   let flowRole: FlowRole = 'user'
   if (isRoot) {
     flowRole = 'root'
-  } else if (isAdmin) {
+  } else if (canViewGlobalReports) {
     flowRole = 'admin'
   }
   const [metric, setMetric] = useState<FlowMetric>('quota')
@@ -335,7 +336,7 @@ export function FlowCharts(props: FlowChartsProps) {
     isLoading,
   } = useQuery({
     queryKey: ['dashboard', 'flow', flowQueryParams, flowRole],
-    queryFn: () => getFlowQuotaDates(flowQueryParams, isAdmin),
+    queryFn: () => getFlowQuotaDates(flowQueryParams, canViewGlobalReports),
     select: (res) =>
       requireSuccessfulFlowRows(res, t('Please try again later.')),
     staleTime: 60_000,
@@ -642,7 +643,7 @@ export function FlowCharts(props: FlowChartsProps) {
         </div>
 
         <div className='flex min-w-0 items-center gap-2 xl:justify-end'>
-          {isAdmin && (
+          {canViewGlobalReports && (
             <div className='flex min-w-0 flex-col gap-2 sm:flex-row xl:w-[min(24rem,34vw)]'>
               <MultiSelect
                 options={userFilterOptions}

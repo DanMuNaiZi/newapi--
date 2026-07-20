@@ -19,6 +19,7 @@ export const ADMIN_PERMISSION_RESOURCES = {
   OAUTH: 'oauth',
   SYSTEM_INFO: 'system_info',
   TASK_LOG: 'task_log',
+  REPORT: 'report',
 } as const
 
 export const ADMIN_PERMISSION_ACTIONS = {

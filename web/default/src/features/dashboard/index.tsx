@@ -37,6 +37,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { ModelsChartPreferences } from './components/models/models-chart-preferences'
 import { ModelsFilter } from './components/models/models-filter-dialog'
 import { OverviewDashboard } from './components/overview/overview-dashboard'
+import { useReportAccess } from './hooks/use-report-access'
 import { DEFAULT_TIME_GRANULARITY } from './constants'
 import {
   buildDefaultDashboardFilters,
@@ -216,13 +217,16 @@ export function Dashboard() {
   )
 
   const meta = SECTION_META[activeSection] ?? SECTION_META.overview
+  const { canViewGlobalReports } = useReportAccess()
   const isAdmin = Boolean(userRole && userRole >= ROLE.ADMIN)
   const visibleSections = useMemo(
     () =>
       DASHBOARD_SECTION_IDS.filter(
-        (section) => section !== 'overview' && (section !== 'users' || isAdmin)
+        (section) =>
+          section !== 'overview' &&
+          (section !== 'users' || canViewGlobalReports)
       ),
-    [isAdmin]
+    [canViewGlobalReports]
   )
   const handleSectionChange = useCallback(
     (section: string) => {
@@ -362,7 +366,7 @@ export function Dashboard() {
               </FadeIn>
             </>
           )}
-          {activeSection === 'users' && (
+          {activeSection === 'users' && canViewGlobalReports && (
             <FadeIn>
               <Suspense fallback={<ModelChartsFallback />}>
                 <LazyUserCharts
