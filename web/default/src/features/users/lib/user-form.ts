@@ -105,6 +105,7 @@ export function transformFormDataToPayload(
     // For update: quota is adjusted atomically via /api/user/manage, not sent here
     payload.group = data.group
     payload.remark = data.remark || undefined
+    payload.role = role
     payload.id = userId
   }
 

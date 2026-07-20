@@ -681,16 +681,23 @@ func UpdateUser(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	if updatedUser.Role != common.RoleGuestUser && updatedUser.Role != originUser.Role {
-		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
-		return
-	}
-	updatedUser.Role = originUser.Role
 	myRole := c.GetInt("role")
 	if !canManageTargetRole(myRole, originUser.Role) {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
 		return
 	}
+	if updatedUser.Role == common.RoleGuestUser {
+		updatedUser.Role = originUser.Role
+	} else if updatedUser.Role != originUser.Role {
+		if myRole != common.RoleRootUser ||
+			(updatedUser.Role != common.RoleCommonUser &&
+				updatedUser.Role != common.RoleAuthorizedAdmin &&
+				updatedUser.Role != common.RoleAdminUser) {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
+	}
+	targetRole := updatedUser.Role
 	if updatedUser.Password == "$I_LOVE_U" {
 		updatedUser.Password = "" // rollback to what it should be
 	}
@@ -700,7 +707,12 @@ func UpdateUser(c *gin.Context) {
 		if err := updatedUser.EditWithTx(tx, updatePassword); err != nil {
 			return err
 		}
-		touched, err := updateAdminPermissionsForUserInTx(c, tx, updatedUser.Id, originUser.Role, updatedUser.AdminPermissions)
+		if targetRole != originUser.Role {
+			if err := tx.Model(&model.User{}).Where("id = ?", updatedUser.Id).Update("role", targetRole).Error; err != nil {
+				return err
+			}
+		}
+		touched, err := updateAdminPermissionsForUserInTx(c, tx, updatedUser.Id, targetRole, updatedUser.AdminPermissions)
 		authzTouched = touched
 		return err
 	}); err != nil {
@@ -719,6 +731,7 @@ func UpdateUser(c *gin.Context) {
 	recordManageAuditFor(c, updatedUser.Id, "user.update", map[string]interface{}{
 		"username": originUser.Username,
 		"id":       updatedUser.Id,
+		"role":     targetRole,
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

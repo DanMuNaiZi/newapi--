@@ -269,7 +269,7 @@ export function UsersMutateDrawer({
                   )}
                 />
 
-                {!isUpdate && (
+                {(!isUpdate || canEditAdminPermissions) && (
                   <FormField
                     control={form.control}
                     name='role'
