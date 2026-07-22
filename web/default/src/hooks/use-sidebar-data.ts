@@ -141,18 +141,12 @@ export function useSidebarData(): SidebarData {
       url: '/keys',
       icon: Key,
     },
-  ]
-  if (
-    isRoot ||
-    user?.role === ROLE.ADMIN ||
-    can(ADMIN_PERMISSION_RESOURCES.USAGE_LOG)
-  ) {
-    generalItems.push({
+    {
       title: t('Usage Logs'),
       url: '/usage-logs/common',
       icon: FileText,
-    })
-  }
+    },
+  ]
   if (
     isRoot ||
     user?.role === ROLE.ADMIN ||

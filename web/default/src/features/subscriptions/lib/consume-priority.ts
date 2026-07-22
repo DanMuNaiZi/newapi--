@@ -1,7 +1,10 @@
+export type SubscriptionDropPosition = 'before' | 'after'
+
 export function reorderSubscriptionIds(
   subscriptionIds: number[],
   activeId: number,
-  overId: number
+  overId: number,
+  position: SubscriptionDropPosition = 'before'
 ): number[] {
   const activeIndex = subscriptionIds.indexOf(activeId)
   const overIndex = subscriptionIds.indexOf(overId)
@@ -10,6 +13,7 @@ export function reorderSubscriptionIds(
   }
   const next = [...subscriptionIds]
   const [movedId] = next.splice(activeIndex, 1)
-  next.splice(overIndex, 0, movedId)
+  const targetIndex = next.indexOf(overId)
+  next.splice(targetIndex + (position === 'after' ? 1 : 0), 0, movedId)
   return next
 }

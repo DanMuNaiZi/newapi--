@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Crown, RefreshCw, Sparkles, Check, GripVertical, RotateCcw } from 'lucide-react'
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, type DragEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -58,6 +58,7 @@ import {
   formatResetPeriod,
   reorderSubscriptionIds,
 } from '@/features/subscriptions/lib'
+import type { SubscriptionDropPosition } from '@/features/subscriptions/lib/consume-priority'
 import type {
   PlanRecord,
   UserSubscriptionRecord,
@@ -116,8 +117,17 @@ export function SubscriptionPlansCard({
   const [billingPreference, setBillingPreference] =
     useState('subscription_first')
   const [consumePriorityIds, setConsumePriorityIds] = useState<number[]>([])
-  const [draggedSubscriptionId, setDraggedSubscriptionId] = useState<number | null>(null)
-  const [consumePriorityDirty, setConsumePriorityDirty] = useState(false)
+  const [draggedSubscriptionId, setDraggedSubscriptionId] = useState<
+    number | null
+  >(null)
+  const [dragOverSubscriptionId, setDragOverSubscriptionId] = useState<
+    number | null
+  >(null)
+  const [dragOverPosition, setDragOverPosition] =
+    useState<SubscriptionDropPosition>('before')
+  const [savedConsumePriorityIds, setSavedConsumePriorityIds] = useState<
+    number[]
+  >([])
   const [consumePrioritySaving, setConsumePrioritySaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -154,12 +164,11 @@ export function SubscriptionPlansCard({
         )
         setActiveSubscriptions(res.data.subscriptions || [])
         setAllSubscriptions(res.data.all_subscriptions || [])
-        setConsumePriorityIds(
-          (res.data.subscriptions || [])
-            .map((item) => item.subscription?.id)
-            .filter((id): id is number => typeof id === 'number')
-        )
-        setConsumePriorityDirty(false)
+        const priorityIds = (res.data.subscriptions || [])
+          .map((item) => item.subscription?.id)
+          .filter((id): id is number => typeof id === 'number')
+        setConsumePriorityIds(priorityIds)
+        setSavedConsumePriorityIds(priorityIds)
       }
     } catch {
       // ignore
@@ -272,6 +281,13 @@ export function SubscriptionPlansCard({
     return [...active, ...inactive]
   }, [allSubscriptions, consumePriorityIds])
 
+  const consumePriorityDirty = useMemo(
+    () =>
+      consumePriorityIds.length !== savedConsumePriorityIds.length ||
+      consumePriorityIds.some((id, index) => id !== savedConsumePriorityIds[index]),
+    [consumePriorityIds, savedConsumePriorityIds]
+  )
+
   const saveConsumePriority = async () => {
     setConsumePrioritySaving(true)
     try {
@@ -315,8 +331,8 @@ export function SubscriptionPlansCard({
         <CardContent className='space-y-4 p-3 sm:p-5'>
           <Skeleton className='h-20 w-full' />
           <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3'>
-            {Array.from({ length: 3 }).map((_, i) => (
-              <Skeleton key={i} className='h-48 w-full' />
+            {['first', 'second', 'third'].map((key) => (
+              <Skeleton key={key} className='h-48 w-full' />
             ))}
           </div>
         </CardContent>
@@ -498,6 +514,7 @@ export function SubscriptionPlansCard({
               <div className='max-h-64 space-y-3 overflow-y-auto pr-1'>
                 {orderedSubscriptions.map((sub) => {
                   const subscription = sub.subscription
+                  const subscriptionId = subscription?.id
                   const totalAmount = Number(subscription?.amount_total || 0)
                   const usedAmount = Number(subscription?.amount_used || 0)
                   const remainAmount =
@@ -511,34 +528,105 @@ export function SubscriptionPlansCard({
                   const isCancelled = subscription?.status === 'cancelled'
                   const isActive =
                     subscription?.status === 'active' && !isExpired
+                  const isDragged =
+                    isActive && subscriptionId === draggedSubscriptionId
+                  const isDropTarget =
+                    isActive &&
+                    subscriptionId !== undefined &&
+                    subscriptionId !== draggedSubscriptionId &&
+                    subscriptionId === dragOverSubscriptionId
+                  const nextResetTime = subscription?.next_reset_time ?? 0
+                  let statusLabel = t('Expired')
+                  let subscriptionTimeLabel = t('Expired at')
+                  if (isActive) {
+                    statusLabel = t('Active')
+                    subscriptionTimeLabel = t('Until')
+                  } else if (isCancelled) {
+                    statusLabel = t('Cancelled')
+                    subscriptionTimeLabel = t('Cancelled at')
+                  }
 
                   return (
                     <div
-                      key={subscription?.id}
+                      key={subscriptionId}
                       draggable={isActive}
-                      onDragStart={() =>
-                        setDraggedSubscriptionId(subscription?.id ?? null)
-                      }
-                      onDragOver={(event) => {
-                        if (isActive) event.preventDefault()
+                      onDragStart={(event: DragEvent<HTMLDivElement>) => {
+                        if (!isActive || subscriptionId === undefined) return
+                        event.dataTransfer.effectAllowed = 'move'
+                        event.dataTransfer.setData('text/plain', String(subscriptionId))
+                        const dragPreview = document.createElement('div')
+                        dragPreview.style.cssText =
+                          'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none'
+                        document.body.append(dragPreview)
+                        event.dataTransfer.setDragImage(dragPreview, 0, 0)
+                        requestAnimationFrame(() => dragPreview.remove())
+                        setDraggedSubscriptionId(subscriptionId)
                       }}
-                      onDrop={(event) => {
+                      onDragOver={(event: DragEvent<HTMLDivElement>) => {
+                        if (
+                          !isActive ||
+                          subscriptionId === undefined ||
+                          subscriptionId === draggedSubscriptionId
+                        ) {
+                          return
+                        }
                         event.preventDefault()
-                        if (!isActive || draggedSubscriptionId === null) return
-                        const next = reorderSubscriptionIds(
-                          consumePriorityIds,
-                          draggedSubscriptionId,
-                          subscription?.id ?? 0
+                        event.dataTransfer.dropEffect = 'move'
+                        const bounds = event.currentTarget.getBoundingClientRect()
+                        const position: SubscriptionDropPosition =
+                          event.clientY < bounds.top + bounds.height / 2
+                            ? 'before'
+                            : 'after'
+                        setDragOverSubscriptionId((current) =>
+                          current === subscriptionId ? current : subscriptionId
                         )
-                        setConsumePriorityIds(next)
-                        setConsumePriorityDirty(next !== consumePriorityIds)
-                        setDraggedSubscriptionId(null)
+                        setDragOverPosition((current) =>
+                          current === position ? current : position
+                        )
                       }}
-                      onDragEnd={() => setDraggedSubscriptionId(null)}
+                      onDrop={(event: DragEvent<HTMLDivElement>) => {
+                        event.preventDefault()
+                        if (
+                          !isActive ||
+                          subscriptionId === undefined ||
+                          draggedSubscriptionId === null
+                        ) {
+                          return
+                        }
+                        const bounds = event.currentTarget.getBoundingClientRect()
+                        const position: SubscriptionDropPosition =
+                          event.clientY < bounds.top + bounds.height / 2
+                            ? 'before'
+                            : 'after'
+                        setConsumePriorityIds((current) =>
+                          reorderSubscriptionIds(
+                            current,
+                            draggedSubscriptionId,
+                            subscriptionId,
+                            position
+                          )
+                        )
+                        setDraggedSubscriptionId(null)
+                        setDragOverSubscriptionId(null)
+                        setDragOverPosition('before')
+                      }}
+                      onDragEnd={() => {
+                        setDraggedSubscriptionId(null)
+                        setDragOverSubscriptionId(null)
+                        setDragOverPosition('before')
+                      }}
                       className={cn(
-                        'bg-background rounded-md border p-3 text-xs',
+                        'bg-background relative rounded-md border p-3 text-xs transition-[opacity,border-color,background-color] duration-150',
                         isActive &&
-                          'cursor-grab active:cursor-grabbing hover:border-primary/50'
+                          'cursor-grab active:cursor-grabbing hover:border-primary/50',
+                        isDragged && 'opacity-40',
+                        isDropTarget && 'border-primary bg-primary/5',
+                        isDropTarget &&
+                          dragOverPosition === 'before' &&
+                          'before:bg-primary before:absolute before:-top-1 before:left-3 before:right-3 before:h-0.5 before:rounded-full',
+                        isDropTarget &&
+                          dragOverPosition === 'after' &&
+                          'after:bg-primary after:absolute after:-bottom-1 after:left-3 after:right-3 after:h-0.5 after:rounded-full'
                       )}
                     >
                       <div className='flex items-center justify-between'>
@@ -554,25 +642,11 @@ export function SubscriptionPlansCard({
                               ? `${planTitle} · ${t('Subscription')} #${subscription?.id}`
                               : `${t('Subscription')} #${subscription?.id}`}
                           </span>
-                          {isActive ? (
-                            <StatusBadge
-                              label={t('Active')}
-                              variant='success'
-                              copyable={false}
-                            />
-                          ) : isCancelled ? (
-                            <StatusBadge
-                              label={t('Cancelled')}
-                              variant='neutral'
-                              copyable={false}
-                            />
-                          ) : (
-                            <StatusBadge
-                              label={t('Expired')}
-                              variant='neutral'
-                              copyable={false}
-                            />
-                          )}
+                          <StatusBadge
+                            label={statusLabel}
+                            variant={isActive ? 'success' : 'neutral'}
+                            copyable={false}
+                          />
                         </div>
                         {isActive && (
                           <span className='text-muted-foreground'>
@@ -583,21 +657,15 @@ export function SubscriptionPlansCard({
                         )}
                       </div>
                       <div className='text-muted-foreground mt-1.5'>
-                        {isActive
-                          ? t('Until')
-                          : isCancelled
-                            ? t('Cancelled at')
-                            : t('Expired at')}{' '}
+                        {subscriptionTimeLabel}{' '}
                         {new Date(
                           (subscription?.end_time || 0) * 1000
                         ).toLocaleString()}
                       </div>
-                      {isActive && (subscription?.next_reset_time ?? 0) > 0 && (
+                      {isActive && nextResetTime > 0 && (
                         <div className='text-muted-foreground mt-1'>
                           {t('Next reset')}:{' '}
-                          {new Date(
-                            subscription!.next_reset_time! * 1000
-                          ).toLocaleString()}
+                          {new Date(nextResetTime * 1000).toLocaleString()}
                         </div>
                       )}
                       <div className='text-muted-foreground mt-1'>
