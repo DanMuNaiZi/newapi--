@@ -38,3 +38,42 @@ func TestRelayInfoGetFinalRequestRelayFormatNilReceiver(t *testing.T) {
 	var info *RelayInfo
 	require.Equal(t, types.RelayFormat(""), info.GetFinalRequestRelayFormat())
 }
+
+func TestMaskMappedModelInClientErrorUsesRequestedModel(t *testing.T) {
+	apiErr := types.WithOpenAIError(types.OpenAIError{
+		Message: "auth_unavailable: no auth available (providers=codex, model=gpt-5.6-terra)",
+		Type:    "upstream_error",
+		Code:    "auth_unavailable",
+	}, 503)
+	info := &RelayInfo{
+		RequestModelName: "codex",
+		ChannelMeta: &ChannelMeta{
+			IsModelMapped:     true,
+			UpstreamModelName: "gpt-5.6-terra",
+		},
+	}
+
+	MaskMappedModelInClientError(info, apiErr)
+
+	require.Equal(t, "auth_unavailable: no auth available (providers=codex, model=codex)", apiErr.Error())
+	require.Equal(t, "auth_unavailable: no auth available (providers=codex, model=codex)", apiErr.ToOpenAIError().Message)
+}
+
+func TestMaskMappedModelInClientErrorDoesNotReplaceModelPrefix(t *testing.T) {
+	apiErr := types.WithOpenAIError(types.OpenAIError{
+		Message: "model=gpt-5.6-terra-mini is unavailable",
+		Type:    "upstream_error",
+		Code:    "auth_unavailable",
+	}, 503)
+	info := &RelayInfo{
+		RequestModelName: "codex",
+		ChannelMeta: &ChannelMeta{
+			IsModelMapped:     true,
+			UpstreamModelName: "gpt-5.6-terra",
+		},
+	}
+
+	MaskMappedModelInClientError(info, apiErr)
+
+	require.Equal(t, "model=gpt-5.6-terra-mini is unavailable", apiErr.ToOpenAIError().Message)
+}

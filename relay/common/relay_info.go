@@ -102,6 +102,7 @@ type RelayInfo struct {
 	IsPlayground           bool
 	UsePrice               bool
 	RelayMode              int
+	RequestModelName       string
 	OriginModelName        string
 	RequestURLPath         string
 	RequestHeaders         map[string]string
@@ -321,6 +322,45 @@ func (info *RelayInfo) ToString() string {
 	return b.String()
 }
 
+// MaskMappedModelInClientError keeps an upstream model alias out of the error
+// returned to the client while retaining it for channel selection and logs.
+func MaskMappedModelInClientError(info *RelayInfo, apiErr *types.NewAPIError) {
+	if info == nil || info.ChannelMeta == nil || !info.IsModelMapped || apiErr == nil {
+		return
+	}
+	if info.RequestModelName == "" || info.UpstreamModelName == "" || info.RequestModelName == info.UpstreamModelName {
+		return
+	}
+
+	replaceMessage := func(message string) string {
+		needle := "model=" + info.UpstreamModelName
+		for start := 0; ; {
+			index := strings.Index(message[start:], needle)
+			if index < 0 {
+				return message
+			}
+			index += start
+			end := index + len(needle)
+			if end == len(message) || strings.ContainsRune(" \t\r\n,;:)]}\"'", rune(message[end])) {
+				message = message[:index] + "model=" + info.RequestModelName + message[end:]
+				start = index + len("model=") + len(info.RequestModelName)
+				continue
+			}
+			start = end
+		}
+	}
+
+	apiErr.SetMessage(replaceMessage(apiErr.Error()))
+	switch relayErr := apiErr.RelayError.(type) {
+	case types.OpenAIError:
+		relayErr.Message = replaceMessage(relayErr.Message)
+		apiErr.RelayError = relayErr
+	case types.ClaudeError:
+		relayErr.Message = replaceMessage(relayErr.Message)
+		apiErr.RelayError = relayErr
+	}
+}
+
 // 定义支持流式选项的通道类型
 var streamSupportedChannels = map[int]bool{
 	constant.ChannelTypeOpenAI:         true,
@@ -476,7 +516,8 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		UserQuota:  common.GetContextKeyInt(c, constant.ContextKeyUserQuota),
 		UserEmail:  common.GetContextKeyString(c, constant.ContextKeyUserEmail),
 
-		OriginModelName: common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
+		RequestModelName: common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
+		OriginModelName:  common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
 
 		TokenId:        common.GetContextKeyInt(c, constant.ContextKeyTokenId),
 		TokenKey:       common.GetContextKeyString(c, constant.ContextKeyTokenKey),
