@@ -77,3 +77,33 @@ func TestMaskMappedModelInClientErrorDoesNotReplaceModelPrefix(t *testing.T) {
 
 	require.Equal(t, "model=gpt-5.6-terra-mini is unavailable", apiErr.ToOpenAIError().Message)
 }
+
+func TestClientVisibleErrorMessageUsesRequestedModelInErrorLog(t *testing.T) {
+	info := &RelayInfo{
+		RequestModelName: "gpt-5.6-sol",
+		ChannelMeta: &ChannelMeta{
+			IsModelMapped:     true,
+			UpstreamModelName: "gpt-5.6-terra",
+		},
+	}
+
+	content := ClientVisibleErrorMessage(info, "status_code=503, auth_unavailable: no auth available (providers=codex, model=gpt-5.6-terra)")
+
+	require.Equal(t, "status_code=503, auth_unavailable: no auth available (providers=codex, model=gpt-5.6-sol)", content)
+}
+
+func TestAppendMappedModelAdminInfoRetainsUpstreamModel(t *testing.T) {
+	info := &RelayInfo{
+		RequestModelName: "gpt-5.6-sol",
+		ChannelMeta: &ChannelMeta{
+			IsModelMapped:     true,
+			UpstreamModelName: "gpt-5.6-terra",
+		},
+	}
+	adminInfo := make(map[string]interface{})
+
+	AppendMappedModelAdminInfo(info, adminInfo)
+
+	require.Equal(t, true, adminInfo["is_model_mapped"])
+	require.Equal(t, "gpt-5.6-terra", adminInfo["upstream_model_name"])
+}

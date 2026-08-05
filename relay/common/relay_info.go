@@ -322,41 +322,60 @@ func (info *RelayInfo) ToString() string {
 	return b.String()
 }
 
-// MaskMappedModelInClientError keeps an upstream model alias out of the error
-// returned to the client while retaining it for channel selection and logs.
-func MaskMappedModelInClientError(info *RelayInfo, apiErr *types.NewAPIError) {
-	if info == nil || info.ChannelMeta == nil || !info.IsModelMapped || apiErr == nil {
+// ClientVisibleErrorMessage replaces an upstream mapped model alias with the
+// model requested by the client, without changing the original error object.
+func ClientVisibleErrorMessage(info *RelayInfo, message string) string {
+	if info == nil || info.ChannelMeta == nil || !info.IsModelMapped {
+		return message
+	}
+	if info.RequestModelName == "" || info.UpstreamModelName == "" || info.RequestModelName == info.UpstreamModelName {
+		return message
+	}
+
+	needle := "model=" + info.UpstreamModelName
+	for start := 0; ; {
+		index := strings.Index(message[start:], needle)
+		if index < 0 {
+			return message
+		}
+		index += start
+		end := index + len(needle)
+		if end == len(message) || strings.ContainsRune(" \t\r\n,;:)]}\"'", rune(message[end])) {
+			message = message[:index] + "model=" + info.RequestModelName + message[end:]
+			start = index + len("model=") + len(info.RequestModelName)
+			continue
+		}
+		start = end
+	}
+}
+
+// AppendMappedModelAdminInfo retains the actual upstream model for
+// administrator-only troubleshooting fields.
+func AppendMappedModelAdminInfo(info *RelayInfo, adminInfo map[string]interface{}) {
+	if info == nil || info.ChannelMeta == nil || adminInfo == nil || !info.IsModelMapped {
 		return
 	}
 	if info.RequestModelName == "" || info.UpstreamModelName == "" || info.RequestModelName == info.UpstreamModelName {
 		return
 	}
+	adminInfo["is_model_mapped"] = true
+	adminInfo["upstream_model_name"] = info.UpstreamModelName
+}
 
-	replaceMessage := func(message string) string {
-		needle := "model=" + info.UpstreamModelName
-		for start := 0; ; {
-			index := strings.Index(message[start:], needle)
-			if index < 0 {
-				return message
-			}
-			index += start
-			end := index + len(needle)
-			if end == len(message) || strings.ContainsRune(" \t\r\n,;:)]}\"'", rune(message[end])) {
-				message = message[:index] + "model=" + info.RequestModelName + message[end:]
-				start = index + len("model=") + len(info.RequestModelName)
-				continue
-			}
-			start = end
-		}
+// MaskMappedModelInClientError keeps an upstream model alias out of the error
+// returned to the client while retaining it for channel selection and logs.
+func MaskMappedModelInClientError(info *RelayInfo, apiErr *types.NewAPIError) {
+	if apiErr == nil {
+		return
 	}
 
-	apiErr.SetMessage(replaceMessage(apiErr.Error()))
+	apiErr.SetMessage(ClientVisibleErrorMessage(info, apiErr.Error()))
 	switch relayErr := apiErr.RelayError.(type) {
 	case types.OpenAIError:
-		relayErr.Message = replaceMessage(relayErr.Message)
+		relayErr.Message = ClientVisibleErrorMessage(info, relayErr.Message)
 		apiErr.RelayError = relayErr
 	case types.ClaudeError:
-		relayErr.Message = replaceMessage(relayErr.Message)
+		relayErr.Message = ClientVisibleErrorMessage(info, relayErr.Message)
 		apiErr.RelayError = relayErr
 	}
 }
