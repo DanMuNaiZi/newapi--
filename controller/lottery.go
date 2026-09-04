@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -39,6 +40,12 @@ type lotteryParticipantUpdateRequest struct {
 	Weight        *int `json:"weight"`
 	PresetPrizeId *int `json:"preset_prize_id"`
 }
+
+type lotteryNotificationReadRequest struct {
+	Ids []int `json:"ids"`
+}
+
+const lotteryNotificationReadMaxIds = 50
 
 // GetLotteryPlansForSelf returns only plans the authenticated user may see.
 // Eligibility remains enforced in model.ListLotteryPlansForUser so clients
@@ -120,7 +127,39 @@ func ClaimLotteryResultForSelf(c *gin.Context) {
 }
 
 func GetLotteryResultsForSelf(c *gin.Context) {
-	results, err := model.ListLotteryResultsForUser(c.GetInt("id"))
+	results, err := model.ListLotterySelfResultsForUser(c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, results)
+}
+
+func GetLotteryResultsPageForSelf(c *gin.Context) {
+	limit, err := lotterySelfHistoryLimit(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	beforeCreatedAt, beforeId, err := lotteryHistoryCursor(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	page, err := model.ListLotterySelfResultsForUserPage(c.GetInt("id"), limit, beforeCreatedAt, beforeId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if page.HasMore && len(page.Items) > 0 {
+		lastItem := page.Items[len(page.Items)-1]
+		page.NextCursor = lotteryHistoryNextCursor(lastItem.CreatedAt, lastItem.Id)
+	}
+	common.ApiSuccess(c, page)
+}
+
+func GetClaimableLotteryResultsForSelf(c *gin.Context) {
+	results, err := model.ListClaimableLotterySelfResultsForUser(c.GetInt("id"))
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -135,6 +174,65 @@ func GetLotteryNotificationsForSelf(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, notifications)
+}
+
+func GetLotteryNotificationsPageForSelf(c *gin.Context) {
+	limit, err := lotterySelfHistoryLimit(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	beforeCreatedAt, beforeId, err := lotteryHistoryCursor(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	page, err := model.ListLotteryNotificationsForUserPage(
+		c.GetInt("id"),
+		limit,
+		c.Query("unread_only") == "true",
+		beforeCreatedAt,
+		beforeId,
+	)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if page.HasMore && len(page.Items) > 0 {
+		lastItem := page.Items[len(page.Items)-1]
+		page.NextCursor = lotteryHistoryNextCursor(lastItem.CreatedAt, lastItem.Id)
+	}
+	common.ApiSuccess(c, page)
+}
+
+func MarkLotteryNotificationsReadForSelf(c *gin.Context) {
+	req := lotteryNotificationReadRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if len(req.Ids) == 0 || len(req.Ids) > lotteryNotificationReadMaxIds {
+		common.ApiErrorMsg(c, "invalid lottery notification ids")
+		return
+	}
+	seen := make(map[int]struct{}, len(req.Ids))
+	notificationIds := make([]int, 0, len(req.Ids))
+	for _, notificationId := range req.Ids {
+		if notificationId <= 0 {
+			common.ApiErrorMsg(c, "invalid lottery notification ids")
+			return
+		}
+		if _, duplicate := seen[notificationId]; duplicate {
+			continue
+		}
+		seen[notificationId] = struct{}{}
+		notificationIds = append(notificationIds, notificationId)
+	}
+	if err := model.MarkLotteryNotificationsReadForUser(c.GetInt("id"), notificationIds); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, nil)
 }
 
 func AdminCreateLotteryPlan(c *gin.Context) {
@@ -334,4 +432,40 @@ func lotteryPathID(c *gin.Context) (int, error) {
 		return 0, errors.New("invalid lottery id")
 	}
 	return id, nil
+}
+
+func lotterySelfHistoryLimit(c *gin.Context) (int, error) {
+	rawLimit := c.Query("limit")
+	if rawLimit == "" {
+		return 0, nil
+	}
+	limit, err := strconv.Atoi(rawLimit)
+	if err != nil || limit <= 0 {
+		return 0, errors.New("invalid lottery history limit")
+	}
+	return limit, nil
+}
+
+func lotteryHistoryCursor(c *gin.Context) (int64, int, error) {
+	rawCursor := strings.TrimSpace(c.Query("cursor"))
+	if rawCursor == "" {
+		return 0, 0, nil
+	}
+	parts := strings.Split(rawCursor, ":")
+	if len(parts) != 2 {
+		return 0, 0, errors.New("invalid lottery history cursor")
+	}
+	createdAt, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || createdAt < 0 {
+		return 0, 0, errors.New("invalid lottery history cursor")
+	}
+	id, err := strconv.Atoi(parts[1])
+	if err != nil || id <= 0 {
+		return 0, 0, errors.New("invalid lottery history cursor")
+	}
+	return createdAt, id, nil
+}
+
+func lotteryHistoryNextCursor(createdAt int64, id int) string {
+	return strconv.FormatInt(createdAt, 10) + ":" + strconv.Itoa(id)
 }

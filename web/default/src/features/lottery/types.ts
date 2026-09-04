@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
 export type LotteryPlanStatus =
   | 'draft'
   | 'scheduled'
@@ -54,6 +53,34 @@ export interface LotteryResult {
   claimed_at: number
   redemption_code: string
   created_at: number
+}
+
+export interface LotteryNotification {
+  id: number
+  user_id: number
+  plan_id: number
+  type: string
+  content: string
+  read_at: number
+  created_at: number
+}
+
+export interface LotterySelfResult extends LotteryResult {
+  claim_status: string
+  claimable: boolean
+}
+
+export interface LotteryResultPage {
+  items: LotterySelfResult[]
+  next_cursor?: string
+  has_more: boolean
+}
+
+export interface LotteryNotificationPage {
+  items: LotteryNotification[]
+  next_cursor?: string
+  has_more: boolean
+  unread_total: number
 }
 
 export interface LotteryResultView extends LotteryResult {

@@ -16,16 +16,26 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute } from '@tanstack/react-router'
-import z from 'zod'
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
 
-import { Lotteries } from '@/features/lottery'
+import { mergeLotteryPages } from './pagination'
 
-const lotterySearchSchema = z.object({
-  plan: z.number().optional().catch(undefined),
-})
+test('merges lottery pages in order without repeating IDs', () => {
+  const items = mergeLotteryPages([
+    [
+      { id: 3, title: 'newest' },
+      { id: 2, title: 'middle' },
+    ],
+    [
+      { id: 2, title: 'duplicate' },
+      { id: 1, title: 'oldest' },
+    ],
+  ])
 
-export const Route = createFileRoute('/_authenticated/lotteries/')({
-  validateSearch: lotterySearchSchema,
-  component: Lotteries,
+  assert.deepEqual(items, [
+    { id: 3, title: 'newest' },
+    { id: 2, title: 'middle' },
+    { id: 1, title: 'oldest' },
+  ])
 })

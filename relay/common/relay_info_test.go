@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -121,4 +122,21 @@ func TestClientVisibleErrorMessageMasksMappedModelAcrossCommonFormats(t *testing
 	content := ClientVisibleErrorMessage(info, `The model gpt-5.6-terra does not exist; body={"model":"gpt-5.6-terra"}`)
 
 	require.Equal(t, `The model gpt-5.6-sol does not exist; body={"model":"gpt-5.6-sol"}`, content)
+}
+
+func TestClientVisibleErrorMessageLeavesUnmappedModelUntouched(t *testing.T) {
+	info := &RelayInfo{
+		RequestModelName: "gpt-5.6-sol",
+		ChannelMeta: &ChannelMeta{
+			IsModelMapped:     false,
+			UpstreamModelName: "gpt-5.6-terra",
+		},
+	}
+
+	message := "upstream model=gpt-5.6-terra is unavailable"
+	require.Equal(t, message, ClientVisibleErrorMessage(info, message))
+
+	other := make(map[string]interface{})
+	AppendMappedModelLogInfo(info, other)
+	assert.Empty(t, other)
 }

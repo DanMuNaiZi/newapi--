@@ -70,6 +70,10 @@ export function LotteryUserDetailsDrawer(props: LotteryUserDetailsDrawerProps) {
   const results = resultsQuery.data?.success
     ? (resultsQuery.data.data ?? [])
     : []
+  const participantsFailed =
+    participantsQuery.isError || participantsQuery.data?.success === false
+  const resultsFailed =
+    resultsQuery.isError || resultsQuery.data?.success === false
 
   return (
     <Sheet open={props.open} onOpenChange={props.onOpenChange}>
@@ -163,35 +167,46 @@ export function LotteryUserDetailsDrawer(props: LotteryUserDetailsDrawerProps) {
                 <Spinner />
               </div>
             )}
-            {!participantsQuery.isLoading && participants.length === 0 && (
+            {participantsFailed && (
               <div className='text-muted-foreground py-12 text-center text-sm'>
-                {t('No participants yet')}
+                {t('Request failed')}
               </div>
             )}
-            {!participantsQuery.isLoading && participants.length > 0 && (
-              <div className='border-border/70 divide-border/70 divide-y border-y'>
-                {participants.map((participant) => (
-                  <div
-                    key={`${participant.username}-${participant.joined_at}`}
-                    className='flex items-center justify-between gap-3 py-3'
-                  >
-                    <div className='min-w-0'>
-                      <div className='truncate text-sm font-medium'>
-                        {participant.display_name || participant.username}
-                      </div>
-                      {participant.display_name && (
-                        <div className='text-muted-foreground truncate text-xs'>
-                          @{participant.username}
+            {!participantsQuery.isLoading &&
+              !participantsFailed &&
+              participants.length === 0 && (
+                <div className='text-muted-foreground py-12 text-center text-sm'>
+                  {t('No participants yet')}
+                </div>
+              )}
+            {!participantsQuery.isLoading &&
+              !participantsFailed &&
+              participants.length > 0 && (
+                <div className='border-border/70 divide-border/70 divide-y border-y'>
+                  {participants.map((participant) => (
+                    <div
+                      key={`${participant.username}-${participant.joined_at}`}
+                      className='flex items-center justify-between gap-3 py-3'
+                    >
+                      <div className='min-w-0'>
+                        <div className='truncate text-sm font-medium'>
+                          {participant.display_name || participant.username}
                         </div>
-                      )}
+                        {participant.display_name && (
+                          <div className='text-muted-foreground truncate text-xs'>
+                            @{participant.username}
+                          </div>
+                        )}
+                      </div>
+                      <time className='text-muted-foreground shrink-0 text-xs'>
+                        {dayjs
+                          .unix(participant.joined_at)
+                          .format('MM-DD HH:mm')}
+                      </time>
                     </div>
-                    <time className='text-muted-foreground shrink-0 text-xs'>
-                      {dayjs.unix(participant.joined_at).format('MM-DD HH:mm')}
-                    </time>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              )}
           </TabsContent>
 
           <TabsContent
@@ -203,40 +218,49 @@ export function LotteryUserDetailsDrawer(props: LotteryUserDetailsDrawerProps) {
                 <Spinner />
               </div>
             )}
-            {!resultsQuery.isLoading && results.length === 0 && (
+            {resultsFailed && (
               <div className='text-muted-foreground py-12 text-center text-sm'>
-                {t('No lottery results yet')}
+                {t('Request failed')}
               </div>
             )}
-            {!resultsQuery.isLoading && results.length > 0 && (
-              <div className='border-border/70 divide-border/70 divide-y border-y'>
-                {results.map((result) => (
-                  <div
-                    key={`${result.username}-${result.created_at}`}
-                    className='flex items-center justify-between gap-3 py-3'
-                  >
-                    <div className='min-w-0'>
-                      <div className='truncate text-sm font-medium'>
-                        {result.display_name || result.username}
-                      </div>
-                      {result.display_name && (
-                        <div className='text-muted-foreground truncate text-xs'>
-                          @{result.username}
+            {!resultsQuery.isLoading &&
+              !resultsFailed &&
+              results.length === 0 && (
+                <div className='text-muted-foreground py-12 text-center text-sm'>
+                  {t('No lottery results yet')}
+                </div>
+              )}
+            {!resultsQuery.isLoading &&
+              !resultsFailed &&
+              results.length > 0 && (
+                <div className='border-border/70 divide-border/70 divide-y border-y'>
+                  {results.map((result) => (
+                    <div
+                      key={`${result.username}-${result.created_at}`}
+                      className='flex items-center justify-between gap-3 py-3'
+                    >
+                      <div className='min-w-0'>
+                        <div className='truncate text-sm font-medium'>
+                          {result.display_name || result.username}
                         </div>
-                      )}
-                    </div>
-                    <div className='min-w-0 text-right'>
-                      <div className='truncate text-sm font-medium'>
-                        {result.prize_name}
+                        {result.display_name && (
+                          <div className='text-muted-foreground truncate text-xs'>
+                            @{result.username}
+                          </div>
+                        )}
                       </div>
-                      <div className='text-muted-foreground text-xs'>
-                        {dayjs.unix(result.created_at).format('MM-DD HH:mm')}
+                      <div className='min-w-0 text-right'>
+                        <div className='truncate text-sm font-medium'>
+                          {result.prize_name}
+                        </div>
+                        <div className='text-muted-foreground text-xs'>
+                          {dayjs.unix(result.created_at).format('MM-DD HH:mm')}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              )}
           </TabsContent>
         </Tabs>
       </SheetContent>

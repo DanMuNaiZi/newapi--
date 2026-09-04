@@ -703,6 +703,184 @@ func TestLotteryWinnerNotificationsTrackExternalDelivery(t *testing.T) {
 	assert.Empty(t, pending)
 }
 
+func TestLotterySelfHistoryPagesPreserveClaimsAndOnlyMarkVisibleNotifications(t *testing.T) {
+	userIDs := setupLotteryFixture(t)
+	now := common.GetTimestamp()
+	for index := 1; index <= 3; index++ {
+		require.NoError(t, DB.Create(&LotteryResult{
+			PlanId:            index,
+			UserId:            userIDs[0],
+			FulfillmentMode:   LotteryFulfillmentSelfClaim,
+			FulfillmentStatus: "pending",
+			CreatedAt:         now + int64(index),
+		}).Error)
+	}
+	expiredResult := &LotteryResult{
+		PlanId:            4,
+		UserId:            userIDs[0],
+		FulfillmentMode:   LotteryFulfillmentSelfClaim,
+		FulfillmentStatus: "pending",
+		ClaimExpiresAt:    now - 1,
+		CreatedAt:         now + 4,
+	}
+	require.NoError(t, DB.Create(expiredResult).Error)
+	require.NoError(t, DB.Create(&LotteryResult{
+		PlanId:            5,
+		UserId:            userIDs[1],
+		FulfillmentMode:   LotteryFulfillmentSelfClaim,
+		FulfillmentStatus: "pending",
+		ClaimExpiresAt:    now + 3600,
+		CreatedAt:         now + 5,
+	}).Error)
+	allResults, err := ListLotterySelfResultsForUser(userIDs[0])
+	require.NoError(t, err)
+	require.Len(t, allResults, 4)
+
+	resultPage, err := ListLotterySelfResultsForUserPage(userIDs[0], 2, 0, 0)
+	require.NoError(t, err)
+	require.Len(t, resultPage.Items, 2)
+	assert.True(t, resultPage.HasMore)
+	assert.Equal(t, "expired", resultPage.Items[0].ClaimStatus)
+	assert.False(t, resultPage.Items[0].Claimable)
+
+	nextPage, err := ListLotterySelfResultsForUserPage(
+		userIDs[0],
+		2,
+		resultPage.Items[1].CreatedAt,
+		resultPage.Items[1].Id,
+	)
+	require.NoError(t, err)
+	require.Len(t, nextPage.Items, 2)
+	assert.False(t, nextPage.HasMore)
+	assert.True(t, nextPage.Items[0].Claimable)
+
+	claimableResults, err := ListClaimableLotterySelfResultsForUser(userIDs[0])
+	require.NoError(t, err)
+	require.Len(t, claimableResults, 3)
+	for _, result := range claimableResults {
+		assert.NotEqual(t, expiredResult.Id, result.Id)
+		assert.Equal(t, userIDs[0], result.UserId)
+	}
+	require.Error(t, ClaimLotteryResult(expiredResult.Id, userIDs[0]))
+
+	notifications := []*LotteryNotification{
+		{UserId: userIDs[0], PlanId: 1, Type: "lottery_result", ReadAt: 0, CreatedAt: now},
+		{UserId: userIDs[0], PlanId: 2, Type: "lottery_result", ReadAt: 0, CreatedAt: now + 1},
+		{UserId: userIDs[0], PlanId: 3, Type: "lottery_result", ReadAt: 0, CreatedAt: now + 2},
+		{UserId: userIDs[1], PlanId: 1, Type: "lottery_result", ReadAt: 0, CreatedAt: now + 3},
+	}
+	for _, notification := range notifications {
+		require.NoError(t, DB.Create(notification).Error)
+	}
+	notificationPage, err := ListLotteryNotificationsForUserPage(userIDs[0], 2, true, 0, 0)
+	require.NoError(t, err)
+	require.Len(t, notificationPage.Items, 2)
+	assert.True(t, notificationPage.HasMore)
+	assert.EqualValues(t, 3, notificationPage.UnreadTotal)
+
+	require.NoError(t, MarkLotteryNotificationsReadForUser(userIDs[0], []int{
+		notificationPage.Items[0].Id,
+		notificationPage.Items[1].Id,
+	}))
+	var readNotification LotteryNotification
+	require.NoError(t, DB.First(&readNotification, notificationPage.Items[0].Id).Error)
+	assert.NotZero(t, readNotification.ReadAt)
+	var unseenNotification LotteryNotification
+	require.NoError(t, DB.First(&unseenNotification, notifications[0].Id).Error)
+	assert.Zero(t, unseenNotification.ReadAt)
+	var otherUserNotification LotteryNotification
+	require.NoError(t, DB.First(&otherUserNotification, notifications[3].Id).Error)
+	assert.Zero(t, otherUserNotification.ReadAt)
+}
+
+func TestLotteryHistoryPaginationOrdersTiesAndClampsLimits(t *testing.T) {
+	userIDs := setupLotteryFixture(t)
+	const createdAt int64 = 2_000
+	results := make([]LotteryResult, 0, 51)
+	for index := 1; index <= 51; index++ {
+		results = append(results, LotteryResult{
+			PlanId:            index,
+			UserId:            userIDs[0],
+			FulfillmentStatus: "fulfilled",
+			CreatedAt:         createdAt,
+		})
+	}
+	require.NoError(t, DB.Create(&results).Error)
+
+	firstPage, err := ListLotterySelfResultsForUserPage(userIDs[0], 2, 0, 0)
+	require.NoError(t, err)
+	require.Len(t, firstPage.Items, 2)
+	assert.True(t, firstPage.HasMore)
+	assert.Greater(t, firstPage.Items[0].Id, firstPage.Items[1].Id)
+
+	seen := make(map[int]struct{}, len(results))
+	page := firstPage
+	for {
+		for _, item := range page.Items {
+			_, duplicate := seen[item.Id]
+			assert.False(t, duplicate, "history cursor must not repeat result %d", item.Id)
+			seen[item.Id] = struct{}{}
+		}
+		if !page.HasMore {
+			break
+		}
+		last := page.Items[len(page.Items)-1]
+		page, err = ListLotterySelfResultsForUserPage(userIDs[0], 2, last.CreatedAt, last.Id)
+		require.NoError(t, err)
+	}
+	assert.Len(t, seen, 51)
+
+	defaultPage, err := ListLotterySelfResultsForUserPage(userIDs[0], 0, 0, 0)
+	require.NoError(t, err)
+	assert.Len(t, defaultPage.Items, lotterySelfHistoryDefaultLimit)
+	maximumPage, err := ListLotterySelfResultsForUserPage(userIDs[0], 1000, 0, 0)
+	require.NoError(t, err)
+	assert.Len(t, maximumPage.Items, lotterySelfHistoryMaxLimit)
+
+	_, err = ListLotterySelfResultsForUserPage(userIDs[0], 2, createdAt, 0)
+	require.ErrorContains(t, err, "invalid lottery history cursor")
+	_, err = ListLotterySelfResultsForUserPage(userIDs[0], 2, -1, 1)
+	require.ErrorContains(t, err, "invalid lottery history cursor")
+}
+
+func TestLotteryNotificationPaginationUsesStableCursorAndOwnsReadState(t *testing.T) {
+	userIDs := setupLotteryFixture(t)
+	const createdAt int64 = 3_000
+	notifications := make([]LotteryNotification, 0, 3)
+	for index := 0; index < 3; index++ {
+		notifications = append(notifications, LotteryNotification{
+			UserId:    userIDs[0],
+			PlanId:    index + 1,
+			Type:      "lottery_result",
+			CreatedAt: createdAt,
+		})
+	}
+	otherUserNotification := LotteryNotification{UserId: userIDs[1], PlanId: 99, Type: "lottery_result", CreatedAt: createdAt}
+	require.NoError(t, DB.Create(&notifications).Error)
+	require.NoError(t, DB.Create(&otherUserNotification).Error)
+
+	firstPage, err := ListLotteryNotificationsForUserPage(userIDs[0], 1, true, 0, 0)
+	require.NoError(t, err)
+	require.Len(t, firstPage.Items, 1)
+	assert.True(t, firstPage.HasMore)
+	assert.EqualValues(t, 3, firstPage.UnreadTotal)
+
+	last := firstPage.Items[0]
+	nextPage, err := ListLotteryNotificationsForUserPage(userIDs[0], 1, true, last.CreatedAt, last.Id)
+	require.NoError(t, err)
+	require.Len(t, nextPage.Items, 1)
+	assert.NotEqual(t, firstPage.Items[0].Id, nextPage.Items[0].Id)
+
+	err = MarkLotteryNotificationsReadForUser(userIDs[0], []int{firstPage.Items[0].Id, otherUserNotification.Id})
+	require.NoError(t, err)
+	var storedOther LotteryNotification
+	require.NoError(t, DB.First(&storedOther, otherUserNotification.Id).Error)
+	assert.Zero(t, storedOther.ReadAt)
+
+	_, err = ListLotteryNotificationsForUserPage(userIDs[0], 1, true, createdAt, 0)
+	require.ErrorContains(t, err, "invalid lottery history cursor")
+}
+
 func stringPointer(value string) *string {
 	return &value
 }

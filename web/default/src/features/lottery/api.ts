@@ -33,9 +33,14 @@ import type {
   LotteryPrize,
   LotteryPublicParticipant,
   LotteryPublicResult,
-  LotteryResult,
+  LotteryNotification,
+  LotteryNotificationPage,
+  LotteryResultPage,
+  LotterySelfResult,
   LotteryResultView,
 } from './types'
+
+const lotteryNotificationReadBatchSize = 50
 
 export async function getLotteryPlansForSelf(): Promise<
   ApiResponse<LotteryPlan[]>
@@ -60,10 +65,65 @@ export async function claimLotteryResult(id: number): Promise<ApiResponse> {
 }
 
 export async function getLotteryResultsForSelf(): Promise<
-  ApiResponse<LotteryResult[]>
+  ApiResponse<LotterySelfResult[]>
 > {
   const response = await api.get('/api/lottery/results/self')
   return response.data
+}
+
+export async function getLotteryResultsPageForSelf(
+  cursor?: string,
+  limit = 20
+): Promise<ApiResponse<LotteryResultPage>> {
+  const response = await api.get('/api/lottery/results/self/page', {
+    params: { limit, cursor: cursor || undefined },
+  })
+  return response.data
+}
+
+export async function getClaimableLotteryResultsForSelf(): Promise<
+  ApiResponse<LotterySelfResult[]>
+> {
+  const response = await api.get('/api/lottery/results/self/pending')
+  return response.data
+}
+
+export async function getLotteryNotificationsForSelf(): Promise<
+  ApiResponse<LotteryNotification[]>
+> {
+  const response = await api.get('/api/lottery/notifications/self')
+  return response.data
+}
+
+export async function getLotteryNotificationsPageForSelf(
+  cursor?: string,
+  limit = 20,
+  unreadOnly = false
+): Promise<ApiResponse<LotteryNotificationPage>> {
+  const response = await api.get('/api/lottery/notifications/self/page', {
+    params: {
+      limit,
+      cursor: cursor || undefined,
+      unread_only: unreadOnly || undefined,
+    },
+  })
+  return response.data
+}
+
+export async function markLotteryNotificationsRead(
+  ids: number[]
+): Promise<ApiResponse> {
+  for (
+    let index = 0;
+    index < ids.length;
+    index += lotteryNotificationReadBatchSize
+  ) {
+    const response = await api.post('/api/lottery/notifications/self/read', {
+      ids: ids.slice(index, index + lotteryNotificationReadBatchSize),
+    })
+    if (!response.data.success) return response.data
+  }
+  return { success: true, message: '', data: undefined }
 }
 
 export async function getLotteryParticipantsForSelf(

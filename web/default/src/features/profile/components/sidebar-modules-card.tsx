@@ -93,6 +93,11 @@ export function SidebarModulesCard() {
           description: t('API usage records'),
         },
         {
+          key: 'ranking',
+          title: t('Usage Rankings'),
+          description: t('Compare user consumption and usage volume.'),
+        },
+        {
           key: 'midjourney',
           title: t('Drawing Logs'),
           description: t('Drawing task records'),

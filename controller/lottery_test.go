@@ -290,3 +290,186 @@ func TestAdminUpdatesAndCancelsPublishedLotteryPlan(t *testing.T) {
 	assert.Equal(t, now+7200, stored.DrawTime)
 	assert.Equal(t, model.LotteryPlanStatusCancelled, stored.Status)
 }
+
+func TestGetLotteryResultsPageForSelfReturnsClaimStateAndCursor(t *testing.T) {
+	db := setupLotteryControllerTestDB(t)
+	user := &model.User{Username: "lottery-results-page-user", Password: "password", Status: common.UserStatusEnabled, AffCode: "lottery-results-page-user"}
+	require.NoError(t, db.Create(user).Error)
+	now := common.GetTimestamp()
+	require.NoError(t, db.Create([]*model.LotteryResult{
+		{
+			PlanId:            1,
+			UserId:            user.Id,
+			FulfillmentMode:   model.LotteryFulfillmentSelfClaim,
+			FulfillmentStatus: "pending",
+			ClaimExpiresAt:    now - 1,
+			CreatedAt:         now + 1,
+		},
+		{
+			PlanId:            2,
+			UserId:            user.Id,
+			FulfillmentMode:   model.LotteryFulfillmentSelfClaim,
+			FulfillmentStatus: "pending",
+			CreatedAt:         now,
+		},
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/lottery/results/self/page?limit=1", nil)
+	ctx.Set("id", user.Id)
+	GetLotteryResultsPageForSelf(ctx)
+
+	response := struct {
+		Success bool                        `json:"success"`
+		Data    model.LotterySelfResultPage `json:"data"`
+	}{}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.True(t, response.Success)
+	require.Len(t, response.Data.Items, 1)
+	assert.True(t, response.Data.HasMore)
+	assert.NotEmpty(t, response.Data.NextCursor)
+	assert.Equal(t, "expired", response.Data.Items[0].ClaimStatus)
+	assert.False(t, response.Data.Items[0].Claimable)
+}
+
+func TestMarkLotteryNotificationsReadForSelfOnlyUpdatesSubmittedIDs(t *testing.T) {
+	db := setupLotteryControllerTestDB(t)
+	user := &model.User{Username: "lottery-notification-user", Password: "password", Status: common.UserStatusEnabled, AffCode: "lottery-notification-user"}
+	otherUser := &model.User{Username: "lottery-notification-other", Password: "password", Status: common.UserStatusEnabled, AffCode: "lottery-notification-other"}
+	require.NoError(t, db.Create([]*model.User{user, otherUser}).Error)
+	now := common.GetTimestamp()
+	notifications := []*model.LotteryNotification{
+		{UserId: user.Id, PlanId: 1, Type: "lottery_result", CreatedAt: now},
+		{UserId: user.Id, PlanId: 2, Type: "lottery_result", CreatedAt: now + 1},
+		{UserId: user.Id, PlanId: 3, Type: "lottery_result", CreatedAt: now + 2},
+		{UserId: otherUser.Id, PlanId: 4, Type: "lottery_result", CreatedAt: now + 3},
+	}
+	for _, notification := range notifications {
+		require.NoError(t, db.Create(notification).Error)
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/api/lottery/notifications/self/read",
+		bytes.NewBufferString(fmt.Sprintf(`{"ids":[%d,%d]}`, notifications[0].Id, notifications[1].Id)),
+	)
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set("id", user.Id)
+	MarkLotteryNotificationsReadForSelf(ctx)
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+
+	for _, notification := range notifications[:2] {
+		var stored model.LotteryNotification
+		require.NoError(t, db.First(&stored, notification.Id).Error)
+		assert.NotZero(t, stored.ReadAt)
+	}
+	for _, notification := range notifications[2:] {
+		var stored model.LotteryNotification
+		require.NoError(t, db.First(&stored, notification.Id).Error)
+		assert.Zero(t, stored.ReadAt)
+	}
+}
+
+func TestLotterySelfResultsExposeOnlyOwnRedemptionCode(t *testing.T) {
+	db := setupLotteryControllerTestDB(t)
+	user := &model.User{Username: "lottery-code-owner", Password: "password", Status: common.UserStatusEnabled, AffCode: "lottery-code-owner"}
+	otherUser := &model.User{Username: "lottery-code-other", Password: "password", Status: common.UserStatusEnabled, AffCode: "lottery-code-other"}
+	require.NoError(t, db.Create([]*model.User{user, otherUser}).Error)
+	ownResult := &model.LotteryResult{
+		PlanId:            1,
+		UserId:            user.Id,
+		FulfillmentMode:   model.LotteryFulfillmentRedemptionCode,
+		FulfillmentStatus: "issued",
+		RedemptionCode:    "OWN-CODE",
+		CreatedAt:         common.GetTimestamp(),
+	}
+	otherResult := &model.LotteryResult{
+		PlanId:            2,
+		UserId:            otherUser.Id,
+		FulfillmentMode:   model.LotteryFulfillmentRedemptionCode,
+		FulfillmentStatus: "issued",
+		RedemptionCode:    "OTHER-CODE",
+		CreatedAt:         common.GetTimestamp(),
+	}
+	require.NoError(t, db.Create([]*model.LotteryResult{ownResult, otherResult}).Error)
+
+	callResults := func(userID int) (string, []model.LotterySelfResultView) {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/api/lottery/results/self", nil)
+		ctx.Set("id", userID)
+		GetLotteryResultsForSelf(ctx)
+		response := struct {
+			Success bool                          `json:"success"`
+			Data    []model.LotterySelfResultView `json:"data"`
+		}{}
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		require.True(t, response.Success)
+		return recorder.Body.String(), response.Data
+	}
+
+	ownerBody, ownerResults := callResults(user.Id)
+	require.Len(t, ownerResults, 1)
+	assert.Equal(t, "OWN-CODE", ownerResults[0].RedemptionCode)
+	assert.Contains(t, ownerBody, "OWN-CODE")
+	assert.NotContains(t, ownerBody, "OTHER-CODE")
+
+	otherBody, otherResults := callResults(otherUser.Id)
+	require.Len(t, otherResults, 1)
+	assert.Equal(t, "OTHER-CODE", otherResults[0].RedemptionCode)
+	assert.Contains(t, otherBody, "OTHER-CODE")
+	assert.NotContains(t, otherBody, "OWN-CODE")
+
+	claimRecorder := httptest.NewRecorder()
+	claimContext, _ := gin.CreateTestContext(claimRecorder)
+	claimContext.Request = httptest.NewRequest(http.MethodPost, "/api/lottery/results/1/claim", nil)
+	claimContext.Params = gin.Params{{Key: "id", Value: fmt.Sprint(ownResult.Id)}}
+	claimContext.Set("id", otherUser.Id)
+	ClaimLotteryResultForSelf(claimContext)
+	assert.Contains(t, claimRecorder.Body.String(), `"success":false`)
+	var storedOwn model.LotteryResult
+	require.NoError(t, db.First(&storedOwn, ownResult.Id).Error)
+	assert.Equal(t, "issued", storedOwn.FulfillmentStatus)
+}
+
+func TestMarkLotteryNotificationsReadForSelfValidatesBatchAndDeduplicatesIDs(t *testing.T) {
+	db := setupLotteryControllerTestDB(t)
+	user := &model.User{Username: "lottery-read-owner", Password: "password", Status: common.UserStatusEnabled, AffCode: "lottery-read-owner"}
+	otherUser := &model.User{Username: "lottery-read-other", Password: "password", Status: common.UserStatusEnabled, AffCode: "lottery-read-other"}
+	require.NoError(t, db.Create([]*model.User{user, otherUser}).Error)
+	ownNotification := &model.LotteryNotification{UserId: user.Id, PlanId: 1, Type: "lottery_result", CreatedAt: common.GetTimestamp()}
+	otherNotification := &model.LotteryNotification{UserId: otherUser.Id, PlanId: 2, Type: "lottery_result", CreatedAt: common.GetTimestamp()}
+	require.NoError(t, db.Create([]*model.LotteryNotification{ownNotification, otherNotification}).Error)
+
+	tooManyIDs := make([]int, lotteryNotificationReadMaxIds+1)
+	for index := range tooManyIDs {
+		tooManyIDs[index] = index + 1
+	}
+	tooManyBody, err := common.Marshal(map[string]interface{}{"ids": tooManyIDs})
+	require.NoError(t, err)
+	tooManyRecorder := httptest.NewRecorder()
+	tooManyContext, _ := gin.CreateTestContext(tooManyRecorder)
+	tooManyContext.Request = httptest.NewRequest(http.MethodPost, "/api/lottery/notifications/self/read", bytes.NewReader(tooManyBody))
+	tooManyContext.Request.Header.Set("Content-Type", "application/json")
+	tooManyContext.Set("id", user.Id)
+	MarkLotteryNotificationsReadForSelf(tooManyContext)
+	assert.Contains(t, tooManyRecorder.Body.String(), `"success":false`)
+
+	validBody := fmt.Sprintf(`{"ids":[%d,%d,%d]}`, ownNotification.Id, ownNotification.Id, otherNotification.Id)
+	validRecorder := httptest.NewRecorder()
+	validContext, _ := gin.CreateTestContext(validRecorder)
+	validContext.Request = httptest.NewRequest(http.MethodPost, "/api/lottery/notifications/self/read", bytes.NewBufferString(validBody))
+	validContext.Request.Header.Set("Content-Type", "application/json")
+	validContext.Set("id", user.Id)
+	MarkLotteryNotificationsReadForSelf(validContext)
+	assert.Contains(t, validRecorder.Body.String(), `"success":true`)
+
+	var storedOwn, storedOther model.LotteryNotification
+	require.NoError(t, db.First(&storedOwn, ownNotification.Id).Error)
+	require.NoError(t, db.First(&storedOther, otherNotification.Id).Error)
+	assert.NotZero(t, storedOwn.ReadAt)
+	assert.Zero(t, storedOther.ReadAt)
+}

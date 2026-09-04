@@ -25,6 +25,7 @@ import {
   Key,
   LayoutDashboard,
   ListTodo,
+  Medal,
   MessageSquare,
   Radio,
   ServerCog,
@@ -145,6 +146,11 @@ export function useSidebarData(): SidebarData {
       title: t('Usage Logs'),
       url: '/usage-logs/common',
       icon: FileText,
+    },
+    {
+      title: t('Usage Rankings'),
+      url: '/usage-rankings',
+      icon: Medal,
     },
   ]
   if (

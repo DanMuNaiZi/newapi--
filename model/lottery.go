@@ -54,6 +54,11 @@ const (
 const LotteryDrawAlgorithmWeightedWithoutReplacement = "weighted_without_replacement"
 const lotteryDatabaseIntMax = 1<<31 - 1
 
+const (
+	lotterySelfHistoryDefaultLimit = 20
+	lotterySelfHistoryMaxLimit     = 50
+)
+
 type LotteryDrawTrigger string
 
 const (
@@ -197,6 +202,28 @@ type LotteryResultView struct {
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
 	PrizeName   string `json:"prize_name"`
+}
+
+// LotterySelfResultView adds the current claim state to a user's own result.
+// Claimability is calculated at read time so expired records do not need a
+// background state mutation before they are rendered correctly.
+type LotterySelfResultView struct {
+	LotteryResult
+	ClaimStatus string `json:"claim_status"`
+	Claimable   bool   `json:"claimable"`
+}
+
+type LotterySelfResultPage struct {
+	Items      []LotterySelfResultView `json:"items"`
+	NextCursor string                  `json:"next_cursor,omitempty"`
+	HasMore    bool                    `json:"has_more"`
+}
+
+type LotteryNotificationPage struct {
+	Items       []LotteryNotification `json:"items"`
+	NextCursor  string                `json:"next_cursor,omitempty"`
+	HasMore     bool                  `json:"has_more"`
+	UnreadTotal int64                 `json:"unread_total"`
 }
 
 type LotteryPlanView struct {
@@ -509,6 +536,86 @@ func ListLotteryResultsForUser(userId int) ([]LotteryResult, error) {
 	return results, nil
 }
 
+func ListLotterySelfResultsForUser(userId int) ([]LotterySelfResultView, error) {
+	results, err := ListLotteryResultsForUser(userId)
+	if err != nil {
+		return nil, err
+	}
+	return lotterySelfResultViews(results, common.GetTimestamp()), nil
+}
+
+func ListLotterySelfResultsForUserPage(userId int, limit int, beforeCreatedAt int64, beforeId int) (*LotterySelfResultPage, error) {
+	if userId <= 0 {
+		return nil, errors.New("invalid user id")
+	}
+	if (beforeId == 0 && beforeCreatedAt != 0) || beforeCreatedAt < 0 || beforeId < 0 {
+		return nil, errors.New("invalid lottery history cursor")
+	}
+	if limit <= 0 {
+		limit = lotterySelfHistoryDefaultLimit
+	}
+	if limit > lotterySelfHistoryMaxLimit {
+		limit = lotterySelfHistoryMaxLimit
+	}
+	query := DB.Where("user_id = ?", userId)
+	if beforeId > 0 {
+		query = query.Where("(created_at < ?) OR (created_at = ? AND id < ?)", beforeCreatedAt, beforeCreatedAt, beforeId)
+	}
+	var results []LotteryResult
+	if err := query.
+		Order("created_at desc, id desc").
+		Limit(limit + 1).
+		Find(&results).Error; err != nil {
+		return nil, err
+	}
+	page := &LotterySelfResultPage{HasMore: len(results) > limit}
+	if page.HasMore {
+		results = results[:limit]
+	}
+	page.Items = lotterySelfResultViews(results, common.GetTimestamp())
+	return page, nil
+}
+
+func ListClaimableLotterySelfResultsForUser(userId int) ([]LotterySelfResultView, error) {
+	if userId <= 0 {
+		return nil, errors.New("invalid user id")
+	}
+	now := common.GetTimestamp()
+	var results []LotteryResult
+	if err := DB.Where("user_id = ? AND fulfillment_mode = ? AND fulfillment_status = ?", userId, LotteryFulfillmentSelfClaim, "pending").
+		Where("claim_expires_at = ? OR claim_expires_at > ?", 0, now).
+		Order("created_at desc, id desc").
+		Find(&results).Error; err != nil {
+		return nil, err
+	}
+	return lotterySelfResultViews(results, now), nil
+}
+
+func lotterySelfResultViews(results []LotteryResult, now int64) []LotterySelfResultView {
+	views := make([]LotterySelfResultView, 0, len(results))
+	for _, result := range results {
+		claimStatus := result.FulfillmentStatus
+		claimable := false
+		if result.FulfillmentMode == LotteryFulfillmentSelfClaim {
+			switch {
+			case result.FulfillmentStatus == "fulfilled":
+				claimStatus = "fulfilled"
+			case result.ClaimExpiresAt > 0 && result.ClaimExpiresAt <= now:
+				claimStatus = "expired"
+			case result.FulfillmentStatus == "pending":
+				claimStatus = "claimable"
+				claimable = true
+			}
+		}
+		views = append(views, LotterySelfResultView{
+			LotteryResult: result,
+			ClaimStatus:   claimStatus,
+			Claimable:     claimable,
+		})
+	}
+	return views
+}
+
 func ListLotteryResultsForPlan(planId int) ([]LotteryResultView, error) {
 	if planId <= 0 {
 		return nil, errors.New("invalid lottery plan")
@@ -609,6 +716,53 @@ func ListLotteryNotificationsForUser(userId int) ([]LotteryNotification, error) 
 		return nil, err
 	}
 	return notifications, nil
+}
+
+func ListLotteryNotificationsForUserPage(userId int, limit int, unreadOnly bool, beforeCreatedAt int64, beforeId int) (*LotteryNotificationPage, error) {
+	if userId <= 0 {
+		return nil, errors.New("invalid user id")
+	}
+	if (beforeId == 0 && beforeCreatedAt != 0) || beforeCreatedAt < 0 || beforeId < 0 {
+		return nil, errors.New("invalid lottery history cursor")
+	}
+	if limit <= 0 {
+		limit = lotterySelfHistoryDefaultLimit
+	}
+	if limit > lotterySelfHistoryMaxLimit {
+		limit = lotterySelfHistoryMaxLimit
+	}
+	query := DB.Where("user_id = ?", userId)
+	if unreadOnly {
+		query = query.Where("read_at = ?", 0)
+	}
+	if beforeId > 0 {
+		query = query.Where("(created_at < ?) OR (created_at = ? AND id < ?)", beforeCreatedAt, beforeCreatedAt, beforeId)
+	}
+	var notifications []LotteryNotification
+	if err := query.
+		Order("created_at desc, id desc").
+		Limit(limit + 1).
+		Find(&notifications).Error; err != nil {
+		return nil, err
+	}
+	page := &LotteryNotificationPage{HasMore: len(notifications) > limit}
+	if page.HasMore {
+		notifications = notifications[:limit]
+	}
+	page.Items = notifications
+	if err := DB.Model(&LotteryNotification{}).Where("user_id = ? AND read_at = ?", userId, 0).Count(&page.UnreadTotal).Error; err != nil {
+		return nil, err
+	}
+	return page, nil
+}
+
+func MarkLotteryNotificationsReadForUser(userId int, notificationIds []int) error {
+	if userId <= 0 || len(notificationIds) == 0 {
+		return errors.New("invalid lottery notification")
+	}
+	return DB.Model(&LotteryNotification{}).
+		Where("user_id = ? AND read_at = ? AND id IN ?", userId, 0, notificationIds).
+		Update("read_at", common.GetTimestamp()).Error
 }
 
 func ListPendingLotteryWinnerNotifications(limit int) ([]LotteryNotification, error) {
@@ -1134,7 +1288,8 @@ func fulfillLotteryResult(resultId int, requestedUserId int, allowAuto bool) err
 		if result.FulfillmentStatus == "fulfilled" {
 			return errors.New("lottery reward has already been fulfilled")
 		}
-		if result.ClaimExpiresAt > 0 && result.ClaimExpiresAt < common.GetTimestamp() {
+		now := common.GetTimestamp()
+		if result.ClaimExpiresAt > 0 && result.ClaimExpiresAt <= now {
 			return errors.New("lottery reward claim has expired")
 		}
 		if !allowAuto && result.FulfillmentMode == LotteryFulfillmentAuto {
@@ -1167,7 +1322,7 @@ func fulfillLotteryResult(resultId int, requestedUserId int, allowAuto bool) err
 		}
 		return tx.Model(&LotteryResult{}).Where("id = ? AND fulfillment_status != ?", result.Id, "fulfilled").Updates(map[string]interface{}{
 			"fulfillment_status": "fulfilled",
-			"claimed_at":         common.GetTimestamp(),
+			"claimed_at":         now,
 		}).Error
 	})
 }
