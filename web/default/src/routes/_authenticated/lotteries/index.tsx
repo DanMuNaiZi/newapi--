@@ -22,7 +22,7 @@ import z from 'zod'
 import { Lotteries } from '@/features/lottery'
 
 const lotterySearchSchema = z.object({
-  plan: z.number().optional().catch(undefined),
+  plan: z.coerce.number().int().positive().optional().catch(undefined),
 })
 
 export const Route = createFileRoute('/_authenticated/lotteries/')({
