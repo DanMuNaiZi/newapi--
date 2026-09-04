@@ -171,6 +171,10 @@ func HideActualModelNames(logs []*Log) {
 		}
 		delete(otherMap, "upstream_model_name")
 		delete(otherMap, "is_model_mapped")
+		if adminInfo, ok := otherMap["admin_info"].(map[string]interface{}); ok {
+			delete(adminInfo, "upstream_model_name")
+			delete(adminInfo, "is_model_mapped")
+		}
 		logs[i].Other = common.MapToJsonStr(otherMap)
 	}
 }

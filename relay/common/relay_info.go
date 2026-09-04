@@ -322,44 +322,71 @@ func (info *RelayInfo) ToString() string {
 	return b.String()
 }
 
+// ClientModelName returns the immutable model name supplied by the client.
+// OriginModelName may be rewritten for channel-specific model mapping.
+func (info *RelayInfo) ClientModelName() string {
+	if info == nil {
+		return ""
+	}
+	if info.RequestModelName != "" {
+		return info.RequestModelName
+	}
+	return info.OriginModelName
+}
+
 // ClientVisibleErrorMessage replaces an upstream mapped model alias with the
 // model requested by the client, without changing the original error object.
 func ClientVisibleErrorMessage(info *RelayInfo, message string) string {
 	if info == nil || info.ChannelMeta == nil || !info.IsModelMapped {
 		return message
 	}
-	if info.RequestModelName == "" || info.UpstreamModelName == "" || info.RequestModelName == info.UpstreamModelName {
+	requestModelName := info.ClientModelName()
+	if requestModelName == "" || info.UpstreamModelName == "" || requestModelName == info.UpstreamModelName {
 		return message
 	}
 
-	needle := "model=" + info.UpstreamModelName
+	return replaceExactMappedModelName(message, info.UpstreamModelName, requestModelName)
+}
+
+func replaceExactMappedModelName(message string, upstreamModelName string, requestModelName string) string {
 	for start := 0; ; {
-		index := strings.Index(message[start:], needle)
+		index := strings.Index(message[start:], upstreamModelName)
 		if index < 0 {
 			return message
 		}
 		index += start
-		end := index + len(needle)
-		if end == len(message) || strings.ContainsRune(" \t\r\n,;:)]}\"'", rune(message[end])) {
-			message = message[:index] + "model=" + info.RequestModelName + message[end:]
-			start = index + len("model=") + len(info.RequestModelName)
+		end := index + len(upstreamModelName)
+		if (index == 0 || !isModelNameCharacter(message[index-1])) &&
+			(end == len(message) || !isModelNameCharacter(message[end])) {
+			message = message[:index] + requestModelName + message[end:]
+			start = index + len(requestModelName)
 			continue
 		}
 		start = end
 	}
 }
 
-// AppendMappedModelAdminInfo retains the actual upstream model for
-// administrator-only troubleshooting fields.
-func AppendMappedModelAdminInfo(info *RelayInfo, adminInfo map[string]interface{}) {
-	if info == nil || info.ChannelMeta == nil || adminInfo == nil || !info.IsModelMapped {
+func isModelNameCharacter(char byte) bool {
+	return char >= 'a' && char <= 'z' ||
+		char >= 'A' && char <= 'Z' ||
+		char >= '0' && char <= '9' ||
+		char == '-' || char == '_' || char == '.' || char == '/'
+}
+
+// AppendMappedModelLogInfo stores request and upstream model names using the
+// standard log fields. Callers redact the upstream field unless the viewer
+// has UsageLogActualModelView permission.
+func AppendMappedModelLogInfo(info *RelayInfo, other map[string]interface{}) {
+	if info == nil || info.ChannelMeta == nil || other == nil || !info.IsModelMapped {
 		return
 	}
-	if info.RequestModelName == "" || info.UpstreamModelName == "" || info.RequestModelName == info.UpstreamModelName {
+	requestModelName := info.ClientModelName()
+	if requestModelName == "" || info.UpstreamModelName == "" || requestModelName == info.UpstreamModelName {
 		return
 	}
-	adminInfo["is_model_mapped"] = true
-	adminInfo["upstream_model_name"] = info.UpstreamModelName
+	other["request_model_name"] = requestModelName
+	other["is_model_mapped"] = true
+	other["upstream_model_name"] = info.UpstreamModelName
 }
 
 // MaskMappedModelInClientError keeps an upstream model alias out of the error
@@ -525,6 +552,12 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 	if reqId == "" {
 		reqId = common.NewRequestId()
 	}
+	originModelName := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
+	requestModelName := common.GetContextKeyString(c, constant.ContextKeyRequestModelName)
+	if requestModelName == "" {
+		requestModelName = originModelName
+	}
+
 	info := &RelayInfo{
 		Request: request,
 
@@ -535,8 +568,8 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		UserQuota:  common.GetContextKeyInt(c, constant.ContextKeyUserQuota),
 		UserEmail:  common.GetContextKeyString(c, constant.ContextKeyUserEmail),
 
-		RequestModelName: common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
-		OriginModelName:  common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
+		RequestModelName: requestModelName,
+		OriginModelName:  originModelName,
 
 		TokenId:        common.GetContextKeyInt(c, constant.ContextKeyTokenId),
 		TokenKey:       common.GetContextKeyString(c, constant.ContextKeyTokenKey),

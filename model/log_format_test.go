@@ -78,12 +78,20 @@ func TestHideActualModelNamesRemovesUpstreamModelFields(t *testing.T) {
 	logs := []*Log{{
 		ModelName:       "gpt-5.4",
 		ActualModelName: "gpt-5.4",
-		Other:           `{"upstream_model_name":"gpt-5.4","is_model_mapped":true}`,
+		Other:           `{"request_model_name":"gpt-5.5","upstream_model_name":"gpt-5.4","is_model_mapped":true,"admin_info":{"use_channel":[11],"upstream_model_name":"gpt-5.4","is_model_mapped":true}}`,
 	}}
 
 	HideActualModelNames(logs)
 
+	other, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
 	assert.Empty(t, logs[0].ActualModelName)
-	assert.NotContains(t, logs[0].Other, "upstream_model_name")
-	assert.NotContains(t, logs[0].Other, "is_model_mapped")
+	assert.Equal(t, "gpt-5.5", other["request_model_name"])
+	assert.NotContains(t, other, "upstream_model_name")
+	assert.NotContains(t, other, "is_model_mapped")
+	assert.NotContains(t, adminInfo, "upstream_model_name")
+	assert.NotContains(t, adminInfo, "is_model_mapped")
+	assert.Contains(t, adminInfo, "use_channel")
 }

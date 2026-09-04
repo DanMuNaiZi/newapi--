@@ -70,6 +70,44 @@ func TestCalculateTextQuotaSummaryUnifiedForClaudeSemantic(t *testing.T) {
 	require.Equal(t, 1488, chatSummary.Quota)
 }
 
+func TestPostTextConsumeQuotaPersistsClientModelForMappedCompactRequest(t *testing.T) {
+	truncate(t)
+	const userID, channelID = 83, 83
+	seedUser(t, userID, 100000)
+	seedChannel(t, channelID)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses/compact", nil)
+	ctx.Set("username", "test_user")
+	startTime := time.Now().Add(-time.Second)
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:            userID,
+		UserQuota:         100000,
+		RequestModelName:  "gpt-5.6-sol",
+		OriginModelName:   "gpt-5.6-terra-openai-compact",
+		UsingGroup:        "default",
+		StartTime:         startTime,
+		FirstResponseTime: startTime,
+		IsPlayground:      true,
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:         channelID,
+			IsModelMapped:     true,
+			UpstreamModelName: "gpt-5.6-terra",
+		},
+	}
+
+	PostTextConsumeQuota(ctx, relayInfo, &dto.Usage{PromptTokens: 10, CompletionTokens: 1}, nil)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	require.Equal(t, "gpt-5.6-sol", log.ModelName)
+}
+
 func TestCalculateTextQuotaSummaryUsesSplitClaudeCacheCreationRatios(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()

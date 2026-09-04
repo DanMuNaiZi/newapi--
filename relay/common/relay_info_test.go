@@ -1,9 +1,13 @@
 package common
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,6 +41,19 @@ func TestRelayInfoGetFinalRequestRelayFormatFallsBackToRelayFormat(t *testing.T)
 func TestRelayInfoGetFinalRequestRelayFormatNilReceiver(t *testing.T) {
 	var info *RelayInfo
 	require.Equal(t, types.RelayFormat(""), info.GetFinalRequestRelayFormat())
+}
+
+func TestGenRelayInfoKeepsClientRequestedModelAfterCompactSuffix(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	ctx.Set(string(constant.ContextKeyOriginalModel), "gpt-5.6-sol-openai-compact")
+	ctx.Set(string(constant.ContextKeyRequestModelName), "gpt-5.6-sol")
+
+	info := GenRelayInfoOpenAI(ctx, nil)
+
+	require.Equal(t, "gpt-5.6-sol", info.RequestModelName)
+	require.Equal(t, "gpt-5.6-sol-openai-compact", info.OriginModelName)
 }
 
 func TestMaskMappedModelInClientErrorUsesRequestedModel(t *testing.T) {
@@ -92,7 +109,7 @@ func TestClientVisibleErrorMessageUsesRequestedModelInErrorLog(t *testing.T) {
 	require.Equal(t, "status_code=503, auth_unavailable: no auth available (providers=codex, model=gpt-5.6-sol)", content)
 }
 
-func TestAppendMappedModelAdminInfoRetainsUpstreamModel(t *testing.T) {
+func TestClientVisibleErrorMessageMasksMappedModelAcrossCommonFormats(t *testing.T) {
 	info := &RelayInfo{
 		RequestModelName: "gpt-5.6-sol",
 		ChannelMeta: &ChannelMeta{
@@ -100,10 +117,8 @@ func TestAppendMappedModelAdminInfoRetainsUpstreamModel(t *testing.T) {
 			UpstreamModelName: "gpt-5.6-terra",
 		},
 	}
-	adminInfo := make(map[string]interface{})
 
-	AppendMappedModelAdminInfo(info, adminInfo)
+	content := ClientVisibleErrorMessage(info, `The model gpt-5.6-terra does not exist; body={"model":"gpt-5.6-terra"}`)
 
-	require.Equal(t, true, adminInfo["is_model_mapped"])
-	require.Equal(t, "gpt-5.6-terra", adminInfo["upstream_model_name"])
+	require.Equal(t, `The model gpt-5.6-sol does not exist; body={"model":"gpt-5.6-sol"}`, content)
 }
