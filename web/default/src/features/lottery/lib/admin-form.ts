@@ -31,11 +31,10 @@ const prizeSchema = z
       .min(1, 'Prize quantity must be at least 1')
       .max(LOTTERY_DATABASE_INT_MAX, 'Prize quantity cannot exceed 2147483647'),
     reward_type: z.enum(['quota', 'subscription']),
-    quota: z
+    reward_amount: z
       .number({ error: 'Quota reward must be greater than 0' })
-      .int()
-      .min(0)
-      .max(LOTTERY_DATABASE_INT_MAX, 'Quota reward cannot exceed 2147483647'),
+      .positive('Quota reward must be greater than 0'),
+    reward_unit: z.enum(['usd', 'cny', 'quota']),
     subscription_plan_id: z
       .number({ error: 'Please select a subscription plan' })
       .int()
@@ -48,11 +47,23 @@ const prizeSchema = z
       .max(3650, 'Claim expiry cannot exceed 3650 days'),
   })
   .superRefine((prize, context) => {
-    if (prize.reward_type === 'quota' && prize.quota <= 0) {
+    if (prize.reward_type === 'quota' && prize.reward_amount <= 0) {
       context.addIssue({
         code: 'custom',
         message: 'Quota reward must be greater than 0',
-        path: ['quota'],
+        path: ['reward_amount'],
+      })
+    }
+    if (
+      prize.reward_type === 'quota' &&
+      prize.reward_unit === 'quota' &&
+      (!Number.isInteger(prize.reward_amount) ||
+        prize.reward_amount > LOTTERY_DATABASE_INT_MAX)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Quota reward cannot exceed 2147483647',
+        path: ['reward_amount'],
       })
     }
     if (
@@ -139,7 +150,8 @@ export const DEFAULT_LOTTERY_PRIZE: LotteryAdminFormValues['prizes'][number] = {
   name: '',
   quantity: 1,
   reward_type: 'quota',
-  quota: 100,
+  reward_amount: 1,
+  reward_unit: 'usd',
   subscription_plan_id: 0,
   fulfillment_mode: 'auto',
   claim_expire_days: 7,
@@ -202,11 +214,65 @@ export function buildLotteryPlanPayload(
       name: prize.name.trim(),
       quantity: prize.quantity,
       reward_type: prize.reward_type,
-      quota: prize.reward_type === 'quota' ? prize.quota : 0,
+      ...(prize.reward_type === 'quota'
+        ? {
+            reward_amount: prize.reward_amount,
+            reward_unit: prize.reward_unit,
+          }
+        : {}),
       subscription_plan_id:
         prize.reward_type === 'subscription' ? prize.subscription_plan_id : 0,
       fulfillment_mode: prize.fulfillment_mode,
       claim_expire_seconds: prize.claim_expire_days * 86400,
     })),
+  }
+}
+
+export type LotteryRewardUnit = 'usd' | 'cny' | 'quota'
+
+export interface LotteryRewardEquivalent {
+  usd: number
+  cny: number
+  quota: number
+}
+
+export function getLotteryRewardEquivalent(
+  amount: number,
+  unit: LotteryRewardUnit,
+  quotaPerUnit: number,
+  usdExchangeRate: number
+): LotteryRewardEquivalent | null {
+  if (
+    !Number.isFinite(amount) ||
+    !Number.isFinite(quotaPerUnit) ||
+    !Number.isFinite(usdExchangeRate) ||
+    amount <= 0 ||
+    quotaPerUnit <= 0 ||
+    usdExchangeRate <= 0
+  ) {
+    return null
+  }
+
+  let rawQuota: number
+  switch (unit) {
+    case 'usd':
+      rawQuota = amount * quotaPerUnit
+      break
+    case 'cny':
+      rawQuota = (amount / usdExchangeRate) * quotaPerUnit
+      break
+    case 'quota':
+      if (!Number.isInteger(amount)) return null
+      rawQuota = amount
+      break
+  }
+
+  const quota = Math.round(rawQuota)
+  if (quota < 1 || quota > LOTTERY_DATABASE_INT_MAX) return null
+  const usd = quota / quotaPerUnit
+  return {
+    usd,
+    cny: usd * usdExchangeRate,
+    quota,
   }
 }

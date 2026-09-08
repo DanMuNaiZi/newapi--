@@ -41,12 +41,14 @@ import { Textarea } from '@/components/ui/textarea'
 import { getAdminPlans } from '@/features/subscriptions/api'
 import type { User } from '@/features/users/types'
 import { cn } from '@/lib/utils'
+import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import { createLotteryPlan, getLotteryAdminGroups } from '../api'
 import {
   buildLotteryPlanPayload,
   createLotteryFormDefaults,
   DEFAULT_LOTTERY_PRIZE,
+  getLotteryRewardEquivalent,
   LOTTERY_DATABASE_INT_MAX,
   lotteryAdminFormSchema,
   type LotteryAdminFormValues,
@@ -66,6 +68,7 @@ export function LotteryPlanForm(props: LotteryPlanFormProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [selectedUsers, setSelectedUsers] = useState<User[]>([])
+  const currencyConfig = useSystemConfigStore((state) => state.config.currency)
   const form = useForm<LotteryAdminFormValues>({
     resolver: zodResolver(lotteryAdminFormSchema),
     defaultValues: createLotteryFormDefaults(),
@@ -384,6 +387,14 @@ export function LotteryPlanForm(props: LotteryPlanFormProps) {
         <div className='grid gap-4'>
           {prizes.fields.map((field, index) => {
             const rewardType = prizeValues[index]?.reward_type ?? 'quota'
+            const rewardAmount = prizeValues[index]?.reward_amount ?? 0
+            const rewardUnit = prizeValues[index]?.reward_unit ?? 'usd'
+            const rewardEquivalent = getLotteryRewardEquivalent(
+              rewardAmount,
+              rewardUnit,
+              currencyConfig.quotaPerUnit,
+              currencyConfig.usdExchangeRate
+            )
             const fulfillmentMode =
               prizeValues[index]?.fulfillment_mode ?? 'auto'
             let fulfillmentDescription = t(
@@ -482,26 +493,68 @@ export function LotteryPlanForm(props: LotteryPlanFormProps) {
                     </Field>
 
                     {rewardType === 'quota' ? (
-                      <Field data-invalid={Boolean(errors?.quota)}>
-                        <FieldLabel htmlFor={`lottery-prize-${index}-quota`}>
-                          {t('Reward quota')}
+                      <Field
+                        className='lg:col-span-2'
+                        data-invalid={Boolean(errors?.reward_amount)}
+                      >
+                        <FieldLabel
+                          htmlFor={`lottery-prize-${index}-reward-amount`}
+                        >
+                          {t('Reward amount')}
                         </FieldLabel>
-                        <Input
-                          id={`lottery-prize-${index}-quota`}
-                          type='number'
-                          min={1}
-                          max={LOTTERY_DATABASE_INT_MAX}
-                          aria-invalid={Boolean(errors?.quota)}
-                          {...form.register(`prizes.${index}.quota`, {
-                            valueAsNumber: true,
-                          })}
-                        />
+                        <div className='grid gap-2 sm:grid-cols-[minmax(0,1fr)_140px]'>
+                          <Input
+                            id={`lottery-prize-${index}-reward-amount`}
+                            type='number'
+                            min={rewardUnit === 'quota' ? 1 : 0.000001}
+                            max={
+                              rewardUnit === 'quota'
+                                ? LOTTERY_DATABASE_INT_MAX
+                                : undefined
+                            }
+                            step={rewardUnit === 'quota' ? 1 : 'any'}
+                            aria-invalid={Boolean(errors?.reward_amount)}
+                            {...form.register(`prizes.${index}.reward_amount`, {
+                              valueAsNumber: true,
+                            })}
+                          />
+                          <NativeSelect
+                            aria-label={t('Reward unit')}
+                            {...form.register(`prizes.${index}.reward_unit`)}
+                          >
+                            <NativeSelectOption value='usd'>
+                              USD ($)
+                            </NativeSelectOption>
+                            <NativeSelectOption value='cny'>
+                              CNY (¥)
+                            </NativeSelectOption>
+                            <NativeSelectOption value='quota'>
+                              {t('Platform quota')}
+                            </NativeSelectOption>
+                          </NativeSelect>
+                        </div>
                         <FieldDescription>
-                          {t('Uses the same quota unit as the user balance.')}
+                          {rewardEquivalent
+                            ? t(
+                                'Equivalent: ${{usd}} · ¥{{cny}} · {{quota}} platform quota',
+                                {
+                                  usd: rewardEquivalent.usd.toLocaleString(
+                                    undefined,
+                                    { maximumFractionDigits: 6 }
+                                  ),
+                                  cny: rewardEquivalent.cny.toLocaleString(
+                                    undefined,
+                                    { maximumFractionDigits: 6 }
+                                  ),
+                                  quota:
+                                    rewardEquivalent.quota.toLocaleString(),
+                                }
+                              )
+                            : t('Enter a valid amount to preview conversion.')}
                         </FieldDescription>
                         <FieldError>
-                          {errors?.quota?.message
-                            ? t(errors.quota.message)
+                          {errors?.reward_amount?.message
+                            ? t(errors.reward_amount.message)
                             : null}
                         </FieldError>
                       </Field>

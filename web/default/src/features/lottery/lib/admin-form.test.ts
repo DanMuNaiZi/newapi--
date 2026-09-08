@@ -22,6 +22,7 @@ import { describe, test } from 'node:test'
 import {
   buildLotteryPlanPayload,
   createLotteryFormDefaults,
+  getLotteryRewardEquivalent,
   lotteryAdminFormSchema,
   type LotteryAdminFormValues,
 } from './admin-form'
@@ -41,7 +42,8 @@ const BASE_FORM: LotteryAdminFormValues = {
       name: 'Quota prize',
       quantity: 2,
       reward_type: 'quota',
-      quota: 100,
+      reward_amount: 10,
+      reward_unit: 'usd',
       subscription_plan_id: 9,
       fulfillment_mode: 'self_claim',
       claim_expire_days: 7,
@@ -82,7 +84,8 @@ describe('buildLotteryPlanPayload', () => {
         {
           ...BASE_FORM.prizes[0],
           quantity: 2_147_483_648,
-          quota: 2_147_483_648,
+          reward_amount: 2_147_483_648,
+          reward_unit: 'quota',
         },
       ],
     })
@@ -150,7 +153,8 @@ describe('buildLotteryPlanPayload', () => {
       name: 'Quota prize',
       quantity: 2,
       reward_type: 'quota',
-      quota: 100,
+      reward_amount: 10,
+      reward_unit: 'usd',
       subscription_plan_id: 0,
       fulfillment_mode: 'self_claim',
       claim_expire_seconds: 604800,
@@ -165,7 +169,8 @@ describe('buildLotteryPlanPayload', () => {
           name: 'Subscription prize',
           quantity: 1,
           reward_type: 'subscription',
-          quota: 500,
+          reward_amount: 1,
+          reward_unit: 'usd',
           subscription_plan_id: 4,
           fulfillment_mode: 'redemption_code',
           claim_expire_days: 0,
@@ -173,8 +178,43 @@ describe('buildLotteryPlanPayload', () => {
       ],
     })
 
-    assert.equal(payload.prizes[0]?.quota, 0)
+    assert.equal(payload.prizes[0]?.reward_amount, undefined)
+    assert.equal(payload.prizes[0]?.reward_unit, undefined)
     assert.equal(payload.prizes[0]?.subscription_plan_id, 4)
     assert.equal(payload.prizes[0]?.claim_expire_seconds, 0)
+  })
+
+  test('defaults quota prizes to one US dollar', () => {
+    const defaults = createLotteryFormDefaults(new Date('2026-07-15T08:00:00'))
+
+    assert.equal(defaults.prizes[0]?.reward_amount, 1)
+    assert.equal(defaults.prizes[0]?.reward_unit, 'usd')
+  })
+
+  test('calculates equivalent USD, CNY and raw quota values', () => {
+    assert.deepEqual(getLotteryRewardEquivalent(10, 'usd', 500_000, 7.3), {
+      usd: 10,
+      cny: 73,
+      quota: 5_000_000,
+    })
+    assert.deepEqual(getLotteryRewardEquivalent(73, 'cny', 500_000, 7.3), {
+      usd: 10,
+      cny: 73,
+      quota: 5_000_000,
+    })
+    assert.deepEqual(
+      getLotteryRewardEquivalent(5_000_000, 'quota', 500_000, 7.3),
+      {
+        usd: 10,
+        cny: 73,
+        quota: 5_000_000,
+      }
+    )
+  })
+
+  test('rejects unusable conversion settings in the preview', () => {
+    assert.equal(getLotteryRewardEquivalent(10, 'usd', 0, 7.3), null)
+    assert.equal(getLotteryRewardEquivalent(10, 'usd', 500_000, 0), null)
+    assert.equal(getLotteryRewardEquivalent(-1, 'usd', 500_000, 7.3), null)
   })
 })

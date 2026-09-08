@@ -36,6 +36,7 @@ import {
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { formatQuota } from '@/lib/format'
+import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import {
   getAdminLotteryResults,
@@ -43,6 +44,7 @@ import {
   getLotteryPrizes,
   updateLotteryParticipant,
 } from '../api'
+import { getLotteryRewardEquivalent } from '../lib/admin-form'
 import {
   getLotteryPlanStatusLabel,
   getLotteryRewardStatusLabel,
@@ -89,6 +91,7 @@ function getStatusVariant(status: LotteryPlan['status']): StatusVariant {
 export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  const currencyConfig = useSystemConfigStore((state) => state.config.currency)
   const [tab, setTab] = useState<LotteryDetailsTab>(props.initialTab)
   const planId = props.plan?.id ?? 0
 
@@ -289,12 +292,31 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
                   } else if (prize.fulfillment_mode === 'self_claim') {
                     deliveryLabel = t('Winner claims manually')
                   }
-                  const rewardLabel =
-                    prize.reward_type === 'subscription'
-                      ? t('Subscription #{{id}}', {
-                          id: prize.subscription_plan_id,
-                        })
-                      : formatQuota(prize.quota)
+                  const rewardEquivalent =
+                    prize.reward_type === 'quota'
+                      ? getLotteryRewardEquivalent(
+                          prize.quota,
+                          'quota',
+                          currencyConfig.quotaPerUnit,
+                          currencyConfig.usdExchangeRate
+                        )
+                      : null
+                  let rewardLabel = formatQuota(prize.quota)
+                  if (prize.reward_type === 'subscription') {
+                    rewardLabel = t('Subscription #{{id}}', {
+                      id: prize.subscription_plan_id,
+                    })
+                  } else if (rewardEquivalent) {
+                    rewardLabel = t('${{usd}} · ¥{{cny}} · {{quota}} quota', {
+                      usd: rewardEquivalent.usd.toLocaleString(undefined, {
+                        maximumFractionDigits: 6,
+                      }),
+                      cny: rewardEquivalent.cny.toLocaleString(undefined, {
+                        maximumFractionDigits: 6,
+                      }),
+                      quota: rewardEquivalent.quota.toLocaleString(),
+                    })
+                  }
 
                   return (
                     <article
@@ -306,6 +328,13 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
                         <div className='text-muted-foreground mt-1 text-xs'>
                           {rewardLabel}
                         </div>
+                        {rewardEquivalent && (
+                          <div className='text-muted-foreground mt-1 text-xs'>
+                            {t(
+                              'Displayed using the current system exchange rate.'
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div className='text-muted-foreground grid grid-cols-2 gap-x-6 gap-y-1 text-xs'>
                         <span>{t('Winner count')}</span>
