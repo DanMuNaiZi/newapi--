@@ -21,6 +21,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
 )
 
@@ -35,6 +36,7 @@ func GetUsageRankings(c *gin.Context) {
 		c.DefaultQuery("period", "week"),
 		c.GetInt("id"),
 		limit,
+		authz.Can(c.GetInt("id"), c.GetInt("role"), authz.UserRead),
 	)
 	if err != nil {
 		common.ApiError(c, err)

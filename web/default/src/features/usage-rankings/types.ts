@@ -28,6 +28,7 @@ export type UsageRankingRow = {
 
 export type UsageRankingsSnapshot = {
   period: UsageRankingPeriod
+  identity_visible: boolean
   display_count: number
   total_users: number
   total_quota: number

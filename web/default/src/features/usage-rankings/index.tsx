@@ -15,14 +15,16 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import { getRouteApi } from '@tanstack/react-router'
-import { Crown, Medal, Users } from 'lucide-react'
+import { Crown, Medal, ShieldCheck, Users } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -91,8 +93,22 @@ export function UsageRankings() {
     rankingsContent = (
       <>
         <UsageSummary snapshot={snapshot} />
+        {snapshot.identity_visible && (
+          <Alert>
+            <ShieldCheck aria-hidden='true' />
+            <AlertTitle>{t('Administrator identity view')}</AlertTitle>
+            <AlertDescription>
+              {t(
+                'Usernames are shown without masking because you can view users.'
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
         <RankHighlights topUser={snapshot.top_user} myRank={snapshot.my_rank} />
-        <UsageLeaderboard rows={snapshot.users} />
+        <UsageLeaderboard
+          rows={snapshot.users}
+          identityVisible={snapshot.identity_visible}
+        />
       </>
     )
   }
@@ -127,11 +143,13 @@ export function UsageRankings() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {DISPLAY_COUNTS.map((count) => (
-                <SelectItem key={count} value={String(count)}>
-                  {count}
-                </SelectItem>
-              ))}
+              <SelectGroup>
+                {DISPLAY_COUNTS.map((count) => (
+                  <SelectItem key={count} value={String(count)}>
+                    {count}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
             </SelectContent>
           </Select>
         </div>
@@ -286,7 +304,10 @@ function RankHighlight(props: {
   )
 }
 
-function UsageLeaderboard(props: { rows: UsageRankingRow[] }) {
+function UsageLeaderboard(props: {
+  rows: UsageRankingRow[]
+  identityVisible: boolean
+}) {
   const { t } = useTranslation()
   return (
     <section className='border-border/70 rounded-lg border'>
@@ -303,7 +324,9 @@ function UsageLeaderboard(props: { rows: UsageRankingRow[] }) {
           <TableHeader>
             <TableRow>
               <TableHead className='w-16'>{t('Rank')}</TableHead>
-              <TableHead>{t('Masked username')}</TableHead>
+              <TableHead>
+                {props.identityVisible ? t('Username') : t('Masked username')}
+              </TableHead>
               <TableHead className='text-right'>{t('Consumption')}</TableHead>
               <TableHead className='text-right'>{t('Tokens')}</TableHead>
               <TableHead className='text-right'>{t('Requests')}</TableHead>

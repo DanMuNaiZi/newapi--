@@ -33,7 +33,7 @@ func TestBuildUsageRankingsResponseMasksUsersAndKeepsSelfRank(t *testing.T) {
 		{UserID: 10, Username: "self-user", TotalQuota: 100, TotalTokens: 80, RequestCount: 2},
 	}
 
-	response := buildUsageRankingsResponse("week", totals, 10, 2)
+	response := buildUsageRankingsResponse("week", totals, 10, 2, false)
 
 	require.Len(t, response.Users, 2)
 	require.NotNil(t, response.TopUser)
@@ -69,7 +69,7 @@ func TestBuildUsageRankingsResponseUsesStableTieOrderAndKeepsSelfRank(t *testing
 		{UserID: 3, Username: "user-three", TotalQuota: 100, TotalTokens: 20, RequestCount: 2},
 	}
 
-	response := buildUsageRankingsResponse("month", totals, 4, 2)
+	response := buildUsageRankingsResponse("month", totals, 4, 2, false)
 	require.Len(t, response.Users, 2)
 	assert.Equal(t, "u***o", response.Users[0].Username)
 	assert.Equal(t, "u***e", response.Users[1].Username)
@@ -85,7 +85,7 @@ func TestBuildUsageRankingsResponseUsesStableTieOrderAndKeepsSelfRank(t *testing
 }
 
 func TestBuildUsageRankingsResponseHandlesEmptyUsageAndUnrankedUser(t *testing.T) {
-	response := buildUsageRankingsResponse("today", nil, 99, 5)
+	response := buildUsageRankingsResponse("today", nil, 99, 5, false)
 
 	assert.Equal(t, "today", response.Period)
 	assert.Equal(t, 5, response.DisplayCount)
@@ -96,6 +96,56 @@ func TestBuildUsageRankingsResponseHandlesEmptyUsageAndUnrankedUser(t *testing.T
 	assert.Empty(t, response.Users)
 	assert.Nil(t, response.TopUser)
 	assert.Nil(t, response.MyRank)
+}
+
+func TestBuildUsageRankingsResponseShowsRawIdentityOnlyWhenAuthorized(t *testing.T) {
+	totals := []model.UsageRankingTotal{
+		{UserID: 12, Username: "top-user", TotalQuota: 900, TotalTokens: 700, RequestCount: 9},
+		{UserID: 10, Username: "self-user", TotalQuota: 100, TotalTokens: 80, RequestCount: 2},
+	}
+
+	response := buildUsageRankingsResponse("week", totals, 10, 10, true)
+
+	assert.True(t, response.IdentityVisible)
+	require.NotNil(t, response.TopUser)
+	require.NotNil(t, response.MyRank)
+	assert.Equal(t, "top-user", response.TopUser.Username)
+	assert.Equal(t, "self-user", response.MyRank.Username)
+	require.Len(t, response.Users, 2)
+	assert.Equal(t, "top-user", response.Users[0].Username)
+	assert.Equal(t, "self-user", response.Users[1].Username)
+}
+
+func TestUsageRankingCacheDoesNotReuseIdentityVisibility(t *testing.T) {
+	rows := []model.UsageRankingTotal{
+		{UserID: 12, Username: "top-user", TotalQuota: 900, TotalTokens: 700, RequestCount: 9},
+	}
+	usageRankingCacheMu.Lock()
+	previous, existed := usageRankingCache["week"]
+	usageRankingCache["week"] = usageRankingCacheItem{
+		expiresAt: time.Now().Add(time.Minute),
+		rows:      rows,
+	}
+	usageRankingCacheMu.Unlock()
+	t.Cleanup(func() {
+		usageRankingCacheMu.Lock()
+		defer usageRankingCacheMu.Unlock()
+		if existed {
+			usageRankingCache["week"] = previous
+		} else {
+			delete(usageRankingCache, "week")
+		}
+	})
+
+	adminResponse, err := GetUsageRankingsSnapshot("week", 12, 10, true)
+	require.NoError(t, err)
+	userResponse, err := GetUsageRankingsSnapshot("week", 12, 10, false)
+	require.NoError(t, err)
+
+	require.NotNil(t, adminResponse.TopUser)
+	require.NotNil(t, userResponse.TopUser)
+	assert.Equal(t, "top-user", adminResponse.TopUser.Username)
+	assert.Equal(t, "t***r", userResponse.TopUser.Username)
 }
 
 func TestUsageRankingPeriodRangesAreDeterministic(t *testing.T) {
