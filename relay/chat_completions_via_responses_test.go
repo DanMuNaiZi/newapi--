@@ -32,7 +32,8 @@ func TestIsResponsesEventStreamContentType(t *testing.T) {
 func TestRecalcQuotaFromRatiosIgnoresInvalidMultipliers(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		PriceData: types.PriceData{
-			Quota: 100,
+			Quota:         100,
+			ResourceQuota: 200,
 		},
 	}
 	info.PriceData.AddOtherRatio("duration", 2)
@@ -47,6 +48,7 @@ func TestRecalcQuotaFromRatiosIgnoresInvalidMultipliers(t *testing.T) {
 
 	require.True(t, ok)
 	assert.Equal(t, 150, quota)
+	assert.Equal(t, 300, info.PriceData.ResourceQuota)
 	assert.True(t, info.PriceData.HasOtherRatio("duration"))
 }
 

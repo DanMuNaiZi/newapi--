@@ -506,6 +506,8 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	}
 
+	// #nosec G704 -- relay destinations come from administrator-managed channel
+	// configuration. User-controlled URL fetches use the SSRF-protected client.
 	resp, err := client.Do(req)
 	if err != nil {
 		logger.LogError(c, "do request failed: "+err.Error())

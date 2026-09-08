@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	httppprof "net/http/pprof"
 	"os"
 	"os/signal"
 	"strconv"
@@ -36,8 +37,6 @@ import (
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-
-	_ "net/http/pprof"
 )
 
 //go:embed web/default/dist
@@ -156,7 +155,18 @@ func main() {
 
 	if os.Getenv("ENABLE_PPROF") == "true" {
 		gopool.Go(func() {
-			log.Println(http.ListenAndServe("0.0.0.0:8005", nil))
+			mux := http.NewServeMux()
+			mux.HandleFunc("/debug/pprof/", httppprof.Index)
+			mux.HandleFunc("/debug/pprof/cmdline", httppprof.Cmdline)
+			mux.HandleFunc("/debug/pprof/profile", httppprof.Profile)
+			mux.HandleFunc("/debug/pprof/symbol", httppprof.Symbol)
+			mux.HandleFunc("/debug/pprof/trace", httppprof.Trace)
+			server := &http.Server{
+				Addr:              "127.0.0.1:8005",
+				Handler:           mux,
+				ReadHeaderTimeout: 5 * time.Second,
+			}
+			log.Println(server.ListenAndServe())
 		})
 		go common.Monitor()
 		common.SysLog("pprof enabled")

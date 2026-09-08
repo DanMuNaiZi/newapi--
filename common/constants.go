@@ -117,6 +117,9 @@ var MemoryCacheEnabled bool
 var LogConsumeEnabled = true
 
 var TLSInsecureSkipVerify bool
+
+// #nosec G402 -- this transport is used only when the operator explicitly sets
+// TLS_INSECURE_SKIP_VERIFY=true; the secure default never references it.
 var InsecureTLSConfig = &tls.Config{InsecureSkipVerify: true}
 
 var SMTPServer = ""
