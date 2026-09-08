@@ -36,10 +36,12 @@ func TestFormatUserLogsStripsQuotaSaturation(t *testing.T) {
 }
 
 func TestFormatUserLogsRemovesActualModelFields(t *testing.T) {
+	resourceQuota := 500
 	logs := []*Log{
 		{
-			ModelName: "gpt-5.4",
-			Other:     `{"request_model_name":"gpt-5.5","upstream_model_name":"gpt-5.4","is_model_mapped":true,"admin_info":{"channel":11},"stream_status":{"status":"ok"},"model_ratio":2}`,
+			ModelName:     "gpt-5.4",
+			ResourceQuota: &resourceQuota,
+			Other:         `{"request_model_name":"gpt-5.5","upstream_model_name":"gpt-5.4","is_model_mapped":true,"admin_info":{"channel":11},"stream_status":{"status":"ok"},"model_ratio":2}`,
 		},
 	}
 
@@ -51,7 +53,9 @@ func TestFormatUserLogsRemovesActualModelFields(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "gpt-5.5", logs[0].ModelName)
 	assert.Empty(t, logs[0].ActualModelName)
+	assert.Nil(t, logs[0].ResourceQuota)
 	assert.NotContains(t, string(data), "actual_model_name")
+	assert.NotContains(t, string(data), "resource_quota")
 	assert.NotContains(t, other, "request_model_name")
 	assert.NotContains(t, other, "upstream_model_name")
 	assert.NotContains(t, other, "is_model_mapped")

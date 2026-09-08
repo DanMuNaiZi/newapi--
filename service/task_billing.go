@@ -52,15 +52,17 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		other["upstream_model_name"] = info.UpstreamModelName
 	}
 	attachQuotaSaturation(c, info, other)
+	resourceQuota := info.PriceData.ResourceQuota
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
-		ChannelId: info.ChannelId,
-		ModelName: info.OriginModelName,
-		TokenName: tokenName,
-		Quota:     info.PriceData.Quota,
-		Content:   logContent,
-		TokenId:   info.TokenId,
-		Group:     info.UsingGroup,
-		Other:     other,
+		ChannelId:     info.ChannelId,
+		ModelName:     info.OriginModelName,
+		TokenName:     tokenName,
+		Quota:         info.PriceData.Quota,
+		ResourceQuota: &resourceQuota,
+		Content:       logContent,
+		TokenId:       info.TokenId,
+		Group:         info.UsingGroup,
+		Other:         other,
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
 	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
@@ -185,6 +187,7 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 		UserId:    task.UserId,
 		LogType:   model.LogTypeRefund,
 		Content:   "",
+		RequestId: task.PrivateData.RequestId,
 		ChannelId: task.ChannelId,
 		ModelName: taskModelName(task),
 		Quota:     quota,
@@ -255,6 +258,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		UserId:    task.UserId,
 		LogType:   logType,
 		Content:   reason,
+		RequestId: task.PrivateData.RequestId,
 		ChannelId: task.ChannelId,
 		ModelName: taskModelName(task),
 		Quota:     logQuota,

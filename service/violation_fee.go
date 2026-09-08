@@ -12,8 +12,6 @@ import (
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
 
-	"github.com/shopspring/decimal"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -88,15 +86,11 @@ func calcViolationFeeQuota(amount, groupRatio float64) int {
 	if groupRatio <= 0 {
 		return 0
 	}
-	quota := decimal.NewFromFloat(amount).
-		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
-		Mul(decimal.NewFromFloat(groupRatio)).
-		Round(0).
-		IntPart()
+	quota := common.QuotaRound(amount * common.QuotaPerUnit * groupRatio)
 	if quota <= 0 {
 		return 0
 	}
-	return int(quota)
+	return quota
 }
 
 // ChargeViolationFeeIfNeeded charges an additional fee after the normal flow finishes (including refund).
@@ -146,12 +140,14 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		"upstream_error_code":  fmt.Sprintf("%v", oai.Code),
 		"violation_fee_marker": CSAMViolationMarker,
 	}
+	resourceQuota := calcViolationFeeQuota(settings.ViolationDeductionAmount, 1)
 
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:      relayInfo.ChannelId,
 		ModelName:      relayInfo.OriginModelName,
 		TokenName:      tokenName,
 		Quota:          feeQuota,
+		ResourceQuota:  &resourceQuota,
 		Content:        "Violation fee charged",
 		TokenId:        relayInfo.TokenId,
 		UseTimeSeconds: int(useTimeSeconds),

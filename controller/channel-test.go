@@ -493,6 +493,10 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	info.SetEstimatePromptTokens(usage.PromptTokens)
 
 	quota, tieredResult := settleTestQuota(info, priceData, usage)
+	resourceQuota := quota
+	if tieredResult != nil {
+		resourceQuota = common.QuotaRound(tieredResult.ActualQuotaBeforeGroup)
+	}
 	tok := time.Now()
 	milliseconds := tok.Sub(tik).Milliseconds()
 	consumedTime := float64(milliseconds) / 1000.0
@@ -504,6 +508,7 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 		ModelName:        info.OriginModelName,
 		TokenName:        "模型测试",
 		Quota:            quota,
+		ResourceQuota:    &resourceQuota,
 		Content:          "模型测试",
 		UseTimeSeconds:   int(consumedTime),
 		IsStream:         info.IsStream,

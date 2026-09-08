@@ -130,6 +130,7 @@ func makeTask(userId, channelId, quota, tokenId int, billingSource string, subsc
 			OriginModelName: "test-model",
 		},
 		PrivateData: model.TaskPrivateData{
+			RequestId:      "task-request",
 			BillingSource:  billingSource,
 			SubscriptionId: subscriptionId,
 			TokenId:        tokenId,
@@ -427,6 +428,7 @@ func TestRecalculate_PositiveDelta(t *testing.T) {
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeConsume, log.Type)
 	assert.Equal(t, actualQuota-preConsumed, log.Quota)
+	assert.Equal(t, "task-request", log.RequestId)
 }
 
 func TestRecalculate_NegativeDelta(t *testing.T) {

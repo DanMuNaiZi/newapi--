@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useChannels } from './channels-provider'
 import { BalanceQueryDialog } from './dialogs/balance-query-dialog'
 import { ChannelTestDialog } from './dialogs/channel-test-dialog'
+import { ChannelUsageSummaryDialog } from './dialogs/channel-usage-summary-dialog'
 import { CopyChannelDialog } from './dialogs/copy-channel-dialog'
 import { EditTagDialog } from './dialogs/edit-tag-dialog'
 import { FetchModelsDialog } from './dialogs/fetch-models-dialog'
@@ -49,6 +50,11 @@ export function ChannelsDialogs() {
       {/* Balance Query Dialog */}
       <BalanceQueryDialog
         open={open === 'balance-query'}
+        onOpenChange={(v) => !v && setOpen(null)}
+      />
+
+      <ChannelUsageSummaryDialog
+        open={open === 'usage-summary'}
         onOpenChange={(v) => !v && setOpen(null)}
       />
 

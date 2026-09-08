@@ -416,6 +416,9 @@ func migrateClickHouseLogDB() error {
 	if err := LOG_DB.Exec(clickHouseLogCreateTableSQL(ttlDays)).Error; err != nil {
 		return err
 	}
+	if err := LOG_DB.Exec("ALTER TABLE logs ADD COLUMN IF NOT EXISTS resource_quota Nullable(Int32) DEFAULT NULL AFTER quota").Error; err != nil {
+		return err
+	}
 	return syncClickHouseLogTTL(ttlDays)
 }
 
@@ -454,6 +457,7 @@ CREATE TABLE IF NOT EXISTS logs (
 	token_name String DEFAULT '',
 	model_name String DEFAULT '',
 	quota Int32 DEFAULT 0,
+	resource_quota Nullable(Int32) DEFAULT NULL,
 	prompt_tokens Int32 DEFAULT 0,
 	completion_tokens Int32 DEFAULT 0,
 	use_time Int32 DEFAULT 0,

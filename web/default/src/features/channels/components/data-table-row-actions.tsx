@@ -33,6 +33,7 @@ import {
   Trash2,
   RefreshCw,
   Loader2,
+  ChartNoAxesCombined,
 } from 'lucide-react'
 import { useContext, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -121,6 +122,11 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const handleQueryBalance = () => {
     setCurrentRow(channel)
     setOpen('balance-query')
+  }
+
+  const handleUsageSummary = () => {
+    setCurrentRow(channel)
+    setOpen('usage-summary')
   }
 
   const handleFetchModels = () => {
@@ -278,6 +284,14 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
             {t('Test Connection')}
             <DropdownMenuShortcut>
               <PlugZap size={16} />
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+
+          {/* Query Balance */}
+          <DropdownMenuItem onClick={handleUsageSummary}>
+            {t('Usage report')}
+            <DropdownMenuShortcut>
+              <ChartNoAxesCombined size={16} />
             </DropdownMenuShortcut>
           </DropdownMenuItem>
 

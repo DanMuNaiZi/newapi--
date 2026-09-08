@@ -27,6 +27,8 @@ import type {
   ChannelBalanceResponse,
   ChannelOpsResponse,
   ChannelTestResponse,
+  ChannelUsagePeriod,
+  ChannelUsageSummaryResponse,
   CopyChannelParams,
   CopyChannelResponse,
   FetchModelsResponse,
@@ -110,6 +112,16 @@ export async function getChannel(id: number): Promise<GetChannelResponse> {
  */
 export async function getChannelOps(): Promise<ChannelOpsResponse> {
   const res = await api.get('/api/channel/ops', channelActionConfig())
+  return res.data
+}
+
+export async function getChannelUsageSummary(
+  id: number,
+  period: ChannelUsagePeriod
+): Promise<ChannelUsageSummaryResponse> {
+  const res = await api.get(`/api/channel/${id}/usage-summary`, {
+    params: { period },
+  })
   return res.data
 }
 

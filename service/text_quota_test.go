@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -405,6 +406,73 @@ func TestComposeTieredTextQuotaKeepsToolCallSurcharges(t *testing.T) {
 
 	require.Equal(t, int64(13000), summary.ToolCallSurchargeQuota.Round(0).IntPart())
 	require.Equal(t, 14000, quota)
+}
+
+func TestCalculateTextQuotaSummaryKeepsResourceQuotaForZeroRatioGroup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "public-pool-model",
+		PriceData: types.PriceData{
+			ModelRatio:      2,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 0},
+		},
+		StartTime: time.Now(),
+	}
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 50,
+		TotalTokens:      150,
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	require.Equal(t, 0, summary.Quota)
+	require.Equal(t, 300, summary.ResourceQuota)
+}
+
+func TestCalculateFixedPriceTextQuotaKeepsResourceQuotaForZeroRatioGroup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "public-pool-fixed-model",
+		PriceData: types.PriceData{
+			UsePrice:       true,
+			ModelPrice:     2,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 0},
+		},
+		StartTime: time.Now(),
+	}
+	usage := &dto.Usage{
+		PromptTokens: 1,
+		TotalTokens:  1,
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	require.Equal(t, 0, summary.Quota)
+	require.Equal(t, common.QuotaFromFloat(2*common.QuotaPerUnit), summary.ResourceQuota)
+}
+
+func TestCalculateTieredResourceQuotaUsesBeforeGroupValue(t *testing.T) {
+	relayInfo := &relaycommon.RelayInfo{
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			GroupRatio:                0,
+			EstimatedQuotaBeforeGroup: 900,
+		},
+	}
+	summary := textQuotaSummary{
+		ResourceToolCallSurchargeQuota: decimal.NewFromInt(100),
+	}
+
+	quota := calculateTieredResourceQuota(relayInfo, summary, &billingexpr.TieredResult{
+		ActualQuotaBeforeGroup: 1000,
+	})
+
+	require.Equal(t, 1100, quota)
 }
 
 func TestComposeTieredTextQuotaFallbackKeepsToolCallSurcharges(t *testing.T) {

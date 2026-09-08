@@ -66,6 +66,7 @@ type Log struct {
 	TokenName         string `json:"token_name" gorm:"index;default:''"`
 	ModelName         string `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;default:''"`
 	Quota             int    `json:"quota" gorm:"default:0"`
+	ResourceQuota     *int   `json:"resource_quota,omitempty"`
 	PromptTokens      int    `json:"prompt_tokens" gorm:"default:0"`
 	CompletionTokens  int    `json:"completion_tokens" gorm:"default:0"`
 	UseTime           int    `json:"use_time" gorm:"default:0"`
@@ -118,6 +119,7 @@ func formatUserLogs(logs []*Log, startIdx int) {
 	for i := range logs {
 		logs[i].ChannelName = ""
 		logs[i].ActualModelName = ""
+		logs[i].ResourceQuota = nil
 		var otherMap map[string]interface{}
 		otherMap, _ = common.StrToMap(logs[i].Other)
 		if otherMap != nil {
@@ -380,6 +382,7 @@ type RecordConsumeLogParams struct {
 	ModelName        string                 `json:"model_name"`
 	TokenName        string                 `json:"token_name"`
 	Quota            int                    `json:"quota"`
+	ResourceQuota    *int                   `json:"resource_quota,omitempty"`
 	Content          string                 `json:"content"`
 	TokenId          int                    `json:"token_id"`
 	UseTimeSeconds   int                    `json:"use_time_seconds"`
@@ -416,6 +419,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		TokenName:        params.TokenName,
 		ModelName:        params.ModelName,
 		Quota:            params.Quota,
+		ResourceQuota:    params.ResourceQuota,
 		ChannelId:        params.ChannelId,
 		TokenId:          params.TokenId,
 		UseTime:          params.UseTimeSeconds,
@@ -455,6 +459,7 @@ type RecordTaskBillingLogParams struct {
 	UserId    int
 	LogType   int
 	Content   string
+	RequestId string
 	ChannelId int
 	ModelName string
 	Quota     int
@@ -488,6 +493,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 		ChannelId: params.ChannelId,
 		TokenId:   params.TokenId,
 		Group:     params.Group,
+		RequestId: params.RequestId,
 		Other:     common.MapToJsonStr(params.Other),
 	}
 	err := createLog(log)
