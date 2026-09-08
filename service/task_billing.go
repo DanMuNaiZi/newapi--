@@ -298,14 +298,11 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 		return
 	}
 
-	groupRatio := ratio_setting.GetGroupRatio(group)
-	userGroupRatio, hasUserGroupRatio := ratio_setting.GetGroupGroupRatio(group, group)
-
-	var finalGroupRatio float64
-	if hasUserGroupRatio {
+	finalGroupRatio := ratio_setting.GetGroupRatio(group)
+	if group == constant.PublicPoolGroup {
+		finalGroupRatio = 0
+	} else if userGroupRatio, ok := ratio_setting.GetGroupGroupRatio(group, group); ok {
 		finalGroupRatio = userGroupRatio
-	} else {
-		finalGroupRatio = groupRatio
 	}
 
 	// 计算 OtherRatios 乘积（视频折扣、时长等）

@@ -8,6 +8,7 @@ const (
 	ResourceSubscription   = "subscription"
 	ResourceRedemption     = "redemption"
 	ResourceLottery        = "lottery"
+	ResourcePublicPool     = "public_pool"
 	ResourceVendor         = "vendor"
 	ResourceGroup          = "group"
 	ResourcePrefillGroup   = "prefill_group"
@@ -57,6 +58,9 @@ var (
 	LotteryRead         = Permission{Resource: ResourceLottery, Action: ActionRead}
 	LotteryWrite        = Permission{Resource: ResourceLottery, Action: ActionWrite}
 	LotteryOperate      = Permission{Resource: ResourceLottery, Action: ActionOperate}
+	PublicPoolRead      = Permission{Resource: ResourcePublicPool, Action: ActionRead}
+	PublicPoolWrite     = Permission{Resource: ResourcePublicPool, Action: ActionWrite}
+	PublicPoolOperate   = Permission{Resource: ResourcePublicPool, Action: ActionOperate}
 
 	VendorRead        = Permission{Resource: ResourceVendor, Action: ActionRead}
 	VendorWrite       = Permission{Resource: ResourceVendor, Action: ActionWrite}
@@ -102,6 +106,7 @@ func init() {
 	registerManagementResource(ResourceSubscription, "Subscription Management", admin)
 	registerManagementResource(ResourceRedemption, "Redemption Code Management", admin)
 	registerManagementResource(ResourceLottery, "Lottery Management", admin)
+	registerManagementResource(ResourcePublicPool, "Public Pool Management", admin)
 	registerReadWriteResource(ResourceVendor, "Vendor Management", admin)
 	RegisterResource(ResourceDefinition{Resource: ResourceGroup, LabelKey: "Group Management", Actions: []ActionDefinition{
 		{Action: ActionRead, LabelKey: "View groups", DescriptionKey: "View available user groups.", DefaultRoles: admin},

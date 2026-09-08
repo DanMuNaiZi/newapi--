@@ -36,6 +36,8 @@ const OPERATIONS_SECTIONS = [
           DefaultCollapseSidebar: settings.DefaultCollapseSidebar,
           DemoSiteEnabled: settings.DemoSiteEnabled,
           SelfUseModeEnabled: settings.SelfUseModeEnabled,
+          'public_pool_setting.enabled':
+            settings['public_pool_setting.enabled'] ?? false,
         }}
       />
     ),

@@ -22,6 +22,7 @@ import {
   CreditCard,
   FileText,
   FlaskConical,
+  HandHeart,
   Key,
   LayoutDashboard,
   ListTodo,
@@ -151,6 +152,11 @@ export function useSidebarData(): SidebarData {
       title: t('Usage Rankings'),
       url: '/usage-rankings',
       icon: Medal,
+    },
+    {
+      title: t('Public Pool'),
+      url: '/public-pool',
+      icon: HandHeart,
     },
   ]
   if (

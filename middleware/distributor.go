@@ -55,6 +55,11 @@ func Distribute() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorChannelDisabled))
 				return
 			}
+			usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+			if !service.IsChannelAllowedForPublicPool(usingGroup, modelRequest.Model, channel.Id) {
+				abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorGroupAccessDenied))
+				return
+			}
 		} else {
 			// Select a channel for the user
 			// check token model mapping

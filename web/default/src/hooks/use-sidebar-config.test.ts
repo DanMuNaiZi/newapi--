@@ -27,12 +27,14 @@ import {
 function config(consoleOverrides: {
   log?: boolean
   ranking?: boolean
+  public_pool?: boolean
 }): SidebarModulesAdminConfig {
   return {
     console: {
       enabled: true,
       log: consoleOverrides.log ?? true,
       ranking: consoleOverrides.ranking ?? true,
+      public_pool: consoleOverrides.public_pool ?? true,
     },
   }
 }
@@ -84,6 +86,24 @@ describe('sidebar module visibility', () => {
     assert.equal(
       isSidebarModuleEnabled('/usage-rankings', config({}), {
         console: { enabled: true, ranking: false },
+      }),
+      false
+    )
+  })
+
+  test('uses the admin and personal gates for the public pool', () => {
+    assert.equal(isSidebarModuleEnabled('/public-pool', config({}), null), true)
+    assert.equal(
+      isSidebarModuleEnabled(
+        '/public-pool',
+        config({ public_pool: false }),
+        null
+      ),
+      false
+    )
+    assert.equal(
+      isSidebarModuleEnabled('/public-pool', config({}), {
+        console: { enabled: true, public_pool: false },
       }),
       false
     )

@@ -14,6 +14,7 @@ export const ADMIN_PERMISSION_RESOURCES = {
   SUBSCRIPTION: 'subscription',
   REDEMPTION: 'redemption',
   LOTTERY: 'lottery',
+  PUBLIC_POOL: 'public_pool',
   SYSTEM_SETTINGS: 'system_settings',
   PAYMENT: 'payment',
   OAUTH: 'oauth',

@@ -114,6 +114,12 @@ export function SidebarModulesSection({
         title: t('Usage rankings'),
         description: t('Compare user consumption and usage volume.'),
       },
+      public_pool: {
+        title: t('Public Pool'),
+        description: t(
+          'Browse contributed free-service sites and submit contributions.'
+        ),
+      },
       midjourney: {
         title: t('Drawing logs'),
         description: t('History of MjProxy-style image tasks.'),

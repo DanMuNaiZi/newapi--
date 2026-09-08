@@ -98,6 +98,13 @@ export function SidebarModulesCard() {
           description: t('Compare user consumption and usage volume.'),
         },
         {
+          key: 'public_pool',
+          title: t('Public Pool'),
+          description: t(
+            'Browse contributed free-service sites and submit contributions.'
+          ),
+        },
+        {
           key: 'midjourney',
           title: t('Drawing Logs'),
           description: t('Drawing task records'),

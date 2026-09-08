@@ -78,6 +78,16 @@ func TestInitOnSlaveOnlyLoadsPolicies(t *testing.T) {
 	assert.False(t, Can(2, common.RoleAdminUser, ChannelRead))
 }
 
+func TestPublicPoolManagementPermissionsUseManagedAdminPolicy(t *testing.T) {
+	db := newAuthzTestDB(t)
+	require.NoError(t, Init(db))
+
+	assert.True(t, Can(2, common.RoleAdminUser, PublicPoolRead))
+	assert.True(t, Can(2, common.RoleAdminUser, PublicPoolWrite))
+	assert.True(t, Can(2, common.RoleAdminUser, PublicPoolOperate))
+	assert.False(t, Can(3, common.RoleCommonUser, PublicPoolRead))
+}
+
 func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 	db := newAuthzTestDB(t)
 	require.NoError(t, Init(db))

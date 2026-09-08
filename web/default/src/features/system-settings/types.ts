@@ -334,6 +334,7 @@ export type OperationsSettings = {
   DefaultCollapseSidebar: boolean
   DemoSiteEnabled: boolean
   SelfUseModeEnabled: boolean
+  'public_pool_setting.enabled': boolean
   QuotaRemindThreshold: string
   SMTPServer: string
   SMTPPort: string

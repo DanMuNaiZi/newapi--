@@ -10,8 +10,10 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -137,4 +139,50 @@ func TestModelPriceHelperTieredPreConsumeMaxTokensFallback(t *testing.T) {
 			require.Equal(t, tc.expected, priceData.QuotaToPreConsume)
 		})
 	}
+}
+
+func TestModelPriceHelperPerCallKeepsResourceQuotaForZeroRatioGroup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousGroupRatios := ratio_setting.GroupRatio2JSONString()
+	previousModelPrices := ratio_setting.ModelPrice2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(previousGroupRatios))
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(previousModelPrices))
+	})
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"public_pool":0}`))
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"public-pool-task":2}`))
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", nil)
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "public-pool-task",
+		UserGroup:       "default",
+		UsingGroup:      "public_pool",
+	}
+
+	priceData, err := ModelPriceHelperPerCall(ctx, info)
+
+	require.NoError(t, err)
+	require.Zero(t, priceData.Quota)
+	require.Equal(t, common.QuotaFromFloat(2*common.QuotaPerUnit), priceData.ResourceQuota)
+}
+
+func TestHandleGroupRatioForcesPublicPoolToZero(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousGroupRatios := ratio_setting.GroupRatio2JSONString()
+	previousSpecialRatios := ratio_setting.GroupGroupRatio2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(previousGroupRatios))
+		require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(previousSpecialRatios))
+	})
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"public_pool":0}`))
+	require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(`{"vip":{"public_pool":1}}`))
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &relaycommon.RelayInfo{UserGroup: "vip", UsingGroup: "public_pool"}
+
+	ratio := HandleGroupRatio(ctx, info)
+
+	assert.Zero(t, ratio.GroupRatio)
+	assert.False(t, ratio.HasSpecialRatio)
 }

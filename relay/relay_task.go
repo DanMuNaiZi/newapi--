@@ -87,6 +87,9 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 	if ch.Status != common.ChannelStatusEnabled {
 		return service.TaskErrorWrapperLocal(errors.New("the channel of the origin task is disabled"), "task_channel_disable", http.StatusBadRequest)
 	}
+	if !service.IsChannelAllowedForPublicPool(info.UsingGroup, info.OriginModelName, ch.Id) {
+		return service.TaskErrorWrapperLocal(errors.New("the channel of the origin task is not available in the public pool"), "task_channel_not_in_public_pool", http.StatusForbidden)
+	}
 	info.LockedChannel = ch
 
 	if originTask.ChannelId != info.ChannelId {
