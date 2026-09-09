@@ -20,6 +20,10 @@ import axios, { type AxiosRequestConfig } from 'axios'
 import { t } from 'i18next'
 import { toast } from 'sonner'
 
+import {
+  clearUserPreviewSession,
+  getUserPreviewToken,
+} from '@/lib/user-preview'
 import { useAuthStore } from '@/stores/auth-store'
 
 declare module 'axios' {
@@ -65,7 +69,8 @@ api.get = ((url: string, config: ApiRequestConfig = {}) => {
   const key = `${url}?${params}`
 
   // Return existing in-flight request if available
-  if (inFlightGet.has(key)) return inFlightGet.get(key)!
+  const inFlightRequest = inFlightGet.get(key)
+  if (inFlightRequest) return inFlightRequest
 
   // Create new request and clean up after completion
   const req = originalGet(url, config).finally(() => inFlightGet.delete(key))
@@ -100,6 +105,18 @@ api.interceptors.response.use(
   (error) => {
     const skip = error?.config?.skipErrorHandler
     const status = error?.response?.status
+    const message = error?.response?.data?.message
+
+    if (
+      status === 403 &&
+      message === 'user preview token has expired' &&
+      getUserPreviewToken()
+    ) {
+      clearUserPreviewSession()
+      if (typeof window !== 'undefined') {
+        window.location.replace('/dashboard/overview')
+      }
+    }
 
     if (status === 401) {
       try {
@@ -113,8 +130,7 @@ api.interceptors.response.use(
       }
     } else if (!skip) {
       // Other errors: show error message from response or default
-      const msg =
-        error?.response?.data?.message || error?.message || t('Request failed')
+      const msg = message || error?.message || t('Request failed')
       toast.error(msg)
     }
     return Promise.reject(error)
@@ -152,6 +168,11 @@ export function getCommonHeaders(): Record<string, string> {
     headers['New-Api-User'] = uid
   }
 
+  const previewToken = getUserPreviewToken()
+  if (previewToken) {
+    headers['New-Api-User-Preview'] = previewToken
+  }
+
   return headers
 }
 
@@ -165,6 +186,15 @@ api.interceptors.request.use((config) => {
   if (uid) {
     // Custom header for user identification
     ;(config.headers as Record<string, string>)['New-Api-User'] = uid
+  }
+
+  const previewToken = getUserPreviewToken()
+  if (previewToken) {
+    if ((config.method ?? 'get').toLowerCase() !== 'get') {
+      return Promise.reject(new Error(t('User preview is read-only')))
+    }
+    ;(config.headers as Record<string, string>)['New-Api-User-Preview'] =
+      previewToken
   }
   return config
 })

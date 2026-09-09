@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { create } from 'zustand'
 
 import type { AdminCapabilities } from '@/lib/admin-permissions'
+import { ROLE } from '@/lib/roles'
+import { getUserPreviewSession, isUserPreviewActive } from '@/lib/user-preview'
 
 export type UserPermissions = {
   sidebar_settings?: boolean
@@ -66,6 +68,15 @@ export const useAuthStore = create<AuthState>()((set) => {
   const initUser = (() => {
     try {
       if (typeof window !== 'undefined') {
+        const previewSession = getUserPreviewSession()
+        if (previewSession && isUserPreviewActive()) {
+          return {
+            id: previewSession.target_user_id,
+            username: previewSession.username,
+            display_name: previewSession.display_name,
+            role: ROLE.USER,
+          }
+        }
         const saved = window.localStorage.getItem('user')
         return saved ? JSON.parse(saved) : null
       }
@@ -85,9 +96,9 @@ export const useAuthStore = create<AuthState>()((set) => {
         set((state) => {
           // Persist user to localStorage
           if (typeof window !== 'undefined') {
-            if (user) {
+            if (user && !isUserPreviewActive()) {
               window.localStorage.setItem('user', JSON.stringify(user))
-            } else {
+            } else if (!user) {
               window.localStorage.removeItem('user')
             }
           }

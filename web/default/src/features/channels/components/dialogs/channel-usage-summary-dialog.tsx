@@ -207,7 +207,7 @@ export function ChannelUsageSummaryDialog({
 }: ChannelUsageSummaryDialogProps) {
   const { t } = useTranslation()
   const { currentRow } = useChannels()
-  const [period, setPeriod] = useState<ChannelUsagePeriod>('day')
+  const [period, setPeriod] = useState<ChannelUsagePeriod>('month')
   const channelId = currentRow?.id
   const query = useQuery({
     queryKey: ['channels', 'usage-summary', channelId, period],
@@ -234,8 +234,8 @@ export function ChannelUsageSummaryDialog({
       description={t('Channel resource usage for {{name}}', {
         name: currentRow.name,
       })}
-      contentHeight='min(42rem, calc(100vh - 14rem))'
-      contentClassName='sm:max-w-3xl'
+      contentHeight='min(36rem, calc(100vh - 12rem))'
+      contentClassName='sm:max-w-2xl'
       bodyClassName='space-y-4'
       footer={
         <Button variant='outline' onClick={() => onOpenChange(false)}>

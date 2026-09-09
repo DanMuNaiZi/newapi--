@@ -28,6 +28,7 @@ import {
   ShieldAlert,
   Link2,
   CreditCard,
+  Eye,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -47,8 +48,19 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { UserSubscriptionsDialog } from '@/features/subscriptions/components/dialogs/user-subscriptions-dialog'
+import { ROLE } from '@/lib/roles'
+import {
+  USER_PREVIEW_SESSION_KEY,
+  USER_PREVIEW_TOKEN_KEY,
+} from '@/lib/user-preview'
+import { useAuthStore } from '@/stores/auth-store'
 
-import { manageUser, resetUserPasskey, resetUserTwoFA } from '../api'
+import {
+  createUserPreview,
+  manageUser,
+  resetUserPasskey,
+  resetUserTwoFA,
+} from '../api'
 import {
   USER_STATUS,
   USER_ROLE,
@@ -72,6 +84,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const [resetTwoFAOpen, setResetTwoFAOpen] = useState(false)
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
   const [subscriptionsDialogOpen, setSubscriptionsDialogOpen] = useState(false)
+  const currentUser = useAuthStore((state) => state.auth.user)
 
   const handleEdit = () => {
     setCurrentRow(user)
@@ -131,9 +144,49 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
     }
   }
 
+  const handlePreview = async () => {
+    const previewWindow = window.open('', '_blank')
+    if (!previewWindow) {
+      toast.error(t('Please allow pop-ups to preview this user'))
+      return
+    }
+    previewWindow.document.title = t('Preparing user preview')
+    try {
+      const result = await createUserPreview(user.id)
+      if (!result.success || !result.data) {
+        previewWindow.close()
+        toast.error(result.message || t('Failed to create user preview'))
+        return
+      }
+      previewWindow.sessionStorage.setItem(
+        USER_PREVIEW_TOKEN_KEY,
+        result.data.token
+      )
+      previewWindow.sessionStorage.setItem(
+        USER_PREVIEW_SESSION_KEY,
+        JSON.stringify({
+          actor_user_id: currentUser?.id,
+          target_user_id: result.data.target.id,
+          username: result.data.target.username,
+          display_name: result.data.target.display_name,
+          expires_at: result.data.expires_at,
+        })
+      )
+      previewWindow.opener = null
+      previewWindow.location.replace('/dashboard/overview')
+    } catch {
+      previewWindow.close()
+      toast.error(t('Failed to create user preview'))
+    }
+  }
+
   const isDisabled = user.status === USER_STATUS.DISABLED
   const isAdmin = user.role >= USER_ROLE.ADMIN
   const isRoot = user.role === USER_ROLE.ROOT
+  const canPreview =
+    currentUser?.role === ROLE.SUPER_ADMIN &&
+    user.role === USER_ROLE.USER &&
+    !isDisabled
 
   if (isUserDeleted(user)) {
     return null
@@ -161,6 +214,15 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         ariaLabel={t('Open menu')}
         contentClassName='w-48'
       >
+        {canPreview && (
+          <DropdownMenuItem onClick={handlePreview}>
+            {t('Preview as user')}
+            <DropdownMenuShortcut>
+              <Eye size={16} />
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+        )}
+
         {isDisabled ? (
           <DropdownMenuItem onClick={() => handleManage('enable')}>
             {t('Enable')}

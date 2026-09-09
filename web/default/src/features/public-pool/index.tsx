@@ -1,3 +1,22 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ExternalLink, HandHeart, Send } from 'lucide-react'
@@ -34,6 +53,8 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { Textarea } from '@/components/ui/textarea'
+import { formatQuota } from '@/lib/format'
+import { isUserPreviewActive } from '@/lib/user-preview'
 
 import {
   createPublicPoolContribution,
@@ -41,7 +62,6 @@ import {
   getPublicPoolSites,
   getPublicPoolStatus,
 } from './api'
-import { PublicPoolAdminPanel } from './components/admin-panel'
 import {
   publicPoolContributionSchema,
   type PublicPoolContributionFormValues,
@@ -56,9 +76,32 @@ function contributionStatusVariant(
   return 'secondary'
 }
 
+function rewardDescription(
+  reward: {
+    type: string
+    subscription_plan_title?: string
+    amount?: string
+    unit?: string
+    quota?: number
+  },
+  t: (key: string, options?: Record<string, unknown>) => string
+): string {
+  if (reward.type === 'subscription') {
+    return t('Reward: {{plan}}', {
+      plan: reward.subscription_plan_title || t('Subscription'),
+    })
+  }
+  return t('Reward: {{amount}} {{unit}} ({{quota}})', {
+    amount: reward.amount ?? reward.quota ?? 0,
+    unit: (reward.unit ?? 'quota').toUpperCase(),
+    quota: formatQuota(reward.quota ?? 0),
+  })
+}
+
 export function PublicPool() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  const readOnlyPreview = isUserPreviewActive()
   const statusQuery = useQuery({
     queryKey: ['public-pool', 'status'],
     queryFn: getPublicPoolStatus,
@@ -162,6 +205,11 @@ export function PublicPool() {
                     <CardHeader>
                       <CardTitle>{site.name}</CardTitle>
                       <CardDescription>{site.description}</CardDescription>
+                      {site.reward && (
+                        <p className='text-primary text-sm font-medium'>
+                          {rewardDescription(site.reward, t)}
+                        </p>
+                      )}
                     </CardHeader>
                     <CardContent>
                       <Button
@@ -187,95 +235,110 @@ export function PublicPool() {
           </section>
 
           <section className='grid gap-6 lg:grid-cols-2'>
-            <Card>
-              <CardHeader>
-                <CardTitle>{t('Submit a contribution')}</CardTitle>
-                <CardDescription>
-                  {t(
-                    'Do not submit passwords, API keys, cookies, or other credentials.'
-                  )}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <form onSubmit={form.handleSubmit(submit)}>
-                  <FieldGroup>
-                    <Field
-                      data-invalid={Boolean(form.formState.errors.site_id)}
-                    >
-                      <FieldLabel htmlFor='public-pool-site'>
-                        {t('Public site')}
-                      </FieldLabel>
-                      <NativeSelect
-                        id='public-pool-site'
-                        aria-invalid={Boolean(form.formState.errors.site_id)}
-                        {...form.register('site_id', { valueAsNumber: true })}
+            {readOnlyPreview ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>{t('Submit a contribution')}</CardTitle>
+                  <CardDescription>
+                    {t('User preview is read-only')}
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            ) : (
+              <Card>
+                <CardHeader>
+                  <CardTitle>{t('Submit a contribution')}</CardTitle>
+                  <CardDescription>
+                    {t(
+                      'Do not submit passwords, API keys, cookies, or other credentials.'
+                    )}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <form onSubmit={form.handleSubmit(submit)}>
+                    <FieldGroup>
+                      <Field
+                        data-invalid={Boolean(form.formState.errors.site_id)}
                       >
-                        <NativeSelectOption value='0'>
-                          {t('Select a public site')}
-                        </NativeSelectOption>
-                        {sites.map((site) => (
-                          <NativeSelectOption key={site.id} value={site.id}>
-                            {site.name}
+                        <FieldLabel htmlFor='public-pool-site'>
+                          {t('Public site')}
+                        </FieldLabel>
+                        <NativeSelect
+                          id='public-pool-site'
+                          aria-invalid={Boolean(form.formState.errors.site_id)}
+                          {...form.register('site_id', { valueAsNumber: true })}
+                        >
+                          <NativeSelectOption value='0'>
+                            {t('Select a public site')}
                           </NativeSelectOption>
-                        ))}
-                      </NativeSelect>
-                      <FieldError>
-                        {form.formState.errors.site_id?.message
-                          ? t(form.formState.errors.site_id.message)
-                          : null}
-                      </FieldError>
-                    </Field>
-                    <Field
-                      data-invalid={Boolean(form.formState.errors.description)}
-                    >
-                      <FieldLabel htmlFor='public-pool-description'>
-                        {t('Contribution description')}
-                      </FieldLabel>
-                      <Textarea
-                        id='public-pool-description'
-                        aria-invalid={Boolean(
+                          {sites.map((site) => (
+                            <NativeSelectOption key={site.id} value={site.id}>
+                              {site.name}
+                            </NativeSelectOption>
+                          ))}
+                        </NativeSelect>
+                        <FieldError>
+                          {form.formState.errors.site_id?.message
+                            ? t(form.formState.errors.site_id.message)
+                            : null}
+                        </FieldError>
+                      </Field>
+                      <Field
+                        data-invalid={Boolean(
                           form.formState.errors.description
                         )}
-                        {...form.register('description')}
-                      />
-                      <FieldError>
-                        {form.formState.errors.description?.message
-                          ? t(form.formState.errors.description.message)
-                          : null}
-                      </FieldError>
-                    </Field>
-                    <Field data-invalid={Boolean(form.formState.errors.proof)}>
-                      <FieldLabel htmlFor='public-pool-proof'>
-                        {t('Contribution proof')}
-                      </FieldLabel>
-                      <Textarea
-                        id='public-pool-proof'
-                        aria-invalid={Boolean(form.formState.errors.proof)}
-                        {...form.register('proof')}
-                      />
-                      <FieldDescription>
-                        {t(
-                          'Describe the completed registration or invitation result.'
+                      >
+                        <FieldLabel htmlFor='public-pool-description'>
+                          {t('Contribution description')}
+                        </FieldLabel>
+                        <Textarea
+                          id='public-pool-description'
+                          aria-invalid={Boolean(
+                            form.formState.errors.description
+                          )}
+                          {...form.register('description')}
+                        />
+                        <FieldError>
+                          {form.formState.errors.description?.message
+                            ? t(form.formState.errors.description.message)
+                            : null}
+                        </FieldError>
+                      </Field>
+                      <Field
+                        data-invalid={Boolean(form.formState.errors.proof)}
+                      >
+                        <FieldLabel htmlFor='public-pool-proof'>
+                          {t('Contribution proof')}
+                        </FieldLabel>
+                        <Textarea
+                          id='public-pool-proof'
+                          aria-invalid={Boolean(form.formState.errors.proof)}
+                          {...form.register('proof')}
+                        />
+                        <FieldDescription>
+                          {t(
+                            'Describe the completed registration or invitation result.'
+                          )}
+                        </FieldDescription>
+                        <FieldError>
+                          {form.formState.errors.proof?.message
+                            ? t(form.formState.errors.proof.message)
+                            : null}
+                        </FieldError>
+                      </Field>
+                      <Button type='submit' disabled={createMutation.isPending}>
+                        {createMutation.isPending ? (
+                          <Spinner data-icon='inline-start' />
+                        ) : (
+                          <Send data-icon='inline-start' aria-hidden='true' />
                         )}
-                      </FieldDescription>
-                      <FieldError>
-                        {form.formState.errors.proof?.message
-                          ? t(form.formState.errors.proof.message)
-                          : null}
-                      </FieldError>
-                    </Field>
-                    <Button type='submit' disabled={createMutation.isPending}>
-                      {createMutation.isPending ? (
-                        <Spinner data-icon='inline-start' />
-                      ) : (
-                        <Send data-icon='inline-start' aria-hidden='true' />
-                      )}
-                      {t('Submit for review')}
-                    </Button>
-                  </FieldGroup>
-                </form>
-              </CardContent>
-            </Card>
+                        {t('Submit for review')}
+                      </Button>
+                    </FieldGroup>
+                  </form>
+                </CardContent>
+              </Card>
+            )}
 
             <Card>
               <CardHeader>
@@ -320,6 +383,16 @@ export function PublicPool() {
                             {t('Review note')}: {item.review_note}
                           </p>
                         )}
+                        {item.reward && (
+                          <p className='mt-2 text-sm'>
+                            {rewardDescription(item.reward, t)}
+                          </p>
+                        )}
+                        {item.reward_status && (
+                          <p className='text-muted-foreground mt-1 text-xs'>
+                            {t(`reward_${item.reward_status}`)}
+                          </p>
+                        )}
                       </article>
                     ))}
                   </div>
@@ -327,8 +400,6 @@ export function PublicPool() {
               </CardContent>
             </Card>
           </section>
-
-          <PublicPoolAdminPanel />
         </div>
       </SectionPageLayout.Content>
     </SectionPageLayout>

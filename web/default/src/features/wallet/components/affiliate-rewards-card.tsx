@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery } from '@tanstack/react-query'
+import dayjs from 'dayjs'
 import { Share2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -24,6 +26,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import { getReferralCampaignSelf } from '@/features/referral-campaigns/api'
 import { formatQuota } from '@/lib/format'
 
 import type { UserWalletData } from '../types'
@@ -34,6 +37,7 @@ interface AffiliateRewardsCardProps {
   onTransfer: () => void
   complianceConfirmed?: boolean
   loading?: boolean
+  readOnly?: boolean
 }
 
 export function AffiliateRewardsCard({
@@ -42,8 +46,14 @@ export function AffiliateRewardsCard({
   onTransfer,
   complianceConfirmed = true,
   loading,
+  readOnly = false,
 }: AffiliateRewardsCardProps) {
   const { t } = useTranslation()
+  const campaignQuery = useQuery({
+    queryKey: ['referral-campaign', 'self'],
+    queryFn: getReferralCampaignSelf,
+    meta: { errorMode: 'local' },
+  })
   if (loading) {
     return (
       <Card data-card-hover='false' className='bg-muted/20 py-0'>
@@ -60,6 +70,27 @@ export function AffiliateRewardsCard({
   }
 
   const hasRewards = (user?.aff_quota ?? 0) > 0
+  const campaignView = campaignQuery.data?.data
+  const campaign = campaignView?.campaign
+  const campaignEvents = campaignView?.events ?? []
+  const progressEvents = campaign
+    ? campaignEvents.filter((event) => event.campaign_id === campaign.id)
+    : campaignEvents
+  const activatedCount = progressEvents.filter((event) =>
+    ['reward_pending', 'rewarded', 'reward_failed', 'limit_reached'].includes(
+      event.status
+    )
+  ).length
+  const rewardedCount = progressEvents.filter(
+    (event) => event.status === 'rewarded'
+  ).length
+  let campaignReward = ''
+  if (campaign?.reward?.type === 'subscription') {
+    campaignReward =
+      campaign.reward.subscription_plan_title || t('Subscription')
+  } else if (campaign?.reward?.quota) {
+    campaignReward = formatQuota(campaign.reward.quota)
+  }
 
   return (
     <Card data-card-hover='false' className='bg-muted/20 py-0'>
@@ -111,7 +142,7 @@ export function AffiliateRewardsCard({
             tooltip={t('Copy referral link')}
             aria-label={t('Copy referral link')}
           />
-          {hasRewards && (
+          {hasRewards && !readOnly && (
             <Button
               onClick={onTransfer}
               disabled={!complianceConfirmed}
@@ -128,6 +159,79 @@ export function AffiliateRewardsCard({
               'Referral reward transfer is disabled until the administrator confirms compliance terms.'
             )}
           </p>
+        ) : null}
+        {campaign || campaignEvents.length > 0 ? (
+          <div className='bg-background/70 rounded-lg border p-3 text-xs lg:col-span-3'>
+            <div className='flex flex-wrap items-center justify-between gap-2'>
+              <div>
+                <span className='font-semibold'>
+                  {campaign?.title || t('Referral Program')}
+                </span>
+                {campaign && (
+                  <span className='text-muted-foreground ml-2'>
+                    {t('Ends {{time}}', {
+                      time: dayjs
+                        .unix(campaign.end_time)
+                        .format('YYYY-MM-DD HH:mm'),
+                    })}
+                  </span>
+                )}
+              </div>
+              <span className='text-muted-foreground'>
+                {t('{{count}} campaign invites', {
+                  count: progressEvents.length,
+                })}
+              </span>
+            </div>
+            {campaign && (
+              <p className='text-muted-foreground mt-1'>
+                {campaign.description ||
+                  t(
+                    'Invited users qualify after their first successful non-public-pool API call.'
+                  )}
+              </p>
+            )}
+            <div className='text-muted-foreground mt-2 flex flex-wrap gap-x-4 gap-y-1'>
+              {campaign && (
+                <span>
+                  {t('Reward')}: {campaignReward || '—'}
+                </span>
+              )}
+              <span>
+                {t('Registered')}: {progressEvents.length}
+              </span>
+              <span>
+                {t('Activated')}: {activatedCount}
+              </span>
+              <span>
+                {t('Rewarded')}: {rewardedCount}
+              </span>
+            </div>
+            {campaignEvents.length > 0 ? (
+              <div className='mt-2 flex flex-wrap gap-2'>
+                {campaignEvents.slice(0, 5).map((event) => {
+                  let statusLabel = t('Pending')
+                  if (event.status === 'rewarded') {
+                    statusLabel = t('Rewarded')
+                  } else if (event.status === 'reward_failed') {
+                    statusLabel = t('Reward delivery failed')
+                  } else if (event.status === 'expired') {
+                    statusLabel = t('Expired')
+                  } else if (event.status === 'limit_reached') {
+                    statusLabel = t('Limit Reached')
+                  }
+                  return (
+                    <span
+                      key={event.id}
+                      className='bg-muted rounded-md px-2 py-1'
+                    >
+                      {event.invitee_username || t('User')}: {statusLabel}
+                    </span>
+                  )
+                })}
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </CardContent>
     </Card>

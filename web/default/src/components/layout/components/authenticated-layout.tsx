@@ -26,6 +26,7 @@ import { cn } from '@/lib/utils'
 
 import { AppHeader } from './app-header'
 import { AppSidebar } from './app-sidebar'
+import { UserPreviewBanner } from './user-preview-banner'
 
 type AuthenticatedLayoutProps = {
   children?: React.ReactNode
@@ -39,6 +40,7 @@ export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
       <SearchProvider>
         <SidebarProvider defaultOpen={defaultOpen} className='flex-col'>
           <SkipToMain />
+          <UserPreviewBanner />
           <AppHeader />
           <div className='flex min-h-0 w-full flex-1'>
             <AppSidebar />

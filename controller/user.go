@@ -378,6 +378,32 @@ func GetUser(c *gin.Context) {
 	return
 }
 
+func CreateUserPreview(c *gin.Context) {
+	targetUserId, err := strconv.Atoi(c.Param("id"))
+	if err != nil || targetUserId <= 0 {
+		common.ApiErrorMsg(c, "invalid preview user id")
+		return
+	}
+	token, target, claims, err := service.CreateUserPreviewToken(c.GetInt("id"), targetUserId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAuditFor(c, target.Id, "user.preview_start", map[string]interface{}{
+		"target_user_id": target.Id,
+		"expires_at":     claims.ExpiresAt,
+	})
+	common.ApiSuccess(c, gin.H{
+		"token": token,
+		"target": gin.H{
+			"id":           target.Id,
+			"username":     target.Username,
+			"display_name": target.DisplayName,
+		},
+		"expires_at": claims.ExpiresAt,
+	})
+}
+
 func GenerateAccessToken(c *gin.Context) {
 	id := c.GetInt("id")
 	user, err := model.GetUserById(id, true)
@@ -448,7 +474,7 @@ func GetAffCode(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	if user.AffCode == "" {
+	if user.AffCode == "" && !c.GetBool("preview_mode") {
 		user.AffCode = common.GetRandomString(4)
 		if err := user.Update(false); err != nil {
 			c.JSON(http.StatusOK, gin.H{
@@ -491,12 +517,6 @@ func GetSelf(c *gin.Context) {
 		"display_name":      user.DisplayName,
 		"role":              user.Role,
 		"status":            user.Status,
-		"email":             user.Email,
-		"github_id":         user.GitHubId,
-		"discord_id":        user.DiscordId,
-		"oidc_id":           user.OidcId,
-		"wechat_id":         user.WeChatId,
-		"telegram_id":       user.TelegramId,
 		"group":             user.Group,
 		"quota":             user.Quota,
 		"used_quota":        user.UsedQuota,
@@ -506,11 +526,19 @@ func GetSelf(c *gin.Context) {
 		"aff_quota":         user.AffQuota,
 		"aff_history_quota": user.AffHistoryQuota,
 		"inviter_id":        user.InviterId,
-		"linux_do_id":       user.LinuxDOId,
-		"setting":           user.Setting,
-		"stripe_customer":   user.StripeCustomer,
 		"sidebar_modules":   userSetting.SidebarModules, // 正确提取sidebar_modules字段
 		"permissions":       permissions,                // 新增权限字段
+	}
+	if !c.GetBool("preview_mode") {
+		responseData["email"] = user.Email
+		responseData["github_id"] = user.GitHubId
+		responseData["discord_id"] = user.DiscordId
+		responseData["oidc_id"] = user.OidcId
+		responseData["wechat_id"] = user.WeChatId
+		responseData["telegram_id"] = user.TelegramId
+		responseData["linux_do_id"] = user.LinuxDOId
+		responseData["setting"] = user.Setting
+		responseData["stripe_customer"] = user.StripeCustomer
 	}
 
 	c.JSON(http.StatusOK, gin.H{

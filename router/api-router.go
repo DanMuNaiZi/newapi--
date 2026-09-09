@@ -147,6 +147,7 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/2fa/stats", middleware.RequirePermission(authz.UserSecurity), controller.Admin2FAStats)
 				adminRoute.DELETE("/:id/2fa", middleware.RequirePermission(authz.UserSecurity), controller.AdminDisable2FA)
 			}
+			userRoute.POST("/:id/preview", middleware.RootAuth(), controller.CreateUserPreview)
 		}
 
 		// Subscription billing (plans, purchase, admin management)
@@ -233,6 +234,7 @@ func SetApiRouter(router *gin.Engine) {
 		}
 		registerChannelRoutes(apiRouter)
 		registerPublicPoolRoutes(apiRouter)
+		registerReferralCampaignRoutes(apiRouter)
 		registerAuthzRoutes(apiRouter)
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())
@@ -262,8 +264,11 @@ func SetApiRouter(router *gin.Engine) {
 		lotteryRoute.Use(middleware.UserAuth())
 		{
 			lotteryRoute.GET("/self", controller.GetLotteryPlansForSelf)
+			lotteryRoute.GET("/plans/:id", controller.GetLotteryPlanForSelf)
 			lotteryRoute.GET("/plans/:id/participants", controller.GetLotteryParticipantsForSelf)
+			lotteryRoute.GET("/plans/:id/participants/page", controller.GetLotteryParticipantsPageForSelf)
 			lotteryRoute.GET("/plans/:id/results", controller.GetLotteryPlanResultsForSelf)
+			lotteryRoute.GET("/plans/:id/results/page", controller.GetLotteryPlanResultsPageForSelf)
 			lotteryRoute.GET("/results/self", controller.GetLotteryResultsForSelf)
 			lotteryRoute.GET("/results/self/page", controller.GetLotteryResultsPageForSelf)
 			lotteryRoute.GET("/results/self/pending", controller.GetClaimableLotteryResultsForSelf)

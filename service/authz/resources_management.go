@@ -1,25 +1,26 @@
 package authz
 
 const (
-	ResourceUser           = "user"
-	ResourceUsageLog       = "usage_log"
-	ResourceModel          = "model"
-	ResourceDeployment     = "deployment"
-	ResourceSubscription   = "subscription"
-	ResourceRedemption     = "redemption"
-	ResourceLottery        = "lottery"
-	ResourcePublicPool     = "public_pool"
-	ResourceVendor         = "vendor"
-	ResourceGroup          = "group"
-	ResourcePrefillGroup   = "prefill_group"
-	ResourceReport         = "report"
-	ResourceTaskLog        = "task_log"
-	ResourceSystemSettings = "system_settings"
-	ResourcePayment        = "payment"
-	ResourceOAuth          = "oauth"
-	ResourcePerformance    = "performance"
-	ResourceSystemInfo     = "system_info"
-	ResourceLogMaintenance = "log_maintenance"
+	ResourceUser             = "user"
+	ResourceUsageLog         = "usage_log"
+	ResourceModel            = "model"
+	ResourceDeployment       = "deployment"
+	ResourceSubscription     = "subscription"
+	ResourceRedemption       = "redemption"
+	ResourceLottery          = "lottery"
+	ResourcePublicPool       = "public_pool"
+	ResourceReferralCampaign = "referral_campaign"
+	ResourceVendor           = "vendor"
+	ResourceGroup            = "group"
+	ResourcePrefillGroup     = "prefill_group"
+	ResourceReport           = "report"
+	ResourceTaskLog          = "task_log"
+	ResourceSystemSettings   = "system_settings"
+	ResourcePayment          = "payment"
+	ResourceOAuth            = "oauth"
+	ResourcePerformance      = "performance"
+	ResourceSystemInfo       = "system_info"
+	ResourceLogMaintenance   = "log_maintenance"
 
 	ActionQuota           = "quota"
 	ActionSecurity        = "security"
@@ -49,18 +50,21 @@ var (
 	DeploymentWrite   = Permission{Resource: ResourceDeployment, Action: ActionWrite}
 	DeploymentOperate = Permission{Resource: ResourceDeployment, Action: ActionOperate}
 
-	SubscriptionRead    = Permission{Resource: ResourceSubscription, Action: ActionRead}
-	SubscriptionWrite   = Permission{Resource: ResourceSubscription, Action: ActionWrite}
-	SubscriptionOperate = Permission{Resource: ResourceSubscription, Action: ActionOperate}
-	RedemptionRead      = Permission{Resource: ResourceRedemption, Action: ActionRead}
-	RedemptionWrite     = Permission{Resource: ResourceRedemption, Action: ActionWrite}
-	RedemptionOperate   = Permission{Resource: ResourceRedemption, Action: ActionOperate}
-	LotteryRead         = Permission{Resource: ResourceLottery, Action: ActionRead}
-	LotteryWrite        = Permission{Resource: ResourceLottery, Action: ActionWrite}
-	LotteryOperate      = Permission{Resource: ResourceLottery, Action: ActionOperate}
-	PublicPoolRead      = Permission{Resource: ResourcePublicPool, Action: ActionRead}
-	PublicPoolWrite     = Permission{Resource: ResourcePublicPool, Action: ActionWrite}
-	PublicPoolOperate   = Permission{Resource: ResourcePublicPool, Action: ActionOperate}
+	SubscriptionRead        = Permission{Resource: ResourceSubscription, Action: ActionRead}
+	SubscriptionWrite       = Permission{Resource: ResourceSubscription, Action: ActionWrite}
+	SubscriptionOperate     = Permission{Resource: ResourceSubscription, Action: ActionOperate}
+	RedemptionRead          = Permission{Resource: ResourceRedemption, Action: ActionRead}
+	RedemptionWrite         = Permission{Resource: ResourceRedemption, Action: ActionWrite}
+	RedemptionOperate       = Permission{Resource: ResourceRedemption, Action: ActionOperate}
+	LotteryRead             = Permission{Resource: ResourceLottery, Action: ActionRead}
+	LotteryWrite            = Permission{Resource: ResourceLottery, Action: ActionWrite}
+	LotteryOperate          = Permission{Resource: ResourceLottery, Action: ActionOperate}
+	PublicPoolRead          = Permission{Resource: ResourcePublicPool, Action: ActionRead}
+	PublicPoolWrite         = Permission{Resource: ResourcePublicPool, Action: ActionWrite}
+	PublicPoolOperate       = Permission{Resource: ResourcePublicPool, Action: ActionOperate}
+	ReferralCampaignRead    = Permission{Resource: ResourceReferralCampaign, Action: ActionRead}
+	ReferralCampaignWrite   = Permission{Resource: ResourceReferralCampaign, Action: ActionWrite}
+	ReferralCampaignOperate = Permission{Resource: ResourceReferralCampaign, Action: ActionOperate}
 
 	VendorRead        = Permission{Resource: ResourceVendor, Action: ActionRead}
 	VendorWrite       = Permission{Resource: ResourceVendor, Action: ActionWrite}
@@ -107,6 +111,7 @@ func init() {
 	registerManagementResource(ResourceRedemption, "Redemption Code Management", admin)
 	registerManagementResource(ResourceLottery, "Lottery Management", admin)
 	registerManagementResource(ResourcePublicPool, "Public Pool Management", admin)
+	registerManagementResource(ResourceReferralCampaign, "Referral Campaign Management", admin)
 	registerReadWriteResource(ResourceVendor, "Vendor Management", admin)
 	RegisterResource(ResourceDefinition{Resource: ResourceGroup, LabelKey: "Group Management", Actions: []ActionDefinition{
 		{Action: ActionRead, LabelKey: "View groups", DescriptionKey: "View available user groups.", DefaultRoles: admin},

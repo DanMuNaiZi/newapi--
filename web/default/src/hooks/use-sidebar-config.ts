@@ -65,6 +65,8 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     user: true,
     setting: true,
     subscription: true,
+    public_pool: true,
+    referral_campaign: true,
   },
 }
 
@@ -107,6 +109,11 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/usage-logs/common': { section: 'console', module: 'log' },
   '/usage-rankings': { section: 'console', module: 'ranking' },
   '/public-pool': { section: 'console', module: 'public_pool' },
+  '/public-pool/admin': { section: 'admin', module: 'public_pool' },
+  '/referral-campaigns/admin': {
+    section: 'admin',
+    module: 'referral_campaign',
+  },
   '/usage-logs/drawing': { section: 'console', module: 'midjourney' },
   '/usage-logs/task': { section: 'console', module: 'task' },
   '/wallet': { section: 'personal', module: 'topup' },

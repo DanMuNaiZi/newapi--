@@ -145,13 +145,47 @@ func authHelper(c *gin.Context, minRole int) {
 		c.Abort()
 		return
 	}
+	contextGroup := session.Get("group")
+	previewToken := c.GetHeader("New-Api-User-Preview")
+	if previewToken != "" {
+		actorUserId := id.(int)
+		actorUsername := username.(string)
+		actorRole := role.(int)
+		previewPath := c.FullPath()
+		if previewPath == "" {
+			previewPath = c.Request.URL.Path
+		}
+		if useAccessToken || actorRole != common.RoleRootUser || minRole != common.RoleCommonUser || c.Request.Method != http.MethodGet || !isUserPreviewPathAllowed(previewPath) {
+			c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "user preview is read-only and this endpoint is not allowed"})
+			c.Abort()
+			return
+		}
+		claims, target, previewErr := service.ValidateUserPreviewToken(previewToken, actorUserId)
+		if previewErr != nil {
+			if errors.Is(previewErr, service.ErrUserPreviewExpired) && claims != nil {
+				recordUserPreviewAudit(c, actorUserId, actorUsername, actorRole, claims.TargetUserId, "user.preview_expired")
+			}
+			c.JSON(http.StatusForbidden, gin.H{"success": false, "message": previewErr.Error()})
+			c.Abort()
+			return
+		}
+		c.Set("preview_mode", true)
+		c.Set("preview_actor_id", actorUserId)
+		c.Set("preview_target_id", target.Id)
+		username = target.Username
+		role = target.Role
+		id = target.Id
+		status = target.Status
+		contextGroup = target.Group
+		recordUserPreviewAudit(c, actorUserId, actorUsername, actorRole, target.Id, "user.preview_access")
+	}
 	// 防止不同newapi版本冲突，导致数据不通用
 	c.Header("Auth-Version", "864b7076dbcd0a3c01b5520316720ebf")
 	c.Set("username", username)
 	c.Set("role", role)
 	c.Set("id", id)
-	c.Set("group", session.Get("group"))
-	c.Set("user_group", session.Get("group"))
+	c.Set("group", contextGroup)
+	c.Set("user_group", contextGroup)
 	c.Set("use_access_token", useAccessToken)
 
 	// 管理/root 写操作审计兜底：内聚在鉴权链路里，保证任何经过 AdminAuth/RootAuth
@@ -165,6 +199,32 @@ func authHelper(c *gin.Context, minRole int) {
 	c.Next()
 
 	finishAdminAudit(c, auditWriter)
+}
+
+func isUserPreviewPathAllowed(path string) bool {
+	switch path {
+	case "/api/user/self", "/api/user/self/groups", "/api/user/models", "/api/user/aff", "/api/user/checkin",
+		"/api/subscription/plans", "/api/subscription/self", "/api/log/self", "/api/log/self/stat", "/api/log/self/search",
+		"/api/data/self", "/api/data/flow/self", "/api/usage-rankings", "/api/public-pool/status", "/api/public-pool/sites",
+		"/api/public-pool/contributions/self", "/api/referral-campaign/self", "/api/lottery/self", "/api/lottery/plans/:id",
+		"/api/lottery/plans/:id/participants", "/api/lottery/plans/:id/participants/page", "/api/lottery/plans/:id/results",
+		"/api/lottery/plans/:id/results/page", "/api/lottery/results/self", "/api/lottery/results/self/page",
+		"/api/lottery/results/self/pending", "/api/lottery/notifications/self", "/api/lottery/notifications/self/page":
+		return true
+	}
+	return false
+}
+
+func recordUserPreviewAudit(c *gin.Context, actorUserId int, actorUsername string, actorRole int, targetUserId int, action string) {
+	model.RecordOperationAuditLog(actorUserId, action, c.ClientIP(), action, map[string]interface{}{
+		"target_user_id": targetUserId,
+		"path":           c.Request.URL.Path,
+	}, map[string]interface{}{
+		"admin_id":       actorUserId,
+		"admin_username": actorUsername,
+		"admin_role":     actorRole,
+		"auth_method":    "session",
+	}, nil)
 }
 
 func TryUserAuth() func(c *gin.Context) {

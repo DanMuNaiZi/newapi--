@@ -27,6 +27,7 @@ import {
   LayoutDashboard,
   ListTodo,
   Medal,
+  Megaphone,
   MessageSquare,
   Radio,
   ServerCog,
@@ -46,6 +47,7 @@ import {
   hasPermission,
 } from '@/lib/admin-permissions'
 import { ROLE } from '@/lib/roles'
+import { isUserPreviewActive } from '@/lib/user-preview'
 import { useAuthStore } from '@/stores/auth-store'
 
 /**
@@ -57,6 +59,7 @@ import { useAuthStore } from '@/stores/auth-store'
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
   const user = useAuthStore((state) => state.auth.user)
+  const readOnlyPreview = isUserPreviewActive()
   const isRoot = user?.role === ROLE.SUPER_ADMIN
   const can = (resource: string, action = ADMIN_PERMISSION_ACTIONS.READ) =>
     isRoot || hasPermission(user, resource, action)
@@ -100,6 +103,20 @@ export function useSidebarData(): SidebarData {
       icon: Trophy,
     })
   }
+  if (can(ADMIN_PERMISSION_RESOURCES.PUBLIC_POOL)) {
+    adminItems.push({
+      title: t('Public pool management'),
+      url: '/public-pool/admin',
+      icon: HandHeart,
+    })
+  }
+  if (can(ADMIN_PERMISSION_RESOURCES.REFERRAL_CAMPAIGN)) {
+    adminItems.push({
+      title: t('Referral campaigns'),
+      url: '/referral-campaigns/admin',
+      icon: Megaphone,
+    })
+  }
   if (can(ADMIN_PERMISSION_RESOURCES.SUBSCRIPTION)) {
     adminItems.push({
       title: t('Subscriptions'),
@@ -138,11 +155,15 @@ export function useSidebarData(): SidebarData {
       url: '/dashboard/models',
       icon: LayoutDashboard,
     },
-    {
+  ]
+  if (!readOnlyPreview) {
+    generalItems.push({
       title: t('API Keys'),
       url: '/keys',
       icon: Key,
-    },
+    })
+  }
+  generalItems.push(
     {
       title: t('Usage Logs'),
       url: '/usage-logs/common',
@@ -157,8 +178,8 @@ export function useSidebarData(): SidebarData {
       title: t('Public Pool'),
       url: '/public-pool',
       icon: HandHeart,
-    },
-  ]
+    }
+  )
   if (
     isRoot ||
     user?.role === ROLE.ADMIN ||
@@ -173,50 +194,55 @@ export function useSidebarData(): SidebarData {
     })
   }
 
+  const navGroups: SidebarData['navGroups'] = []
+  if (!readOnlyPreview) {
+    navGroups.push({
+      id: 'chat',
+      title: t('Chat'),
+      items: [
+        {
+          title: t('Playground'),
+          url: '/playground',
+          icon: FlaskConical,
+        },
+        {
+          title: t('Chat'),
+          icon: MessageSquare,
+          type: 'chat-presets',
+        },
+      ],
+    })
+  }
+  navGroups.push(
+    {
+      id: 'general',
+      title: t('General'),
+      items: generalItems,
+    },
+    {
+      id: 'personal',
+      title: t('Personal'),
+      items: [
+        {
+          title: t('Wallet'),
+          url: '/wallet',
+          icon: Wallet,
+        },
+        {
+          title: t('Profile'),
+          url: '/profile',
+          icon: User,
+        },
+      ],
+    },
+    {
+      id: 'admin',
+      title: t('Admin'),
+      items: adminItems,
+    }
+  )
+
   return {
-    navGroups: [
-      {
-        id: 'chat',
-        title: t('Chat'),
-        items: [
-          {
-            title: t('Playground'),
-            url: '/playground',
-            icon: FlaskConical,
-          },
-          {
-            title: t('Chat'),
-            icon: MessageSquare,
-            type: 'chat-presets',
-          },
-        ],
-      },
-      {
-        id: 'general',
-        title: t('General'),
-        items: generalItems,
-      },
-      {
-        id: 'personal',
-        title: t('Personal'),
-        items: [
-          {
-            title: t('Wallet'),
-            url: '/wallet',
-            icon: Wallet,
-          },
-          {
-            title: t('Profile'),
-            url: '/profile',
-            icon: User,
-          },
-        ],
-      },
-      {
-        id: 'admin',
-        title: t('Admin'),
-        items: adminItems,
-      },
-    ],
+    navGroups,
   }
 }

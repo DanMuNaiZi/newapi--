@@ -244,15 +244,16 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 			other := service.GenerateMjOtherInfo(info, priceData)
 			resourceQuota := priceData.ResourceQuota
 			model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
-				ChannelId:     info.ChannelId,
-				ModelName:     modelName,
-				TokenName:     tokenName,
-				Quota:         priceData.Quota,
-				ResourceQuota: &resourceQuota,
-				Content:       logContent,
-				TokenId:       info.TokenId,
-				Group:         info.UsingGroup,
-				Other:         other,
+				ChannelId:        info.ChannelId,
+				ModelName:        modelName,
+				TokenName:        tokenName,
+				Quota:            priceData.Quota,
+				ResourceQuota:    &resourceQuota,
+				Content:          logContent,
+				TokenId:          info.TokenId,
+				Group:            info.UsingGroup,
+				Other:            other,
+				ActivateReferral: true,
 			})
 			model.UpdateUserUsedQuotaAndRequestCount(info.UserId, priceData.Quota)
 			model.UpdateChannelUsedQuota(info.ChannelId, priceData.Quota)
@@ -552,15 +553,16 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 			other := service.GenerateMjOtherInfo(relayInfo, priceData)
 			resourceQuota := priceData.ResourceQuota
 			model.RecordConsumeLog(c, relayInfo.UserId, model.RecordConsumeLogParams{
-				ChannelId:     relayInfo.ChannelId,
-				ModelName:     modelName,
-				TokenName:     tokenName,
-				Quota:         priceData.Quota,
-				ResourceQuota: &resourceQuota,
-				Content:       logContent,
-				TokenId:       relayInfo.TokenId,
-				Group:         relayInfo.UsingGroup,
-				Other:         other,
+				ChannelId:        relayInfo.ChannelId,
+				ModelName:        modelName,
+				TokenName:        tokenName,
+				Quota:            priceData.Quota,
+				ResourceQuota:    &resourceQuota,
+				Content:          logContent,
+				TokenId:          relayInfo.TokenId,
+				Group:            relayInfo.UsingGroup,
+				Other:            other,
+				ActivateReferral: midjResponse.Code == 1,
 			})
 			model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, priceData.Quota)
 			model.UpdateChannelUsedQuota(relayInfo.ChannelId, priceData.Quota)

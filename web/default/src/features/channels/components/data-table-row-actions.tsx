@@ -238,6 +238,27 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           render={
             <Button
               variant='ghost'
+              size='sm'
+              className='gap-1.5 px-2'
+              onClick={(event) => {
+                event.stopPropagation()
+                handleUsageSummary()
+              }}
+              aria-label={t('Usage report')}
+            />
+          }
+        >
+          <ChartNoAxesCombined className='size-4' />
+          <span>{t('Usage')}</span>
+        </TooltipTrigger>
+        <TooltipContent>{t('Usage report')}</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant='ghost'
               size='icon-sm'
               onClick={handleToggleStatus}
               disabled={isTogglingStatus}
@@ -284,14 +305,6 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
             {t('Test Connection')}
             <DropdownMenuShortcut>
               <PlugZap size={16} />
-            </DropdownMenuShortcut>
-          </DropdownMenuItem>
-
-          {/* Query Balance */}
-          <DropdownMenuItem onClick={handleUsageSummary}>
-            {t('Usage report')}
-            <DropdownMenuShortcut>
-              <ChartNoAxesCombined size={16} />
             </DropdownMenuShortcut>
           </DropdownMenuItem>
 

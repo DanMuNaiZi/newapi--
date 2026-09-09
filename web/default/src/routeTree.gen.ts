@@ -53,6 +53,8 @@ import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authentica
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedUsageLogsSectionRouteImport } from './routes/_authenticated/usage-logs/$section'
+import { Route as AuthenticatedReferralCampaignsAdminRouteImport } from './routes/_authenticated/referral-campaigns/admin'
+import { Route as AuthenticatedPublicPoolAdminRouteImport } from './routes/_authenticated/public-pool/admin'
 import { Route as AuthenticatedModelsSectionRouteImport } from './routes/_authenticated/models/$section'
 import { Route as AuthenticatedLotteriesAdminRouteImport } from './routes/_authenticated/lotteries/admin'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
@@ -308,6 +310,18 @@ const AuthenticatedUsageLogsSectionRoute =
     path: '/usage-logs/$section',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedReferralCampaignsAdminRoute =
+  AuthenticatedReferralCampaignsAdminRouteImport.update({
+    id: '/referral-campaigns/admin',
+    path: '/referral-campaigns/admin',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedPublicPoolAdminRoute =
+  AuthenticatedPublicPoolAdminRouteImport.update({
+    id: '/public-pool/admin',
+    path: '/public-pool/admin',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedModelsSectionRoute =
   AuthenticatedModelsSectionRouteImport.update({
     id: '/models/$section',
@@ -458,6 +472,8 @@ export interface FileRoutesByFullPath {
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/lotteries/admin': typeof AuthenticatedLotteriesAdminRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/public-pool/admin': typeof AuthenticatedPublicPoolAdminRoute
+  '/referral-campaigns/admin': typeof AuthenticatedReferralCampaignsAdminRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
@@ -521,6 +537,8 @@ export interface FileRoutesByTo {
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/lotteries/admin': typeof AuthenticatedLotteriesAdminRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/public-pool/admin': typeof AuthenticatedPublicPoolAdminRoute
+  '/referral-campaigns/admin': typeof AuthenticatedReferralCampaignsAdminRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
@@ -588,6 +606,8 @@ export interface FileRoutesById {
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/lotteries/admin': typeof AuthenticatedLotteriesAdminRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/_authenticated/public-pool/admin': typeof AuthenticatedPublicPoolAdminRoute
+  '/_authenticated/referral-campaigns/admin': typeof AuthenticatedReferralCampaignsAdminRoute
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
@@ -654,6 +674,8 @@ export interface FileRouteTypes {
     | '/errors/$error'
     | '/lotteries/admin'
     | '/models/$section'
+    | '/public-pool/admin'
+    | '/referral-campaigns/admin'
     | '/usage-logs/$section'
     | '/channels/'
     | '/dashboard/'
@@ -717,6 +739,8 @@ export interface FileRouteTypes {
     | '/errors/$error'
     | '/lotteries/admin'
     | '/models/$section'
+    | '/public-pool/admin'
+    | '/referral-campaigns/admin'
     | '/usage-logs/$section'
     | '/channels'
     | '/dashboard'
@@ -783,6 +807,8 @@ export interface FileRouteTypes {
     | '/_authenticated/errors/$error'
     | '/_authenticated/lotteries/admin'
     | '/_authenticated/models/$section'
+    | '/_authenticated/public-pool/admin'
+    | '/_authenticated/referral-campaigns/admin'
     | '/_authenticated/usage-logs/$section'
     | '/_authenticated/channels/'
     | '/_authenticated/dashboard/'
@@ -1148,6 +1174,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedUsageLogsSectionRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/referral-campaigns/admin': {
+      id: '/_authenticated/referral-campaigns/admin'
+      path: '/referral-campaigns/admin'
+      fullPath: '/referral-campaigns/admin'
+      preLoaderRoute: typeof AuthenticatedReferralCampaignsAdminRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/public-pool/admin': {
+      id: '/_authenticated/public-pool/admin'
+      path: '/public-pool/admin'
+      fullPath: '/public-pool/admin'
+      preLoaderRoute: typeof AuthenticatedPublicPoolAdminRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/models/$section': {
       id: '/_authenticated/models/$section'
       path: '/models/$section'
@@ -1382,6 +1422,8 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedLotteriesAdminRoute: typeof AuthenticatedLotteriesAdminRoute
   AuthenticatedModelsSectionRoute: typeof AuthenticatedModelsSectionRoute
+  AuthenticatedPublicPoolAdminRoute: typeof AuthenticatedPublicPoolAdminRoute
+  AuthenticatedReferralCampaignsAdminRoute: typeof AuthenticatedReferralCampaignsAdminRoute
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
@@ -1409,6 +1451,9 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
   AuthenticatedLotteriesAdminRoute: AuthenticatedLotteriesAdminRoute,
   AuthenticatedModelsSectionRoute: AuthenticatedModelsSectionRoute,
+  AuthenticatedPublicPoolAdminRoute: AuthenticatedPublicPoolAdminRoute,
+  AuthenticatedReferralCampaignsAdminRoute:
+    AuthenticatedReferralCampaignsAdminRoute,
   AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,

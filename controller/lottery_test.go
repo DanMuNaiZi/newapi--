@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -83,6 +84,38 @@ func TestGetLotteryPlansForSelfReturnsOnlyVisiblePlans(t *testing.T) {
 	assert.Equal(t, publicPlan.Id, response.Data[0].Id)
 }
 
+func TestUserPreviewNeverReturnsLotteryRedemptionCodes(t *testing.T) {
+	db := setupLotteryControllerTestDB(t)
+	user := &model.User{Username: "lottery-controller-preview", Password: "password", Status: common.UserStatusEnabled, Group: "vip", AffCode: "lottery-controller-preview"}
+	require.NoError(t, db.Create(user).Error)
+	require.NoError(t, db.Create(&model.LotteryResult{
+		PlanId:            100,
+		UserId:            user.Id,
+		PrizeId:           1,
+		FulfillmentMode:   model.LotteryFulfillmentRedemptionCode,
+		FulfillmentStatus: "fulfilled",
+		RedemptionCode:    "secret-code",
+		CreatedAt:         common.GetTimestamp(),
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/lottery/results/self", nil)
+	ctx.Set("id", user.Id)
+	ctx.Set("preview_mode", true)
+
+	GetLotteryResultsForSelf(ctx)
+
+	response := struct {
+		Success bool                          `json:"success"`
+		Data    []model.LotterySelfResultView `json:"data"`
+	}{}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success)
+	require.Len(t, response.Data, 1)
+	assert.Empty(t, response.Data[0].RedemptionCode)
+}
+
 func TestLotterySelfActionsJoinLeaveAndClaim(t *testing.T) {
 	db := setupLotteryControllerTestDB(t)
 	user := &model.User{Username: "lottery-controller-user", Password: "password", Status: common.UserStatusEnabled, Group: "default", AffCode: "lottery-controller-self"}
@@ -126,7 +159,7 @@ func TestLotterySelfActionsJoinLeaveAndClaim(t *testing.T) {
 	assert.Equal(t, 100, storedUser.Quota)
 }
 
-func TestLotteryPublicDetailsEndpointsReturnParticipantAndWinnerNames(t *testing.T) {
+func TestLotteryPublicDetailsEndpointsMaskParticipantAndWinnerNames(t *testing.T) {
 	db := setupLotteryControllerTestDB(t)
 	user := &model.User{Username: "lottery-public-user", DisplayName: "Public Winner", Password: "password", Status: common.UserStatusEnabled, AffCode: "lottery-public-user"}
 	require.NoError(t, db.Create(user).Error)
@@ -142,7 +175,9 @@ func TestLotteryPublicDetailsEndpointsReturnParticipantAndWinnerNames(t *testing
 	participantsContext.Params = gin.Params{{Key: "id", Value: fmt.Sprint(plan.Id)}}
 	participantsContext.Set("id", user.Id)
 	GetLotteryParticipantsForSelf(participantsContext)
-	require.Contains(t, participantsRecorder.Body.String(), `"username":"lottery-public-user"`)
+	require.Contains(t, participantsRecorder.Body.String(), `"username":"l***r"`)
+	require.Contains(t, participantsRecorder.Body.String(), `"is_self":true`)
+	require.NotContains(t, participantsRecorder.Body.String(), `lottery-public-user`)
 	require.NotContains(t, participantsRecorder.Body.String(), `"weight"`)
 	require.NotContains(t, participantsRecorder.Body.String(), `"preset_prize_id"`)
 
@@ -151,9 +186,60 @@ func TestLotteryPublicDetailsEndpointsReturnParticipantAndWinnerNames(t *testing
 	resultsContext.Params = gin.Params{{Key: "id", Value: fmt.Sprint(plan.Id)}}
 	resultsContext.Set("id", user.Id)
 	GetLotteryPlanResultsForSelf(resultsContext)
-	require.Contains(t, resultsRecorder.Body.String(), `"username":"lottery-public-user"`)
+	require.Contains(t, resultsRecorder.Body.String(), `"username":"l***r"`)
+	require.Contains(t, resultsRecorder.Body.String(), `"is_self":true`)
+	require.NotContains(t, resultsRecorder.Body.String(), `lottery-public-user`)
 	require.Contains(t, resultsRecorder.Body.String(), `"prize_name":"Public prize"`)
 	require.NotContains(t, resultsRecorder.Body.String(), `"redemption_code"`)
+}
+
+func TestGetLotteryPlanForSelfUsesHTTPStatusForInvalidInvisibleAndMissingPlans(t *testing.T) {
+	db := setupLotteryControllerTestDB(t)
+	user := &model.User{Username: "lottery-detail-user", Password: "password", Status: common.UserStatusEnabled, Group: "default", AffCode: "lottery-detail-user"}
+	allowedUser := &model.User{Username: "lottery-detail-allowed", Password: "password", Status: common.UserStatusEnabled, Group: "default", AffCode: "lottery-detail-allowed"}
+	require.NoError(t, db.Create([]*model.User{user, allowedUser}).Error)
+	now := common.GetTimestamp()
+	privatePlan := &model.LotteryPlan{Title: "Private", Status: model.LotteryPlanStatusOpen, EligibilityMode: model.LotteryEligibilityUsers, MaxParticipants: 2, RegistrationStartTime: now - 60, DrawTime: now + 3600}
+	require.NoError(t, model.CreateLotteryPlan(privatePlan, []int{allowedUser.Id}, nil, []*model.LotteryPrize{{Name: "Prize", Quantity: 1, RewardType: model.LotteryRewardQuota, Quota: 100, FulfillmentMode: model.LotteryFulfillmentAuto}}))
+
+	tests := []struct {
+		name       string
+		pathID     string
+		wantStatus int
+	}{
+		{name: "invalid", pathID: "bad", wantStatus: http.StatusBadRequest},
+		{name: "invisible", pathID: fmt.Sprint(privatePlan.Id), wantStatus: http.StatusForbidden},
+		{name: "missing", pathID: "999999", wantStatus: http.StatusNotFound},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodGet, "/api/lottery/plans/"+test.pathID, nil)
+			ctx.Params = gin.Params{{Key: "id", Value: test.pathID}}
+			ctx.Set("id", user.Id)
+			ctx.Set(common.RequestIdKey, "lottery-request-id")
+
+			GetLotteryPlanForSelf(ctx)
+
+			assert.Equal(t, test.wantStatus, recorder.Code)
+			assert.Contains(t, recorder.Body.String(), `"request_id":"lottery-request-id"`)
+		})
+	}
+}
+
+func TestLotteryUserAPIErrorHidesInternalFailureDetails(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/lottery/plans/1", nil)
+	ctx.Set(common.RequestIdKey, "lottery-internal-error")
+
+	lotteryUserAPIError(ctx, 0, errors.New("database password leaked in driver error"))
+
+	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"message":"internal server error"`)
+	assert.Contains(t, recorder.Body.String(), `"request_id":"lottery-internal-error"`)
+	assert.NotContains(t, recorder.Body.String(), "database password")
 }
 
 func TestAdminCreateLotteryPlanPersistsPrizeAndAllowList(t *testing.T) {

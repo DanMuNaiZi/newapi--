@@ -55,11 +55,11 @@ func TestNormalizeUsageRankingLimit(t *testing.T) {
 }
 
 func TestMaskUsageRankingUsernameHandlesUnicode(t *testing.T) {
-	assert.Equal(t, "杨*", maskUsageRankingUsername("杨彬"))
-	assert.Equal(t, "*", maskUsageRankingUsername("Y"))
-	assert.Equal(t, "***", maskUsageRankingUsername("  "))
-	assert.Equal(t, "a*", maskUsageRankingUsername("ab"))
-	assert.Equal(t, "a***z", maskUsageRankingUsername("abcdefgz"))
+	assert.Equal(t, "杨*", common.MaskUsername("杨彬"))
+	assert.Equal(t, "*", common.MaskUsername("Y"))
+	assert.Equal(t, "***", common.MaskUsername("  "))
+	assert.Equal(t, "a*", common.MaskUsername("ab"))
+	assert.Equal(t, "a***z", common.MaskUsername("abcdefgz"))
 }
 
 func TestBuildUsageRankingsResponseUsesStableTieOrderAndKeepsSelfRank(t *testing.T) {

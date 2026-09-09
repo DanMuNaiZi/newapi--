@@ -16,8 +16,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Crown, RefreshCw, Sparkles, Check, GripVertical, RotateCcw } from 'lucide-react'
-import { useState, useEffect, useMemo, useCallback, type DragEvent } from 'react'
+import {
+  Crown,
+  RefreshCw,
+  Sparkles,
+  Check,
+  GripVertical,
+  RotateCcw,
+} from 'lucide-react'
+import {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  type DragEvent,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -73,6 +86,7 @@ interface SubscriptionPlansCardProps {
   onAvailabilityChange?: (available: boolean) => void
   userQuota?: number
   onPurchaseSuccess?: () => void | Promise<void>
+  readOnly?: boolean
 }
 
 function getEpayMethods(payMethods: PaymentMethod[] = []): PaymentMethod[] {
@@ -104,6 +118,7 @@ export function SubscriptionPlansCard({
   onAvailabilityChange,
   userQuota,
   onPurchaseSuccess,
+  readOnly = false,
 }: SubscriptionPlansCardProps) {
   const { t } = useTranslation()
 
@@ -284,7 +299,9 @@ export function SubscriptionPlansCard({
   const consumePriorityDirty = useMemo(
     () =>
       consumePriorityIds.length !== savedConsumePriorityIds.length ||
-      consumePriorityIds.some((id, index) => id !== savedConsumePriorityIds[index]),
+      consumePriorityIds.some(
+        (id, index) => id !== savedConsumePriorityIds[index]
+      ),
     [consumePriorityIds, savedConsumePriorityIds]
   )
 
@@ -420,6 +437,7 @@ export function SubscriptionPlansCard({
                 ]}
                 value={displayPref}
                 onValueChange={(v) => v !== null && handlePreferenceChange(v)}
+                disabled={readOnly}
               >
                 <SelectTrigger className='h-8 flex-1 text-xs sm:w-[140px] sm:flex-none'>
                   <SelectValue>
@@ -482,7 +500,7 @@ export function SubscriptionPlansCard({
           {hasAny && (
             <>
               <Separator className='my-3' />
-              {hasActive && (
+              {hasActive && !readOnly && (
                 <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
                   <p className='text-muted-foreground text-xs'>
                     {t(
@@ -549,11 +567,20 @@ export function SubscriptionPlansCard({
                   return (
                     <div
                       key={subscriptionId}
-                      draggable={isActive}
+                      draggable={isActive && !readOnly}
                       onDragStart={(event: DragEvent<HTMLDivElement>) => {
-                        if (!isActive || subscriptionId === undefined) return
+                        if (
+                          readOnly ||
+                          !isActive ||
+                          subscriptionId === undefined
+                        ) {
+                          return
+                        }
                         event.dataTransfer.effectAllowed = 'move'
-                        event.dataTransfer.setData('text/plain', String(subscriptionId))
+                        event.dataTransfer.setData(
+                          'text/plain',
+                          String(subscriptionId)
+                        )
                         const dragPreview = document.createElement('div')
                         dragPreview.style.cssText =
                           'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none'
@@ -564,6 +591,7 @@ export function SubscriptionPlansCard({
                       }}
                       onDragOver={(event: DragEvent<HTMLDivElement>) => {
                         if (
+                          readOnly ||
                           !isActive ||
                           subscriptionId === undefined ||
                           subscriptionId === draggedSubscriptionId
@@ -572,7 +600,8 @@ export function SubscriptionPlansCard({
                         }
                         event.preventDefault()
                         event.dataTransfer.dropEffect = 'move'
-                        const bounds = event.currentTarget.getBoundingClientRect()
+                        const bounds =
+                          event.currentTarget.getBoundingClientRect()
                         const position: SubscriptionDropPosition =
                           event.clientY < bounds.top + bounds.height / 2
                             ? 'before'
@@ -587,13 +616,15 @@ export function SubscriptionPlansCard({
                       onDrop={(event: DragEvent<HTMLDivElement>) => {
                         event.preventDefault()
                         if (
+                          readOnly ||
                           !isActive ||
                           subscriptionId === undefined ||
                           draggedSubscriptionId === null
                         ) {
                           return
                         }
-                        const bounds = event.currentTarget.getBoundingClientRect()
+                        const bounds =
+                          event.currentTarget.getBoundingClientRect()
                         const position: SubscriptionDropPosition =
                           event.clientY < bounds.top + bounds.height / 2
                             ? 'before'
@@ -618,6 +649,7 @@ export function SubscriptionPlansCard({
                       className={cn(
                         'bg-background relative rounded-md border p-3 text-xs transition-[opacity,border-color,background-color] duration-150',
                         isActive &&
+                          !readOnly &&
                           'cursor-grab active:cursor-grabbing hover:border-primary/50',
                         isDragged && 'opacity-40',
                         isDropTarget && 'border-primary bg-primary/5',
@@ -631,7 +663,7 @@ export function SubscriptionPlansCard({
                     >
                       <div className='flex items-center justify-between'>
                         <div className='flex items-center gap-2'>
-                          {isActive && (
+                          {isActive && !readOnly && (
                             <GripVertical
                               className='text-muted-foreground size-3.5'
                               aria-hidden='true'
@@ -802,12 +834,20 @@ export function SubscriptionPlansCard({
                       <Button
                         variant='outline'
                         className='w-full'
+                        disabled={readOnly}
                         onClick={() => {
+                          if (readOnly) {
+                            return
+                          }
                           setSelectedPlan(p)
                           setPurchaseOpen(true)
                         }}
                       >
-                        {t('Subscribe Now')}
+                        {t(
+                          readOnly
+                            ? 'User preview is read-only'
+                            : 'Subscribe Now'
+                        )}
                       </Button>
                     )}
                   </CardContent>

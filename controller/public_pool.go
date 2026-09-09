@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -18,6 +19,7 @@ type publicPoolSiteRequest struct {
 	Description string                     `json:"description"`
 	Status      model.PublicPoolSiteStatus `json:"status"`
 	SortOrder   int                        `json:"sort_order"`
+	Reward      *dto.RewardSpec            `json:"reward"`
 }
 
 type publicPoolContributionRequest struct {
@@ -34,6 +36,13 @@ type publicPoolContributionReviewRequest struct {
 type publicPoolStatusResponse struct {
 	service.PublicPoolStatus
 	ChannelCount int64 `json:"channel_count"`
+}
+
+type publicPoolContributionPage struct {
+	Items    []model.PublicPoolContribution `json:"items"`
+	Total    int64                          `json:"total"`
+	Page     int                            `json:"page"`
+	PageSize int                            `json:"page_size"`
 }
 
 func ListPublicPoolSitesForSelf(c *gin.Context) {
@@ -87,6 +96,15 @@ func GetPublicPoolStatus(c *gin.Context) {
 	common.ApiSuccess(c, publicPoolStatusResponse{PublicPoolStatus: status, ChannelCount: channelCount})
 }
 
+func AdminListRewardSubscriptionPlans(c *gin.Context) {
+	plans, err := model.ListRewardSubscriptionPlanOptions()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, plans)
+}
+
 func AdminListPublicPoolSites(c *gin.Context) {
 	sites, err := model.ListPublicPoolSites(false)
 	if err != nil {
@@ -102,18 +120,16 @@ func AdminCreatePublicPoolSite(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	site := &model.PublicPoolSite{
-		Name:        request.Name,
-		URL:         request.URL,
-		Description: request.Description,
-		Status:      request.Status,
-		SortOrder:   request.SortOrder,
+	site, err := publicPoolSiteFromRequest(0, request)
+	if err != nil {
+		common.ApiError(c, err)
+		return
 	}
 	if err := model.CreatePublicPoolSite(site); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	recordManageAudit(c, "public_pool.site_create", map[string]interface{}{"site_id": site.Id})
+	recordManageAudit(c, "public_pool.site_create", publicPoolSiteAudit(site))
 	common.ApiSuccess(c, site)
 }
 
@@ -128,19 +144,16 @@ func AdminUpdatePublicPoolSite(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	site := &model.PublicPoolSite{
-		Id:          id,
-		Name:        request.Name,
-		URL:         request.URL,
-		Description: request.Description,
-		Status:      request.Status,
-		SortOrder:   request.SortOrder,
+	site, err := publicPoolSiteFromRequest(id, request)
+	if err != nil {
+		common.ApiError(c, err)
+		return
 	}
 	if err := model.UpdatePublicPoolSite(site); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	recordManageAudit(c, "public_pool.site_update", map[string]interface{}{"site_id": site.Id})
+	recordManageAudit(c, "public_pool.site_update", publicPoolSiteAudit(site))
 	common.ApiSuccess(c, site)
 }
 
@@ -159,12 +172,18 @@ func AdminDeletePublicPoolSite(c *gin.Context) {
 }
 
 func AdminListPublicPoolContributions(c *gin.Context) {
-	contributions, err := model.ListPublicPoolContributionsForAdmin()
+	page, pageSize, err := publicPoolAdminPagination(c)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, contributions)
+	status := model.PublicPoolContributionStatus(c.Query("status"))
+	contributions, total, err := model.ListPublicPoolContributionsForAdminPage(c.Query("search"), status, pageSize, (page-1)*pageSize)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, publicPoolContributionPage{Items: contributions, Total: total, Page: page, PageSize: pageSize})
 }
 
 func AdminReviewPublicPoolContribution(c *gin.Context) {
@@ -186,8 +205,68 @@ func AdminReviewPublicPoolContribution(c *gin.Context) {
 	recordManageAudit(c, "public_pool.contribution_review", map[string]interface{}{
 		"contribution_id": contribution.Id,
 		"status":          contribution.Status,
+		"reward_grant_id": contribution.RewardGrantId,
+		"reward_status":   contribution.RewardStatus,
 	})
 	common.ApiSuccess(c, contribution)
+}
+
+func AdminRetryPublicPoolContributionReward(c *gin.Context) {
+	id, err := publicPoolPathID(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	contribution, err := model.RetryPublicPoolContributionReward(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "public_pool.reward_retry", map[string]interface{}{
+		"contribution_id": contribution.Id,
+		"reward_status":   contribution.RewardStatus,
+	})
+	common.ApiSuccess(c, contribution)
+}
+
+func publicPoolSiteFromRequest(id int, request publicPoolSiteRequest) (*model.PublicPoolSite, error) {
+	site := &model.PublicPoolSite{
+		Id:          id,
+		Name:        request.Name,
+		URL:         request.URL,
+		Description: request.Description,
+		Status:      request.Status,
+		SortOrder:   request.SortOrder,
+	}
+	if request.Reward == nil {
+		return site, nil
+	}
+	snapshot, err := service.NormalizeRewardSpec(*request.Reward)
+	if err != nil {
+		return nil, err
+	}
+	rawSnapshot, err := model.EncodeRewardSnapshot(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	site.RewardSnapshotJSON = rawSnapshot
+	snapshot.SubscriptionPlanSnapshot = ""
+	site.Reward = &snapshot
+	return site, nil
+}
+
+func publicPoolSiteAudit(site *model.PublicPoolSite) map[string]interface{} {
+	audit := map[string]interface{}{"site_id": site.Id}
+	if site.Reward != nil {
+		audit["reward_type"] = site.Reward.Type
+		audit["reward_amount"] = site.Reward.InputAmount
+		audit["reward_unit"] = site.Reward.InputUnit
+		audit["reward_quota"] = site.Reward.Quota
+		audit["quota_per_unit"] = site.Reward.QuotaPerUnit
+		audit["usd_exchange_rate"] = site.Reward.USDExchangeRate
+		audit["subscription_plan_id"] = site.Reward.SubscriptionPlanId
+	}
+	return audit
 }
 
 func publicPoolPathID(c *gin.Context) (int, error) {
@@ -196,6 +275,28 @@ func publicPoolPathID(c *gin.Context) (int, error) {
 		return 0, errors.New("invalid public pool id")
 	}
 	return id, nil
+}
+
+func publicPoolAdminPagination(c *gin.Context) (int, int, error) {
+	page := 1
+	pageSize := 20
+	var err error
+	if raw := c.Query("page"); raw != "" {
+		page, err = strconv.Atoi(raw)
+		if err != nil || page <= 0 {
+			return 0, 0, errors.New("invalid page")
+		}
+	}
+	if raw := c.Query("page_size"); raw != "" {
+		pageSize, err = strconv.Atoi(raw)
+		if err != nil || pageSize <= 0 {
+			return 0, 0, errors.New("invalid page size")
+		}
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	return page, pageSize, nil
 }
 
 func validatePublicPoolSettingUpdate(key string, value string) error {

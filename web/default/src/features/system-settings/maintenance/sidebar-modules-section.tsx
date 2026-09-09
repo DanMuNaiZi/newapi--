@@ -164,6 +164,14 @@ export function SidebarModulesSection({
         title: t('Subscription Management'),
         description: t('Manage subscription plans and pricing.'),
       },
+      public_pool: {
+        title: t('Public pool management'),
+        description: t('Manage public sites, reviews, and pool status.'),
+      },
+      referral_campaign: {
+        title: t('Referral campaigns'),
+        description: t('Manage referral campaigns and reward delivery.'),
+      },
     },
   }
   const formDefaults = useMemo(() => config, [config])

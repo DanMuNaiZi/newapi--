@@ -22,6 +22,7 @@ import {
   CardStaggerItem,
 } from '@/components/page-transition'
 import { useStatus } from '@/hooks/use-status'
+import { isUserPreviewActive } from '@/lib/user-preview'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { CheckinCalendarCard } from './components/checkin-calendar-card'
@@ -38,6 +39,7 @@ export function Profile() {
   const { profile, loading, refreshProfile } = useProfile()
   const { status } = useStatus()
   const permissions = useAuthStore((s) => s.auth.user?.permissions)
+  const readOnlyPreview = isUserPreviewActive()
 
   const checkinEnabled = status?.checkin_enabled === true
   const turnstileEnabled = !!(
@@ -45,6 +47,18 @@ export function Profile() {
   )
   const turnstileSiteKey = status?.turnstile_site_key || ''
   const canConfigureSidebar = permissions?.sidebar_settings !== false
+
+  if (readOnlyPreview) {
+    return (
+      <Main>
+        <div className='min-h-0 flex-1 overflow-auto px-3 py-3 sm:px-4 sm:py-6'>
+          <div className='mx-auto w-full max-w-7xl'>
+            <ProfileHeader profile={profile} loading={loading} />
+          </div>
+        </div>
+      </Main>
+    )
+  }
 
   return (
     <Main>

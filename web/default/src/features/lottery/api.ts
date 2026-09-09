@@ -32,7 +32,9 @@ import type {
   LotteryPlanUpdatePayload,
   LotteryPrize,
   LotteryPublicParticipant,
+  LotteryPublicParticipantPage,
   LotteryPublicResult,
+  LotteryPublicResultPage,
   LotteryNotification,
   LotteryNotificationPage,
   LotteryResultPage,
@@ -46,6 +48,16 @@ export async function getLotteryPlansForSelf(): Promise<
   ApiResponse<LotteryPlan[]>
 > {
   const response = await api.get('/api/lottery/self')
+  return response.data
+}
+
+export async function getLotteryPlanForSelf(
+  planId: number
+): Promise<ApiResponse<LotteryPlan>> {
+  const response = await api.get(`/api/lottery/plans/${planId}`, {
+    skipBusinessError: true,
+    skipErrorHandler: true,
+  })
   return response.data
 }
 
@@ -137,6 +149,35 @@ export async function getLotteryPlanResultsForSelf(
   planId: number
 ): Promise<ApiResponse<LotteryPublicResult[]>> {
   const response = await api.get(`/api/lottery/plans/${planId}/results`)
+  return response.data
+}
+
+export async function getLotteryParticipantsPageForSelf(
+  planId: number,
+  cursor?: string,
+  limit = 20
+): Promise<ApiResponse<LotteryPublicParticipantPage>> {
+  const response = await api.get(
+    `/api/lottery/plans/${planId}/participants/page`,
+    {
+      params: { limit, cursor: cursor || undefined },
+      skipBusinessError: true,
+      skipErrorHandler: true,
+    }
+  )
+  return response.data
+}
+
+export async function getLotteryPlanResultsPageForSelf(
+  planId: number,
+  cursor?: string,
+  limit = 20
+): Promise<ApiResponse<LotteryPublicResultPage>> {
+  const response = await api.get(`/api/lottery/plans/${planId}/results/page`, {
+    params: { limit, cursor: cursor || undefined },
+    skipBusinessError: true,
+    skipErrorHandler: true,
+  })
   return response.data
 }
 

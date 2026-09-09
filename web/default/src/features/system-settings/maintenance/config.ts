@@ -82,6 +82,8 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
     user: true,
     setting: true,
     subscription: true,
+    public_pool: true,
+    referral_campaign: true,
   },
 }
 

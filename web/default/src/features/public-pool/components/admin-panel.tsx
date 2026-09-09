@@ -18,7 +18,15 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Pencil, Plus, ShieldCheck, Trash2, X } from 'lucide-react'
+import {
+  Check,
+  Pencil,
+  Plus,
+  RefreshCw,
+  ShieldCheck,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -44,6 +52,7 @@ import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import {
   ADMIN_PERMISSION_ACTIONS,
@@ -51,28 +60,38 @@ import {
   hasPermission,
 } from '@/lib/admin-permissions'
 import dayjs from '@/lib/dayjs'
+import { formatQuota } from '@/lib/format'
 import { useAuthStore } from '@/stores/auth-store'
 
 import {
   createAdminPublicPoolSite,
   deleteAdminPublicPoolSite,
   getAdminPublicPoolContributions,
+  getAdminPublicPoolRewardPlans,
   getAdminPublicPoolSites,
+  getPublicPoolStatus,
+  retryAdminPublicPoolContributionReward,
   reviewAdminPublicPoolContribution,
   updateAdminPublicPoolSite,
 } from '../api'
 import {
   publicPoolSiteSchema,
+  toPublicPoolSitePayload,
   type PublicPoolSiteFormValues,
 } from '../lib/admin-form'
 import type { PublicPoolContributionStatus, PublicPoolSite } from '../types'
 
+const PAGE_SIZE = 10
 const EMPTY_SITE: PublicPoolSiteFormValues = {
   name: '',
   url: '',
   description: '',
   status: 'enabled',
   sort_order: 0,
+  reward_type: 'quota',
+  reward_amount: '1',
+  reward_unit: 'usd',
+  subscription_plan_id: 0,
 }
 
 function contributionStatusVariant(
@@ -105,27 +124,68 @@ export function PublicPoolAdminPanel() {
   const [editingSite, setEditingSite] = useState<PublicPoolSite | null>(null)
   const [siteToDelete, setSiteToDelete] = useState<PublicPoolSite | null>(null)
   const [reviewNotes, setReviewNotes] = useState<Record<number, string>>({})
+  const [siteSearch, setSiteSearch] = useState('')
+  const [siteStatusFilter, setSiteStatusFilter] = useState('all')
+  const [sitePage, setSitePage] = useState(1)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [reviewPage, setReviewPage] = useState(1)
   const form = useForm<PublicPoolSiteFormValues>({
     resolver: zodResolver(publicPoolSiteSchema),
     defaultValues: EMPTY_SITE,
   })
+  const rewardType = form.watch('reward_type')
 
   const sitesQuery = useQuery({
     queryKey: ['public-pool', 'admin', 'sites'],
     queryFn: getAdminPublicPoolSites,
     enabled: canRead,
+    meta: { errorMode: 'local' },
   })
   const contributionsQuery = useQuery({
-    queryKey: ['public-pool', 'admin', 'contributions'],
-    queryFn: getAdminPublicPoolContributions,
+    queryKey: [
+      'public-pool',
+      'admin',
+      'contributions',
+      search,
+      statusFilter,
+      reviewPage,
+    ],
+    queryFn: () =>
+      getAdminPublicPoolContributions({
+        search: search.trim() || undefined,
+        status: statusFilter === 'all' ? undefined : statusFilter,
+        page: reviewPage,
+        page_size: PAGE_SIZE,
+      }),
     enabled: canRead,
+    meta: { errorMode: 'local' },
   })
+  const statusQuery = useQuery({
+    queryKey: ['public-pool', 'admin', 'status'],
+    queryFn: getPublicPoolStatus,
+    enabled: canRead,
+    meta: { errorMode: 'local' },
+  })
+  const plansQuery = useQuery({
+    queryKey: ['public-pool', 'admin', 'reward-plans'],
+    queryFn: getAdminPublicPoolRewardPlans,
+    enabled: canWrite,
+    meta: { errorMode: 'local' },
+  })
+
+  const invalidate = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['public-pool'] }),
+      queryClient.invalidateQueries({ queryKey: ['subscription', 'self'] }),
+    ])
+  }
   const saveSiteMutation = useMutation({
     mutationFn: async (values: PublicPoolSiteFormValues) => {
-      if (editingSite) {
-        return updateAdminPublicPoolSite(editingSite.id, values)
-      }
-      return createAdminPublicPoolSite(values)
+      const payload = toPublicPoolSitePayload(values)
+      return editingSite
+        ? updateAdminPublicPoolSite(editingSite.id, payload)
+        : createAdminPublicPoolSite(payload)
     },
     onSuccess: async (response) => {
       if (!response.success) {
@@ -137,12 +197,7 @@ export function PublicPoolAdminPanel() {
       )
       setEditingSite(null)
       form.reset(EMPTY_SITE)
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['public-pool', 'sites'] }),
-        queryClient.invalidateQueries({
-          queryKey: ['public-pool', 'admin', 'sites'],
-        }),
-      ])
+      await invalidate()
     },
   })
   const deleteSiteMutation = useMutation({
@@ -152,14 +207,9 @@ export function PublicPoolAdminPanel() {
         toast.error(response.message || t('Failed to delete public site'))
         return
       }
-      toast.success(t('Public site deleted'))
       setSiteToDelete(null)
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['public-pool', 'sites'] }),
-        queryClient.invalidateQueries({
-          queryKey: ['public-pool', 'admin', 'sites'],
-        }),
-      ])
+      toast.success(t('Public site deleted'))
+      await invalidate()
     },
   })
   const reviewMutation = useMutation({
@@ -182,24 +232,64 @@ export function PublicPoolAdminPanel() {
         delete next[response.data?.id ?? 0]
         return next
       })
-      toast.success(t('Contribution review saved'))
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: ['public-pool', 'admin', 'contributions'],
-        }),
-        queryClient.invalidateQueries({
-          queryKey: ['public-pool', 'contributions', 'self'],
-        }),
-      ])
+      if (
+        response.data?.status === 'approved' &&
+        response.data.reward_status !== 'succeeded'
+      ) {
+        toast.error(t('Reward delivery failed'))
+      } else {
+        toast.success(t('Contribution review saved'))
+      }
+      await invalidate()
+    },
+  })
+  const retryMutation = useMutation({
+    mutationFn: retryAdminPublicPoolContributionReward,
+    onSuccess: async (response) => {
+      if (!response.success) {
+        toast.error(response.message || t('Failed to retry reward'))
+        return
+      }
+      if (response.data?.reward_status === 'succeeded') {
+        toast.success(t('Reward delivered'))
+      } else {
+        toast.error(t('Reward delivery failed'))
+      }
+      await invalidate()
     },
   })
 
-  if (!canRead) return null
-
   const sites = sitesQuery.data?.success ? (sitesQuery.data.data ?? []) : []
-  const contributions = contributionsQuery.data?.success
-    ? (contributionsQuery.data.data ?? [])
-    : []
+  const siteKeyword = siteSearch.trim().toLocaleLowerCase()
+  const filteredSites = sites.filter((site) => {
+    const matchesSearch =
+      siteKeyword === '' ||
+      site.name.toLocaleLowerCase().includes(siteKeyword) ||
+      site.url.toLocaleLowerCase().includes(siteKeyword)
+    const matchesStatus =
+      siteStatusFilter === 'all' || site.status === siteStatusFilter
+    return matchesSearch && matchesStatus
+  })
+  const sitePageCount = Math.max(1, Math.ceil(filteredSites.length / PAGE_SIZE))
+  const visibleSitePage = Math.min(sitePage, sitePageCount)
+  const visibleSites = filteredSites.slice(
+    (visibleSitePage - 1) * PAGE_SIZE,
+    visibleSitePage * PAGE_SIZE
+  )
+  const contributionPage = contributionsQuery.data?.success
+    ? contributionsQuery.data.data
+    : undefined
+  const plans = plansQuery.data?.data ?? []
+  const pageItems = contributionPage?.items ?? []
+  const pageCount = Math.max(
+    1,
+    Math.ceil((contributionPage?.total ?? 0) / PAGE_SIZE)
+  )
+  const sitesFailed = sitesQuery.isError || sitesQuery.data?.success === false
+  const contributionsFailed =
+    contributionsQuery.isError || contributionsQuery.data?.success === false
+
+  if (!canRead) return null
 
   const editSite = (site: PublicPoolSite) => {
     setEditingSite(site)
@@ -209,25 +299,88 @@ export function PublicPoolAdminPanel() {
       description: site.description,
       status: site.status,
       sort_order: site.sort_order,
+      reward_type: site.reward?.type ?? 'none',
+      reward_amount: site.reward?.amount ?? '1',
+      reward_unit: site.reward?.unit ?? 'usd',
+      subscription_plan_id: site.reward?.subscription_plan_id ?? 0,
     })
   }
 
+  const rewardLabel = (site: PublicPoolSite) => {
+    if (!site.reward) return t('No reward configured')
+    if (site.reward.type === 'subscription') {
+      return site.reward.subscription_plan_title || t('Subscription reward')
+    }
+    return `${site.reward.amount ?? site.reward.quota ?? 0} ${(site.reward.unit ?? 'quota').toUpperCase()} (${formatQuota(site.reward.quota ?? 0)})`
+  }
+
+  let siteSubmitIcon = <Plus data-icon='inline-start' />
+  if (saveSiteMutation.isPending) {
+    siteSubmitIcon = <Spinner data-icon='inline-start' />
+  } else if (editingSite) {
+    siteSubmitIcon = <Check data-icon='inline-start' />
+  }
+
+  const runtimeStatus = statusQuery.data?.data
+  let runtimeStatusContent = (
+    <div className='space-y-3 text-center'>
+      <p className='text-muted-foreground text-sm'>{t('Request failed')}</p>
+      <Button
+        size='sm'
+        variant='outline'
+        onClick={() => void statusQuery.refetch()}
+      >
+        {t('Retry')}
+      </Button>
+    </div>
+  )
+  if (statusQuery.isLoading) {
+    runtimeStatusContent = <Skeleton className='h-24' />
+  } else if (runtimeStatus) {
+    runtimeStatusContent = (
+      <dl className='grid gap-4 sm:grid-cols-3'>
+        <div>
+          <dt className='text-muted-foreground text-xs'>{t('Available')}</dt>
+          <dd className='mt-1 font-medium'>
+            {runtimeStatus.available ? t('Yes') : t('No')}
+          </dd>
+        </div>
+        <div>
+          <dt className='text-muted-foreground text-xs'>
+            {t('Channel count')}
+          </dt>
+          <dd className='mt-1 font-medium'>{runtimeStatus.channel_count}</dd>
+        </div>
+        <div>
+          <dt className='text-muted-foreground text-xs'>{t('Group ratio')}</dt>
+          <dd className='mt-1 font-medium'>{runtimeStatus.group_ratio}</dd>
+        </div>
+      </dl>
+    )
+  }
+
   return (
-    <section className='space-y-4 border-t pt-6'>
-      <div>
-        <div className='flex items-center gap-2'>
-          <ShieldCheck className='text-primary size-5' aria-hidden='true' />
+    <section className='space-y-4'>
+      <div className='flex items-start gap-3'>
+        <ShieldCheck className='text-primary mt-1 size-5' aria-hidden='true' />
+        <div>
           <h2 className='text-lg font-semibold'>
             {t('Public pool management')}
           </h2>
+          <p className='text-muted-foreground text-sm'>
+            {t('Maintain public sites, rewards, reviews, and runtime status.')}
+          </p>
         </div>
-        <p className='text-muted-foreground mt-1 text-sm'>
-          {t('Maintain public sites and review user contributions.')}
-        </p>
       </div>
 
-      <div className='grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]'>
-        <div className='space-y-4'>
+      <Tabs defaultValue='sites'>
+        <TabsList>
+          <TabsTrigger value='sites'>{t('Site management')}</TabsTrigger>
+          <TabsTrigger value='reviews'>{t('Contribution reviews')}</TabsTrigger>
+          <TabsTrigger value='status'>{t('Runtime status')}</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value='sites' className='mt-4 grid gap-6 xl:grid-cols-2'>
           {canWrite && (
             <Card>
               <CardHeader>
@@ -235,7 +388,9 @@ export function PublicPoolAdminPanel() {
                   {t(editingSite ? 'Edit public site' : 'Add public site')}
                 </CardTitle>
                 <CardDescription>
-                  {t('Only credential-free HTTP and HTTPS links are accepted.')}
+                  {t(
+                    'The configured reward is frozen when a user submits proof.'
+                  )}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -251,7 +406,6 @@ export function PublicPoolAdminPanel() {
                       </FieldLabel>
                       <Input
                         id='public-pool-admin-name'
-                        aria-invalid={Boolean(form.formState.errors.name)}
                         {...form.register('name')}
                       />
                       <FieldError>
@@ -267,7 +421,6 @@ export function PublicPoolAdminPanel() {
                       <Input
                         id='public-pool-admin-url'
                         type='url'
-                        aria-invalid={Boolean(form.formState.errors.url)}
                         {...form.register('url')}
                       />
                       <FieldError>
@@ -276,29 +429,17 @@ export function PublicPoolAdminPanel() {
                           : null}
                       </FieldError>
                     </Field>
-                    <Field
-                      data-invalid={Boolean(form.formState.errors.description)}
-                    >
+                    <Field>
                       <FieldLabel htmlFor='public-pool-admin-description'>
                         {t('Description')}
                       </FieldLabel>
                       <Textarea
                         id='public-pool-admin-description'
-                        aria-invalid={Boolean(
-                          form.formState.errors.description
-                        )}
                         {...form.register('description')}
                       />
-                      <FieldError>
-                        {form.formState.errors.description?.message
-                          ? t(form.formState.errors.description.message)
-                          : null}
-                      </FieldError>
                     </Field>
                     <div className='grid gap-3 sm:grid-cols-2'>
-                      <Field
-                        data-invalid={Boolean(form.formState.errors.status)}
-                      >
+                      <Field>
                         <FieldLabel htmlFor='public-pool-admin-status'>
                           {t('Status')}
                         </FieldLabel>
@@ -321,34 +462,113 @@ export function PublicPoolAdminPanel() {
                         <Input
                           id='public-pool-admin-sort'
                           type='number'
-                          aria-invalid={Boolean(
-                            form.formState.errors.sort_order
-                          )}
                           {...form.register('sort_order', {
                             valueAsNumber: true,
                           })}
                         />
+                      </Field>
+                    </div>
+                    <Field>
+                      <FieldLabel htmlFor='public-pool-reward-type'>
+                        {t('Fixed reward')}
+                      </FieldLabel>
+                      <NativeSelect
+                        id='public-pool-reward-type'
+                        {...form.register('reward_type')}
+                      >
+                        <NativeSelectOption value='none'>
+                          {t('No reward')}
+                        </NativeSelectOption>
+                        <NativeSelectOption value='quota'>
+                          {t('Main account quota')}
+                        </NativeSelectOption>
+                        <NativeSelectOption value='subscription'>
+                          {t('Subscription')}
+                        </NativeSelectOption>
+                      </NativeSelect>
+                    </Field>
+                    {rewardType === 'quota' && (
+                      <div className='grid gap-3 sm:grid-cols-2'>
+                        <Field
+                          data-invalid={Boolean(
+                            form.formState.errors.reward_amount
+                          )}
+                        >
+                          <FieldLabel htmlFor='public-pool-reward-amount'>
+                            {t('Reward amount')}
+                          </FieldLabel>
+                          <Input
+                            id='public-pool-reward-amount'
+                            inputMode='decimal'
+                            {...form.register('reward_amount')}
+                          />
+                          <FieldError>
+                            {form.formState.errors.reward_amount?.message
+                              ? t(form.formState.errors.reward_amount.message)
+                              : null}
+                          </FieldError>
+                        </Field>
+                        <Field>
+                          <FieldLabel htmlFor='public-pool-reward-unit'>
+                            {t('Reward unit')}
+                          </FieldLabel>
+                          <NativeSelect
+                            id='public-pool-reward-unit'
+                            {...form.register('reward_unit')}
+                          >
+                            <NativeSelectOption value='usd'>
+                              USD
+                            </NativeSelectOption>
+                            <NativeSelectOption value='cny'>
+                              CNY
+                            </NativeSelectOption>
+                            <NativeSelectOption value='quota'>
+                              {t('Raw quota')}
+                            </NativeSelectOption>
+                          </NativeSelect>
+                        </Field>
+                      </div>
+                    )}
+                    {rewardType === 'subscription' && (
+                      <Field
+                        data-invalid={Boolean(
+                          form.formState.errors.subscription_plan_id
+                        )}
+                      >
+                        <FieldLabel htmlFor='public-pool-reward-plan'>
+                          {t('Subscription plan')}
+                        </FieldLabel>
+                        <NativeSelect
+                          id='public-pool-reward-plan'
+                          {...form.register('subscription_plan_id', {
+                            valueAsNumber: true,
+                          })}
+                        >
+                          <NativeSelectOption value='0'>
+                            {t('Select a subscription plan')}
+                          </NativeSelectOption>
+                          {plans.map((plan) => (
+                            <NativeSelectOption key={plan.id} value={plan.id}>
+                              {plan.title}
+                            </NativeSelectOption>
+                          ))}
+                        </NativeSelect>
                         <FieldError>
-                          {form.formState.errors.sort_order?.message
-                            ? t(form.formState.errors.sort_order.message)
+                          {form.formState.errors.subscription_plan_id?.message
+                            ? t(
+                                form.formState.errors.subscription_plan_id
+                                  .message
+                              )
                             : null}
                         </FieldError>
                       </Field>
-                    </div>
+                    )}
                     <div className='flex flex-wrap gap-2'>
                       <Button
                         type='submit'
                         disabled={saveSiteMutation.isPending}
                       >
-                        {saveSiteMutation.isPending && (
-                          <Spinner data-icon='inline-start' />
-                        )}
-                        {!saveSiteMutation.isPending && editingSite && (
-                          <Check data-icon='inline-start' />
-                        )}
-                        {!saveSiteMutation.isPending && !editingSite && (
-                          <Plus data-icon='inline-start' />
-                        )}
+                        {siteSubmitIcon}
                         {t(editingSite ? 'Save changes' : 'Add public site')}
                       </Button>
                       {editingSite && (
@@ -377,15 +597,57 @@ export function PublicPoolAdminPanel() {
                 {t('{{count}} sites configured', { count: sites.length })}
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              {sitesQuery.isLoading ? (
+            <CardContent className='space-y-4'>
+              <div className='grid gap-3 sm:grid-cols-2'>
+                <Input
+                  value={siteSearch}
+                  onChange={(event) => {
+                    setSiteSearch(event.target.value)
+                    setSitePage(1)
+                  }}
+                  placeholder={t('Search')}
+                />
+                <NativeSelect
+                  value={siteStatusFilter}
+                  onChange={(event) => {
+                    setSiteStatusFilter(event.target.value)
+                    setSitePage(1)
+                  }}
+                >
+                  <NativeSelectOption value='all'>
+                    {t('All statuses')}
+                  </NativeSelectOption>
+                  <NativeSelectOption value='enabled'>
+                    {t('enabled')}
+                  </NativeSelectOption>
+                  <NativeSelectOption value='disabled'>
+                    {t('disabled')}
+                  </NativeSelectOption>
+                </NativeSelect>
+              </div>
+              {sitesQuery.isLoading && (
                 <div className='space-y-3'>
-                  <Skeleton className='h-20' />
-                  <Skeleton className='h-20' />
+                  <Skeleton className='h-24' />
+                  <Skeleton className='h-24' />
                 </div>
-              ) : (
+              )}
+              {sitesFailed && (
+                <div className='space-y-3 py-8 text-center'>
+                  <p className='text-muted-foreground text-sm'>
+                    {t('Request failed')}
+                  </p>
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    onClick={() => void sitesQuery.refetch()}
+                  >
+                    {t('Retry')}
+                  </Button>
+                </div>
+              )}
+              {!sitesQuery.isLoading && !sitesFailed && (
                 <div className='divide-y'>
-                  {sites.map((site) => (
+                  {visibleSites.map((site) => (
                     <article
                       key={site.id}
                       className='space-y-2 py-3 first:pt-0'
@@ -407,6 +669,7 @@ export function PublicPoolAdminPanel() {
                           <p className='text-muted-foreground mt-1 truncate text-xs'>
                             {site.url}
                           </p>
+                          <p className='mt-1 text-xs'>{rewardLabel(site)}</p>
                         </div>
                         {canWrite && (
                           <div className='flex shrink-0 gap-1'>
@@ -432,124 +695,277 @@ export function PublicPoolAdminPanel() {
                       </div>
                     </article>
                   ))}
-                  {sites.length === 0 && (
-                    <p className='text-muted-foreground py-6 text-center text-sm'>
+                  {filteredSites.length === 0 && (
+                    <p className='text-muted-foreground py-8 text-center text-sm'>
                       {t('No public sites configured')}
                     </p>
                   )}
                 </div>
               )}
+              {sitePageCount > 1 && (
+                <div className='flex items-center justify-between gap-3'>
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    disabled={visibleSitePage <= 1}
+                    onClick={() => setSitePage(visibleSitePage - 1)}
+                  >
+                    {t('Previous')}
+                  </Button>
+                  <span className='text-muted-foreground text-xs'>
+                    {t('Page {{current}} of {{total}}', {
+                      current: visibleSitePage,
+                      total: sitePageCount,
+                    })}
+                  </span>
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    disabled={visibleSitePage >= sitePageCount}
+                    onClick={() => setSitePage(visibleSitePage + 1)}
+                  >
+                    {t('Next')}
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
-        </div>
+        </TabsContent>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>{t('Contribution reviews')}</CardTitle>
-            <CardDescription>
-              {t(
-                'Review registration and referral contributions without collecting credentials.'
-              )}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {contributionsQuery.isLoading ? (
-              <div className='space-y-3'>
-                <Skeleton className='h-32' />
-                <Skeleton className='h-32' />
-              </div>
-            ) : (
-              <div className='divide-y'>
-                {contributions.map((item) => (
-                  <article key={item.id} className='space-y-3 py-4 first:pt-0'>
-                    <div className='flex flex-wrap items-center justify-between gap-2'>
-                      <div>
-                        <span className='font-medium'>
-                          {item.username ||
-                            t('User #{{id}}', { id: item.user_id })}
-                        </span>
-                        <span className='text-muted-foreground ml-2 text-xs'>
-                          {item.site_name ||
-                            t('Site #{{id}}', { id: item.site_id })}
-                        </span>
-                      </div>
-                      <Badge variant={contributionStatusVariant(item.status)}>
-                        {t(item.status)}
-                      </Badge>
-                    </div>
-                    <div className='bg-muted/40 space-y-1 rounded-lg p-3 text-sm'>
-                      {item.description && <p>{item.description}</p>}
-                      {item.proof && (
-                        <p className='text-muted-foreground'>{item.proof}</p>
-                      )}
-                    </div>
-                    <div className='text-muted-foreground text-xs'>
-                      {dayjs.unix(item.created_at).format('YYYY-MM-DD HH:mm')}
-                    </div>
-                    {item.status === 'pending' && canOperate && (
-                      <div className='space-y-2'>
-                        <Textarea
-                          value={reviewNotes[item.id] ?? ''}
-                          onChange={(event) =>
-                            setReviewNotes((current) => ({
-                              ...current,
-                              [item.id]: event.target.value,
-                            }))
-                          }
-                          placeholder={t('Optional review note')}
-                          aria-label={t('Review note')}
-                        />
-                        <div className='flex flex-wrap gap-2'>
-                          <Button
-                            size='sm'
-                            onClick={() =>
-                              reviewMutation.mutate({
-                                id: item.id,
-                                status: 'approved',
-                                review_note: reviewNotes[item.id] ?? '',
-                              })
-                            }
-                            disabled={reviewMutation.isPending}
-                          >
-                            <Check data-icon='inline-start' />
-                            {t('Approve')}
-                          </Button>
-                          <Button
-                            size='sm'
-                            variant='destructive'
-                            onClick={() =>
-                              reviewMutation.mutate({
-                                id: item.id,
-                                status: 'rejected',
-                                review_note: reviewNotes[item.id] ?? '',
-                              })
-                            }
-                            disabled={reviewMutation.isPending}
-                          >
-                            <X data-icon='inline-start' />
-                            {t('Reject')}
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                    {(!canOperate || item.status !== 'pending') &&
-                      item.review_note && (
-                        <p className='text-sm'>
-                          {t('Review note')}: {item.review_note}
-                        </p>
-                      )}
-                  </article>
-                ))}
-                {contributions.length === 0 && (
-                  <p className='text-muted-foreground py-8 text-center text-sm'>
-                    {t('No contribution applications')}
-                  </p>
+        <TabsContent value='reviews' className='mt-4'>
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('Contribution reviews')}</CardTitle>
+              <CardDescription>
+                {t(
+                  'Approving a contribution delivers its frozen reward exactly once.'
                 )}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className='space-y-4'>
+              <div className='grid gap-3 sm:grid-cols-2'>
+                <Input
+                  value={search}
+                  onChange={(event) => {
+                    setSearch(event.target.value)
+                    setReviewPage(1)
+                  }}
+                  placeholder={t('Search user or site')}
+                />
+                <NativeSelect
+                  value={statusFilter}
+                  onChange={(event) => {
+                    setStatusFilter(event.target.value)
+                    setReviewPage(1)
+                  }}
+                >
+                  <NativeSelectOption value='all'>
+                    {t('All statuses')}
+                  </NativeSelectOption>
+                  <NativeSelectOption value='pending'>
+                    {t('pending')}
+                  </NativeSelectOption>
+                  <NativeSelectOption value='approved'>
+                    {t('approved')}
+                  </NativeSelectOption>
+                  <NativeSelectOption value='rejected'>
+                    {t('rejected')}
+                  </NativeSelectOption>
+                </NativeSelect>
               </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+              {contributionsQuery.isLoading && (
+                <div className='space-y-3'>
+                  <Skeleton className='h-32' />
+                  <Skeleton className='h-32' />
+                </div>
+              )}
+              {contributionsFailed && (
+                <div className='space-y-3 py-8 text-center'>
+                  <p className='text-muted-foreground text-sm'>
+                    {t('Request failed')}
+                  </p>
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    onClick={() => void contributionsQuery.refetch()}
+                  >
+                    {t('Retry')}
+                  </Button>
+                </div>
+              )}
+              {!contributionsQuery.isLoading && !contributionsFailed && (
+                <div className='divide-y'>
+                  {pageItems.map((item) => {
+                    let rewardStatusLabel = t('Pending')
+                    if (item.reward_status === 'succeeded') {
+                      rewardStatusLabel = t('Rewarded')
+                    } else if (item.reward_status === 'failed') {
+                      rewardStatusLabel = t('Failed')
+                    }
+                    return (
+                      <article
+                        key={item.id}
+                        className='space-y-3 py-4 first:pt-0'
+                      >
+                        <div className='flex flex-wrap items-center justify-between gap-2'>
+                          <div>
+                            <span className='font-medium'>
+                              {item.username ||
+                                t('User #{{id}}', { id: item.user_id })}
+                            </span>
+                            <span className='text-muted-foreground ml-2 text-xs'>
+                              {item.site_name ||
+                                t('Site #{{id}}', { id: item.site_id })}
+                            </span>
+                          </div>
+                          <div className='flex items-center gap-2'>
+                            {item.status === 'approved' && item.reward && (
+                              <Badge
+                                variant={
+                                  item.reward_status === 'failed'
+                                    ? 'destructive'
+                                    : 'outline'
+                                }
+                              >
+                                {rewardStatusLabel}
+                              </Badge>
+                            )}
+                            <Badge
+                              variant={contributionStatusVariant(item.status)}
+                            >
+                              {t(item.status)}
+                            </Badge>
+                          </div>
+                        </div>
+                        <div className='bg-muted/40 space-y-1 rounded-lg p-3 text-sm'>
+                          {item.description && <p>{item.description}</p>}
+                          {item.proof && (
+                            <p className='text-muted-foreground'>
+                              {item.proof}
+                            </p>
+                          )}
+                        </div>
+                        <div className='text-muted-foreground text-xs'>
+                          {dayjs
+                            .unix(item.created_at)
+                            .format('YYYY-MM-DD HH:mm')}
+                        </div>
+                        {item.status === 'pending' && canOperate && (
+                          <div className='space-y-2'>
+                            <Textarea
+                              value={reviewNotes[item.id] ?? ''}
+                              onChange={(event) =>
+                                setReviewNotes((current) => ({
+                                  ...current,
+                                  [item.id]: event.target.value,
+                                }))
+                              }
+                              placeholder={t('Optional review note')}
+                            />
+                            <div className='flex flex-wrap gap-2'>
+                              <Button
+                                size='sm'
+                                disabled={
+                                  reviewMutation.isPending || !item.reward
+                                }
+                                onClick={() =>
+                                  reviewMutation.mutate({
+                                    id: item.id,
+                                    status: 'approved',
+                                    review_note: reviewNotes[item.id] ?? '',
+                                  })
+                                }
+                              >
+                                <Check data-icon='inline-start' />
+                                {t('Approve and reward')}
+                              </Button>
+                              <Button
+                                size='sm'
+                                variant='destructive'
+                                disabled={reviewMutation.isPending}
+                                onClick={() =>
+                                  reviewMutation.mutate({
+                                    id: item.id,
+                                    status: 'rejected',
+                                    review_note: reviewNotes[item.id] ?? '',
+                                  })
+                                }
+                              >
+                                <X data-icon='inline-start' />
+                                {t('Reject')}
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                        {item.status === 'approved' &&
+                          item.reward &&
+                          item.reward_status !== 'succeeded' &&
+                          canOperate && (
+                            <div className='space-y-2'>
+                              <p className='text-destructive text-sm'>
+                                {item.reward_failure_reason ||
+                                  t('Reward delivery failed')}
+                              </p>
+                              <Button
+                                size='sm'
+                                variant='outline'
+                                disabled={retryMutation.isPending}
+                                onClick={() => retryMutation.mutate(item.id)}
+                              >
+                                <RefreshCw data-icon='inline-start' />
+                                {t('Retry reward')}
+                              </Button>
+                            </div>
+                          )}
+                      </article>
+                    )
+                  })}
+                  {pageItems.length === 0 && (
+                    <p className='text-muted-foreground py-8 text-center text-sm'>
+                      {t('No contribution applications')}
+                    </p>
+                  )}
+                </div>
+              )}
+              <div className='flex items-center justify-end gap-2'>
+                <Button
+                  size='sm'
+                  variant='outline'
+                  disabled={reviewPage <= 1}
+                  onClick={() => setReviewPage((page) => Math.max(1, page - 1))}
+                >
+                  {t('Previous')}
+                </Button>
+                <span className='text-muted-foreground text-xs'>
+                  {reviewPage}/{pageCount}
+                </span>
+                <Button
+                  size='sm'
+                  variant='outline'
+                  disabled={reviewPage >= pageCount}
+                  onClick={() =>
+                    setReviewPage((page) => Math.min(pageCount, page + 1))
+                  }
+                >
+                  {t('Next')}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value='status' className='mt-4'>
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('Runtime status')}</CardTitle>
+              <CardDescription>
+                {t('Public pool availability and zero-cost group validation.')}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>{runtimeStatusContent}</CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       <ConfirmDialog
         open={siteToDelete != null}

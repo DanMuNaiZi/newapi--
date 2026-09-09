@@ -24,6 +24,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import { isUserPreviewActive } from '@/lib/user-preview'
 
 import {
   claimLotteryResult,
@@ -36,6 +37,7 @@ import { LotteryIcon } from './lottery-icon'
 export function LotteryDashboardPanel() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  const readOnlyPreview = isUserPreviewActive()
   const plansQuery = useQuery({
     queryKey: ['lottery', 'self'],
     queryFn: getLotteryPlansForSelf,
@@ -191,17 +193,23 @@ export function LotteryDashboardPanel() {
                 <span className='truncate text-sm'>
                   {t('Lottery reward')} #{result.id}
                 </span>
-                <Button
-                  size='sm'
-                  disabled={claimMutation.isPending}
-                  onClick={() =>
-                    claimMutation.mutate({
-                      resultId: result.id,
-                    })
-                  }
-                >
-                  {t('Claim lottery reward')}
-                </Button>
+                {readOnlyPreview ? (
+                  <span className='text-muted-foreground text-xs'>
+                    {t('User preview is read-only')}
+                  </span>
+                ) : (
+                  <Button
+                    size='sm'
+                    disabled={claimMutation.isPending}
+                    onClick={() =>
+                      claimMutation.mutate({
+                        resultId: result.id,
+                      })
+                    }
+                  >
+                    {t('Claim lottery reward')}
+                  </Button>
+                )}
               </div>
             ))}
           </div>

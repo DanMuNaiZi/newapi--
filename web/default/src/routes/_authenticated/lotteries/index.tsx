@@ -17,13 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute } from '@tanstack/react-router'
-import z from 'zod'
 
 import { Lotteries } from '@/features/lottery'
 
-const lotterySearchSchema = z.object({
-  plan: z.coerce.number().int().positive().optional().catch(undefined),
-})
+import { lotterySearchSchema } from './-search'
 
 export const Route = createFileRoute('/_authenticated/lotteries/')({
   validateSearch: lotterySearchSchema,

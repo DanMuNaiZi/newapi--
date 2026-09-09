@@ -40,6 +40,7 @@ import { toast } from 'sonner'
 import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
+import { isUserPreviewActive } from '@/lib/user-preview'
 
 import {
   claimLotteryResult,
@@ -71,6 +72,7 @@ export function Lotteries() {
   const search = route.useSearch()
   const navigate = route.useNavigate()
   const queryClient = useQueryClient()
+  const readOnlyPreview = isUserPreviewActive()
   const plansQuery = useQuery({
     queryKey: LOTTERY_QUERY_KEY,
     queryFn: getLotteryPlansForSelf,
@@ -171,10 +173,6 @@ export function Lotteries() {
   const notificationsFailed =
     notificationsQuery.isError ||
     notificationsQuery.data?.pages.some((page) => !page.success) === true
-  const selectedPlan = search.plan
-    ? (plans.find((plan) => plan.id === search.plan) ?? null)
-    : null
-
   const selectPlan = (plan: LotteryPlan): void => {
     void navigate({
       search: (previous) => ({ ...previous, plan: plan.id }),
@@ -260,6 +258,7 @@ export function Lotteries() {
                       {t('View details')}
                     </Button>
                     {isOpen &&
+                      !readOnlyPreview &&
                       (plan.joined ? (
                         <Button
                           size='sm'
@@ -313,18 +312,20 @@ export function Lotteries() {
                     })}
                   </span>
                 </div>
-                <Button
-                  size='sm'
-                  variant='outline'
-                  disabled={markNotificationsReadMutation.isPending}
-                  onClick={() =>
-                    markNotificationsReadMutation.mutate(
-                      notifications.map((notification) => notification.id)
-                    )
-                  }
-                >
-                  {t('Mark displayed as read')}
-                </Button>
+                {!readOnlyPreview && (
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    disabled={markNotificationsReadMutation.isPending}
+                    onClick={() =>
+                      markNotificationsReadMutation.mutate(
+                        notifications.map((notification) => notification.id)
+                      )
+                    }
+                  >
+                    {t('Mark displayed as read')}
+                  </Button>
+                )}
               </div>
               <div className='grid gap-2'>
                 {notifications.map((notification) => (
@@ -387,7 +388,7 @@ export function Lotteries() {
                     {t('Lottery reward')} #{result.id}
                   </span>
                 </span>
-                {result.claimable ? (
+                {result.claimable && !readOnlyPreview ? (
                   <Button
                     size='sm'
                     disabled={claimMutation.isPending}
@@ -422,8 +423,8 @@ export function Lotteries() {
         </div>
       </SectionPageLayout.Content>
       <LotteryUserDetailsDrawer
-        open={selectedPlan !== null}
-        plan={selectedPlan}
+        open={search.plan != null}
+        planId={search.plan ?? null}
         onOpenChange={(open) => {
           if (!open) {
             void navigate({

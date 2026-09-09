@@ -16,7 +16,7 @@ import (
 
 func TestCreatePublicPoolContributionUsesAuthenticatedUserIdentity(t *testing.T) {
 	db := setupLotteryControllerTestDB(t)
-	require.NoError(t, db.AutoMigrate(&model.PublicPoolSite{}, &model.PublicPoolContribution{}))
+	require.NoError(t, db.AutoMigrate(&model.PublicPoolSite{}, &model.PublicPoolContribution{}, &model.RewardGrant{}))
 	owner := &model.User{Username: "pool-controller-owner", Password: "password", Status: common.UserStatusEnabled, AffCode: "pool-controller-owner"}
 	other := &model.User{Username: "pool-controller-other", Password: "password", Status: common.UserStatusEnabled, AffCode: "pool-controller-other"}
 	require.NoError(t, db.Create([]*model.User{owner, other}).Error)
@@ -45,8 +45,10 @@ func TestCreatePublicPoolContributionUsesAuthenticatedUserIdentity(t *testing.T)
 
 func TestAdminReviewPublicPoolContributionCannotOverrideReviewer(t *testing.T) {
 	db := setupLotteryControllerTestDB(t)
-	require.NoError(t, db.AutoMigrate(&model.PublicPoolSite{}, &model.PublicPoolContribution{}))
-	site := &model.PublicPoolSite{Name: "Example", URL: "https://example.com", Status: model.PublicPoolSiteStatusEnabled}
+	require.NoError(t, db.AutoMigrate(&model.PublicPoolSite{}, &model.PublicPoolContribution{}, &model.RewardGrant{}))
+	rawReward, err := model.EncodeRewardSnapshot(model.RewardSnapshot{Type: model.RewardTypeQuota, Quota: 100})
+	require.NoError(t, err)
+	site := &model.PublicPoolSite{Name: "Example", URL: "https://example.com", Status: model.PublicPoolSiteStatusEnabled, RewardSnapshotJSON: rawReward}
 	require.NoError(t, model.CreatePublicPoolSite(site))
 	contribution := &model.PublicPoolContribution{UserId: 10, SiteId: site.Id, Description: "registered"}
 	require.NoError(t, model.CreatePublicPoolContribution(contribution))

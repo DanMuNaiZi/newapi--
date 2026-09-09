@@ -18,11 +18,10 @@ package service
 
 import (
 	"sort"
-	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 )
 
@@ -158,7 +157,7 @@ func buildUsageRankingsResponse(period string, totals []model.UsageRankingTotal,
 func usageRankingRow(total model.UsageRankingTotal, rank int, userID int, identityVisible bool) UsageRankingRow {
 	username := total.Username
 	if !identityVisible {
-		username = maskUsageRankingUsername(total.Username)
+		username = common.MaskUsername(total.Username)
 	}
 	return UsageRankingRow{
 		Rank:         rank,
@@ -168,20 +167,4 @@ func usageRankingRow(total model.UsageRankingTotal, rank int, userID int, identi
 		RequestCount: total.RequestCount,
 		IsSelf:       total.UserID == userID,
 	}
-}
-
-func maskUsageRankingUsername(username string) string {
-	username = strings.TrimSpace(username)
-	if username == "" {
-		return "***"
-	}
-	runeCount := utf8.RuneCountInString(username)
-	if runeCount == 1 {
-		return "*"
-	}
-	runes := []rune(username)
-	if runeCount == 2 {
-		return string(runes[0]) + "*"
-	}
-	return string(runes[0]) + strings.Repeat("*", minInt(3, len(runes)-2)) + string(runes[len(runes)-1])
 }

@@ -78,6 +78,16 @@ export interface ApiResponse<T = unknown> {
   data?: T
 }
 
+export interface UserPreviewResponse {
+  token: string
+  target: {
+    id: number
+    username: string
+    display_name?: string
+  }
+  expires_at: number
+}
+
 export interface GetUsersParams {
   p?: number
   page_size?: number

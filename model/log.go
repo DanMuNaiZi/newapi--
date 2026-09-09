@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/types"
 
@@ -389,10 +390,24 @@ type RecordConsumeLogParams struct {
 	IsStream         bool                   `json:"is_stream"`
 	Group            string                 `json:"group"`
 	Other            map[string]interface{} `json:"other"`
+	ActivateReferral bool                   `json:"-"`
+}
+
+func isReferralActivationEligible(params RecordConsumeLogParams) bool {
+	if !params.ActivateReferral || params.Group == constant.PublicPoolGroup {
+		return false
+	}
+	streamStatus, ok := params.Other["stream_status"].(map[string]interface{})
+	if !ok {
+		return true
+	}
+	status, _ := streamStatus["status"].(string)
+	return status != "error"
 }
 
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
 	if !common.LogConsumeEnabled {
+		activateReferralCampaignFromConsumeLog(c, userId, params)
 		return
 	}
 	logger.LogInfo(c, fmt.Sprintf("record consume log: userId=%d, params=%s", userId, common.GetJsonString(params)))
@@ -439,6 +454,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	if err != nil {
 		logger.LogError(c, "failed to record log: "+err.Error())
 	}
+	activateReferralCampaignFromConsumeLog(c, userId, params)
 	if common.DataExportEnabled {
 		LogQuotaData(QuotaDataLogParams{
 			UserID:    userId,
@@ -452,6 +468,15 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			ChannelID: params.ChannelId,
 			NodeName:  common.NodeName,
 		})
+	}
+}
+
+func activateReferralCampaignFromConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
+	if !isReferralActivationEligible(params) {
+		return
+	}
+	if err := ActivateReferralCampaignForUser(userId, c.GetString(common.RequestIdKey), params.Group); err != nil {
+		logger.LogError(c, "failed to activate referral campaign: "+err.Error())
 	}
 }
 

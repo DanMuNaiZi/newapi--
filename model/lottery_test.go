@@ -87,6 +87,38 @@ func TestLotteryPlanDefaultAlgorithmFitsLegacyColumn(t *testing.T) {
 	assert.Equal(t, plan.DrawAlgorithm, stored.DrawAlgorithm)
 }
 
+func TestLotteryPublicParticipantPagesAreStableAndMasked(t *testing.T) {
+	userIDs := setupLotteryFixture(t)
+	now := common.GetTimestamp()
+	plan := &LotteryPlan{
+		Title:                 "Paged participants",
+		Status:                LotteryPlanStatusOpen,
+		EligibilityMode:       LotteryEligibilityAll,
+		MaxParticipants:       10,
+		RegistrationStartTime: now - 60,
+		DrawTime:              now + 3600,
+	}
+	require.NoError(t, CreateLotteryPlan(plan, nil, nil, []*LotteryPrize{{Name: "Prize", Quantity: 1, RewardType: LotteryRewardQuota, Quota: 100, FulfillmentMode: LotteryFulfillmentAuto}}))
+	for _, userID := range userIDs {
+		require.NoError(t, JoinLotteryPlan(plan.Id, userID))
+	}
+	require.NoError(t, DB.Model(&LotteryParticipant{}).Where("plan_id = ?", plan.Id).Update("joined_at", now).Error)
+
+	first, err := ListLotteryParticipantsForUserPage(plan.Id, userIDs[0], 2, 0, 0)
+	require.NoError(t, err)
+	require.Len(t, first.Items, 2)
+	assert.True(t, first.HasMore)
+	assert.NotContains(t, first.Items[0].Username, "lottery-")
+
+	last := first.Items[len(first.Items)-1]
+	second, err := ListLotteryParticipantsForUserPage(plan.Id, userIDs[0], 2, last.JoinedAt, last.Id)
+	require.NoError(t, err)
+	require.Len(t, second.Items, 1)
+	assert.False(t, second.HasMore)
+	assert.NotEqual(t, first.Items[0].Id, second.Items[0].Id)
+	assert.NotEqual(t, first.Items[1].Id, second.Items[0].Id)
+}
+
 func TestLotteryCreateRejectsDatabaseIntOverflow(t *testing.T) {
 	if strconv.IntSize < 64 {
 		t.Skip("database INT overflow values do not fit in a 32-bit Go int")
@@ -200,7 +232,7 @@ func TestListLotteryResultsForPlanIncludesWinnerAndPrizeNames(t *testing.T) {
 	assert.Equal(t, "Grand prize", results[0].PrizeName)
 }
 
-func TestLotteryPublicDetailsExposeNamesOnlyToVisibleUsers(t *testing.T) {
+func TestLotteryPublicDetailsMaskNamesAndRequireVisibility(t *testing.T) {
 	userIDs := setupLotteryFixture(t)
 	plan := &LotteryPlan{
 		Title:                 "Private public details",
@@ -221,12 +253,14 @@ func TestLotteryPublicDetailsExposeNamesOnlyToVisibleUsers(t *testing.T) {
 	participants, err := ListLotteryParticipantsForUser(plan.Id, userIDs[0])
 	require.NoError(t, err)
 	require.Len(t, participants, 1)
-	assert.Equal(t, "lottery-a", participants[0].Username)
+	assert.Equal(t, "l***a", participants[0].Username)
+	assert.True(t, participants[0].IsSelf)
 
 	results, err := ListLotteryResultsForUserPlan(plan.Id, userIDs[0])
 	require.NoError(t, err)
 	require.Len(t, results, 1)
-	assert.Equal(t, "lottery-a", results[0].Username)
+	assert.Equal(t, "l***a", results[0].Username)
+	assert.True(t, results[0].IsSelf)
 	assert.Equal(t, "Visible prize", results[0].PrizeName)
 
 	_, err = ListLotteryParticipantsForUser(plan.Id, userIDs[1])

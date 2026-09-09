@@ -13,13 +13,13 @@ import (
 func setupPublicPoolFixture(t *testing.T) {
 	t.Helper()
 	setupLotteryFixture(t)
-	require.NoError(t, DB.AutoMigrate(&PublicPoolSite{}, &PublicPoolContribution{}, &Channel{}, &Ability{}))
-	for _, table := range []interface{}{&PublicPoolContribution{}, &PublicPoolSite{}, &Ability{}, &Channel{}} {
+	require.NoError(t, DB.AutoMigrate(&PublicPoolSite{}, &PublicPoolContribution{}, &RewardGrant{}, &Channel{}, &Ability{}))
+	for _, table := range []interface{}{&RewardGrant{}, &PublicPoolContribution{}, &PublicPoolSite{}, &Ability{}, &Channel{}} {
 		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(table).Error)
 	}
 	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Where("username LIKE ?", "pool-%").Delete(&User{}).Error)
 	t.Cleanup(func() {
-		for _, table := range []interface{}{&PublicPoolContribution{}, &PublicPoolSite{}, &Ability{}, &Channel{}} {
+		for _, table := range []interface{}{&RewardGrant{}, &PublicPoolContribution{}, &PublicPoolSite{}, &Ability{}, &Channel{}} {
 			require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(table).Error)
 		}
 		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Where("username LIKE ?", "pool-%").Delete(&User{}).Error)
@@ -51,9 +51,13 @@ func TestPublicPoolContributionsStayScopedToTheirOwner(t *testing.T) {
 
 func TestReviewPublicPoolContributionRecordsReviewerAndDecision(t *testing.T) {
 	setupPublicPoolFixture(t)
-	site := &PublicPoolSite{Name: "Example", URL: "https://example.com", Status: PublicPoolSiteStatusEnabled}
+	rawReward, err := EncodeRewardSnapshot(RewardSnapshot{Type: RewardTypeQuota, Quota: 100})
+	require.NoError(t, err)
+	user := &User{Username: "pool-review-user", Password: "password", Status: common.UserStatusEnabled, AffCode: "pool-review-user"}
+	require.NoError(t, DB.Create(user).Error)
+	site := &PublicPoolSite{Name: "Example", URL: "https://example.com", Status: PublicPoolSiteStatusEnabled, RewardSnapshotJSON: rawReward}
 	require.NoError(t, CreatePublicPoolSite(site))
-	contribution := &PublicPoolContribution{UserId: 12, SiteId: site.Id, Description: "Registered", Proof: "Proof"}
+	contribution := &PublicPoolContribution{UserId: user.Id, SiteId: site.Id, Description: "Registered", Proof: "Proof"}
 	require.NoError(t, CreatePublicPoolContribution(contribution))
 
 	reviewed, err := ReviewPublicPoolContribution(contribution.Id, 99, PublicPoolContributionStatusApproved, "Verified")
@@ -62,6 +66,105 @@ func TestReviewPublicPoolContributionRecordsReviewerAndDecision(t *testing.T) {
 	assert.Equal(t, PublicPoolContributionStatusApproved, reviewed.Status)
 	assert.Equal(t, "Verified", reviewed.ReviewNote)
 	assert.NotZero(t, reviewed.ReviewedAt)
+	assert.Equal(t, RewardGrantStatusSucceeded, reviewed.RewardStatus)
+	var stored User
+	require.NoError(t, DB.First(&stored, user.Id).Error)
+	assert.Equal(t, 100, stored.Quota)
+}
+
+func TestPublicPoolApprovalKeepsFailedRewardVisibleAndRetryable(t *testing.T) {
+	setupPublicPoolFixture(t)
+	rawReward, err := EncodeRewardSnapshot(RewardSnapshot{Type: RewardTypeQuota, Quota: 100})
+	require.NoError(t, err)
+	user := &User{
+		Username: "pool-full-balance", Password: "password", Status: common.UserStatusEnabled,
+		AffCode: "pool-full-balance", Quota: common.MaxQuota,
+	}
+	require.NoError(t, DB.Create(user).Error)
+	site := &PublicPoolSite{Name: "Example", URL: "https://example.com", Status: PublicPoolSiteStatusEnabled, RewardSnapshotJSON: rawReward}
+	require.NoError(t, CreatePublicPoolSite(site))
+	contribution := &PublicPoolContribution{UserId: user.Id, SiteId: site.Id, Description: "Registered", Proof: "Proof"}
+	require.NoError(t, CreatePublicPoolContribution(contribution))
+
+	reviewed, err := ReviewPublicPoolContribution(contribution.Id, 99, PublicPoolContributionStatusApproved, "Verified")
+	require.NoError(t, err)
+	assert.Equal(t, PublicPoolContributionStatusApproved, reviewed.Status)
+	assert.Equal(t, RewardGrantStatusFailed, reviewed.RewardStatus)
+	assert.NotEmpty(t, reviewed.RewardFailureReason)
+
+	var stored User
+	require.NoError(t, DB.First(&stored, user.Id).Error)
+	assert.Equal(t, common.MaxQuota, stored.Quota)
+}
+
+func TestPublicPoolAdminContributionPageFiltersAndOrdersStably(t *testing.T) {
+	setupPublicPoolFixture(t)
+	users := []*User{
+		{Username: "pool-page-alice", Password: "password", Status: common.UserStatusEnabled, AffCode: "pool-page-a"},
+		{Username: "pool-page-bob", Password: "password", Status: common.UserStatusEnabled, AffCode: "pool-page-b"},
+	}
+	require.NoError(t, DB.Create(&users).Error)
+	site := &PublicPoolSite{Name: "Example Search Site", URL: "https://example.com", Status: PublicPoolSiteStatusEnabled}
+	require.NoError(t, CreatePublicPoolSite(site))
+	first := &PublicPoolContribution{UserId: users[0].Id, SiteId: site.Id, Description: "one", Status: PublicPoolContributionStatusPending, CreatedAt: 100, UpdatedAt: 100}
+	second := &PublicPoolContribution{UserId: users[1].Id, SiteId: site.Id, Description: "two", Status: PublicPoolContributionStatusApproved, CreatedAt: 100, UpdatedAt: 100}
+	require.NoError(t, DB.Create(first).Error)
+	require.NoError(t, DB.Create(second).Error)
+
+	items, total, err := ListPublicPoolContributionsForAdminPage("BOB", PublicPoolContributionStatusApproved, 10, 0)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, items, 1)
+	assert.Equal(t, second.Id, items[0].Id)
+
+	items, total, err = ListPublicPoolContributionsForAdminPage("Example Search", "", 1, 0)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, total)
+	require.Len(t, items, 1)
+	assert.Equal(t, second.Id, items[0].Id)
+}
+
+func TestRejectedPublicPoolContributionCanBeResubmittedWithLatestFrozenReward(t *testing.T) {
+	setupPublicPoolFixture(t)
+	firstReward, err := EncodeRewardSnapshot(RewardSnapshot{Type: RewardTypeQuota, Quota: 100})
+	require.NoError(t, err)
+	site := &PublicPoolSite{Name: "Example", URL: "https://example.com", Status: PublicPoolSiteStatusEnabled, RewardSnapshotJSON: firstReward}
+	require.NoError(t, CreatePublicPoolSite(site))
+	contribution := &PublicPoolContribution{UserId: 15, SiteId: site.Id, Description: "Registered", Proof: "First proof"}
+	require.NoError(t, CreatePublicPoolContribution(contribution))
+	_, err = ReviewPublicPoolContribution(contribution.Id, 99, PublicPoolContributionStatusRejected, "Try again")
+	require.NoError(t, err)
+
+	secondReward, err := EncodeRewardSnapshot(RewardSnapshot{Type: RewardTypeQuota, Quota: 200})
+	require.NoError(t, err)
+	site.RewardSnapshotJSON = secondReward
+	require.NoError(t, UpdatePublicPoolSite(site))
+	resubmitted := &PublicPoolContribution{UserId: 15, SiteId: site.Id, Description: "Registered", Proof: "Updated proof"}
+	require.NoError(t, CreatePublicPoolContribution(resubmitted))
+
+	assert.Equal(t, contribution.Id, resubmitted.Id)
+	snapshot, err := DecodeRewardSnapshot(resubmitted.RewardSnapshotJSON)
+	require.NoError(t, err)
+	assert.Equal(t, 200, snapshot.Quota)
+}
+
+func TestPublicPoolContributionCannotResubmitWhenAnOlderActiveRecordExists(t *testing.T) {
+	setupPublicPoolFixture(t)
+	site := &PublicPoolSite{Name: "Example", URL: "https://example.com", Status: PublicPoolSiteStatusEnabled}
+	require.NoError(t, CreatePublicPoolSite(site))
+	require.NoError(t, DB.Create(&PublicPoolContribution{
+		UserId: 41, SiteId: site.Id, Description: "Approved", Proof: "Proof",
+		Status: PublicPoolContributionStatusApproved, CreatedAt: 100, UpdatedAt: 100,
+	}).Error)
+	require.NoError(t, DB.Create(&PublicPoolContribution{
+		UserId: 41, SiteId: site.Id, Description: "Rejected", Proof: "Proof",
+		Status: PublicPoolContributionStatusRejected, CreatedAt: 200, UpdatedAt: 200,
+	}).Error)
+
+	err := CreatePublicPoolContribution(&PublicPoolContribution{
+		UserId: 41, SiteId: site.Id, Description: "Retry", Proof: "Updated proof",
+	})
+	require.ErrorContains(t, err, "already exists")
 }
 
 func TestCountAvailablePublicPoolChannelsIgnoresDisabledChannels(t *testing.T) {

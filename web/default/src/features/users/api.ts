@@ -28,6 +28,7 @@ import type {
   ManageUserAction,
   ManageUserQuotaPayload,
   ApiResponse,
+  UserPreviewResponse,
 } from './types'
 
 // ============================================================================
@@ -75,6 +76,13 @@ export async function searchUsers(
  */
 export async function getUser(id: number): Promise<ApiResponse<User>> {
   const res = await api.get(`/api/user/${id}`)
+  return res.data
+}
+
+export async function createUserPreview(
+  id: number
+): Promise<ApiResponse<UserPreviewResponse>> {
+  const res = await api.post(`/api/user/${id}/preview`)
   return res.data
 }
 

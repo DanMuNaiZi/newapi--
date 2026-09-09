@@ -3,14 +3,17 @@ package controller
 import (
 	"errors"
 	"math"
+	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
+	"gorm.io/gorm"
 )
 
 type lotteryRewardUnit string
@@ -90,32 +93,102 @@ func GetLotteryPlansForSelf(c *gin.Context) {
 	common.ApiSuccess(c, plans)
 }
 
+func GetLotteryPlanForSelf(c *gin.Context) {
+	planId, err := lotteryPathID(c)
+	if err != nil {
+		lotteryUserAPIError(c, http.StatusBadRequest, err)
+		return
+	}
+	plan, err := model.GetLotteryPlanForUser(planId, c.GetInt("id"))
+	if err != nil {
+		lotteryUserAPIError(c, 0, err)
+		return
+	}
+	common.ApiSuccess(c, plan)
+}
+
 func GetLotteryParticipantsForSelf(c *gin.Context) {
 	planId, err := lotteryPathID(c)
 	if err != nil {
-		common.ApiError(c, err)
+		lotteryUserAPIError(c, http.StatusBadRequest, err)
 		return
 	}
 	participants, err := model.ListLotteryParticipantsForUser(planId, c.GetInt("id"))
 	if err != nil {
-		common.ApiError(c, err)
+		lotteryUserAPIError(c, 0, err)
 		return
 	}
 	common.ApiSuccess(c, participants)
 }
 
+func GetLotteryParticipantsPageForSelf(c *gin.Context) {
+	planId, err := lotteryPathID(c)
+	if err != nil {
+		lotteryUserAPIError(c, http.StatusBadRequest, err)
+		return
+	}
+	limit, err := lotterySelfHistoryLimit(c)
+	if err != nil {
+		lotteryUserAPIError(c, http.StatusBadRequest, err)
+		return
+	}
+	beforeCreatedAt, beforeId, err := lotteryHistoryCursor(c)
+	if err != nil {
+		lotteryUserAPIError(c, http.StatusBadRequest, err)
+		return
+	}
+	page, err := model.ListLotteryParticipantsForUserPage(planId, c.GetInt("id"), limit, beforeCreatedAt, beforeId)
+	if err != nil {
+		lotteryUserAPIError(c, 0, err)
+		return
+	}
+	if page.HasMore && len(page.Items) > 0 {
+		lastItem := page.Items[len(page.Items)-1]
+		page.NextCursor = lotteryHistoryNextCursor(lastItem.JoinedAt, lastItem.Id)
+	}
+	common.ApiSuccess(c, page)
+}
+
 func GetLotteryPlanResultsForSelf(c *gin.Context) {
 	planId, err := lotteryPathID(c)
 	if err != nil {
-		common.ApiError(c, err)
+		lotteryUserAPIError(c, http.StatusBadRequest, err)
 		return
 	}
 	results, err := model.ListLotteryResultsForUserPlan(planId, c.GetInt("id"))
 	if err != nil {
-		common.ApiError(c, err)
+		lotteryUserAPIError(c, 0, err)
 		return
 	}
 	common.ApiSuccess(c, results)
+}
+
+func GetLotteryPlanResultsPageForSelf(c *gin.Context) {
+	planId, err := lotteryPathID(c)
+	if err != nil {
+		lotteryUserAPIError(c, http.StatusBadRequest, err)
+		return
+	}
+	limit, err := lotterySelfHistoryLimit(c)
+	if err != nil {
+		lotteryUserAPIError(c, http.StatusBadRequest, err)
+		return
+	}
+	beforeCreatedAt, beforeId, err := lotteryHistoryCursor(c)
+	if err != nil {
+		lotteryUserAPIError(c, http.StatusBadRequest, err)
+		return
+	}
+	page, err := model.ListLotteryResultsForUserPlanPage(planId, c.GetInt("id"), limit, beforeCreatedAt, beforeId)
+	if err != nil {
+		lotteryUserAPIError(c, 0, err)
+		return
+	}
+	if page.HasMore && len(page.Items) > 0 {
+		lastItem := page.Items[len(page.Items)-1]
+		page.NextCursor = lotteryHistoryNextCursor(lastItem.CreatedAt, lastItem.Id)
+	}
+	common.ApiSuccess(c, page)
 }
 
 func JoinLotteryPlanForSelf(c *gin.Context) {
@@ -163,6 +236,7 @@ func GetLotteryResultsForSelf(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	redactLotteryPreviewCodes(c, results)
 	common.ApiSuccess(c, results)
 }
 
@@ -186,6 +260,7 @@ func GetLotteryResultsPageForSelf(c *gin.Context) {
 		lastItem := page.Items[len(page.Items)-1]
 		page.NextCursor = lotteryHistoryNextCursor(lastItem.CreatedAt, lastItem.Id)
 	}
+	redactLotteryPreviewCodes(c, page.Items)
 	common.ApiSuccess(c, page)
 }
 
@@ -195,7 +270,17 @@ func GetClaimableLotteryResultsForSelf(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	redactLotteryPreviewCodes(c, results)
 	common.ApiSuccess(c, results)
+}
+
+func redactLotteryPreviewCodes(c *gin.Context, results []model.LotterySelfResultView) {
+	if !c.GetBool("preview_mode") {
+		return
+	}
+	for index := range results {
+		results[index].RedemptionCode = ""
+	}
 }
 
 func GetLotteryNotificationsForSelf(c *gin.Context) {
@@ -587,4 +672,27 @@ func lotteryHistoryCursor(c *gin.Context) (int64, int, error) {
 
 func lotteryHistoryNextCursor(createdAt int64, id int) string {
 	return strconv.FormatInt(createdAt, 10) + ":" + strconv.Itoa(id)
+}
+
+func lotteryUserAPIError(c *gin.Context, status int, err error) {
+	if status == 0 {
+		switch {
+		case errors.Is(err, model.ErrLotteryPlanForbidden):
+			status = http.StatusForbidden
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			status = http.StatusNotFound
+		default:
+			status = http.StatusInternalServerError
+		}
+	}
+	message := err.Error()
+	if status == http.StatusInternalServerError {
+		logger.LogError(c, "lottery user API error: "+err.Error())
+		message = "internal server error"
+	}
+	c.JSON(status, gin.H{
+		"success":    false,
+		"message":    message,
+		"request_id": c.GetString(common.RequestIdKey),
+	})
 }
