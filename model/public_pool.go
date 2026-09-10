@@ -39,6 +39,7 @@ type PublicPoolSite struct {
 	SortOrder          int                  `json:"sort_order" gorm:"type:int;index"`
 	RewardSnapshotJSON string               `json:"-" gorm:"column:reward_snapshot;type:text"`
 	Reward             *RewardSnapshot      `json:"reward,omitempty" gorm:"-"`
+	PreserveReward     bool                 `json:"-" gorm:"-"`
 	CreatedAt          int64                `json:"created_at" gorm:"type:bigint"`
 	UpdatedAt          int64                `json:"updated_at" gorm:"type:bigint"`
 }
@@ -117,16 +118,31 @@ func UpdatePublicPoolSite(site *PublicPoolSite) error {
 	if err := normalizePublicPoolSite(site); err != nil {
 		return err
 	}
-	updates := map[string]interface{}{
-		"name":            site.Name,
-		"url":             site.URL,
-		"description":     site.Description,
-		"status":          site.Status,
-		"sort_order":      site.SortOrder,
-		"reward_snapshot": site.RewardSnapshotJSON,
-		"updated_at":      common.GetTimestamp(),
-	}
-	if err := DB.Model(&PublicPoolSite{}).Where("id = ?", site.Id).Updates(updates).Error; err != nil {
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var current PublicPoolSite
+		if err := lockForUpdate(tx).First(&current, site.Id).Error; err != nil {
+			return err
+		}
+		if site.PreserveReward {
+			if strings.TrimSpace(current.RewardSnapshotJSON) != "" {
+				if _, err := DecodeRewardSnapshot(current.RewardSnapshotJSON); err != nil {
+					return err
+				}
+			}
+			site.RewardSnapshotJSON = current.RewardSnapshotJSON
+		}
+		updates := map[string]interface{}{
+			"name":            site.Name,
+			"url":             site.URL,
+			"description":     site.Description,
+			"status":          site.Status,
+			"sort_order":      site.SortOrder,
+			"reward_snapshot": site.RewardSnapshotJSON,
+			"updated_at":      common.GetTimestamp(),
+		}
+		return tx.Model(&current).Updates(updates).Error
+	})
+	if err != nil {
 		return err
 	}
 	hydratePublicPoolSiteReward(site)

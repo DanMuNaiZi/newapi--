@@ -22,7 +22,6 @@ import { describe, test } from 'node:test'
 import {
   buildLotteryPlanPayload,
   createLotteryFormDefaults,
-  getLotteryRewardEquivalent,
   lotteryAdminFormSchema,
   type LotteryAdminFormValues,
 } from './admin-form'
@@ -42,7 +41,7 @@ const BASE_FORM: LotteryAdminFormValues = {
       name: 'Quota prize',
       quantity: 2,
       reward_type: 'quota',
-      reward_amount: 10,
+      reward_amount: '10.5000',
       reward_unit: 'usd',
       subscription_plan_id: 9,
       fulfillment_mode: 'self_claim',
@@ -76,6 +75,34 @@ describe('buildLotteryPlanPayload', () => {
     )
   })
 
+  test('uses defined integer validation messages for lottery fields', () => {
+    const result = lotteryAdminFormSchema.safeParse({
+      ...BASE_FORM,
+      max_participants: 1.5,
+      prizes: [
+        {
+          ...BASE_FORM.prizes[0],
+          quantity: 1.5,
+          reward_type: 'subscription',
+          subscription_plan_id: 1.5,
+          claim_expire_days: 1.5,
+        },
+      ],
+    })
+
+    assert.equal(result.success, false)
+    if (result.success) return
+    assert.deepEqual(
+      result.error.issues.map((issue) => issue.message).sort(),
+      [
+        'Claim expiry must be an integer',
+        'Maximum participants must be an integer',
+        'Prize quantity must be an integer',
+        'Subscription plan must be an integer',
+      ].sort()
+    )
+  })
+
   test('rejects values that exceed cross-database integer columns', () => {
     const result = lotteryAdminFormSchema.safeParse({
       ...BASE_FORM,
@@ -84,7 +111,7 @@ describe('buildLotteryPlanPayload', () => {
         {
           ...BASE_FORM.prizes[0],
           quantity: 2_147_483_648,
-          reward_amount: 2_147_483_648,
+          reward_amount: '2147483648',
           reward_unit: 'quota',
         },
       ],
@@ -97,7 +124,7 @@ describe('buildLotteryPlanPayload', () => {
       [
         'Maximum participants cannot exceed 2147483647',
         'Prize quantity cannot exceed 2147483647',
-        'Quota reward cannot exceed 2147483647',
+        'Reward quota must be between 1 and 2147483647',
       ].sort()
     )
   })
@@ -147,13 +174,14 @@ describe('buildLotteryPlanPayload', () => {
   })
 
   test('normalizes quota prizes and converts claim days to seconds', () => {
+    assert.equal(lotteryAdminFormSchema.safeParse(BASE_FORM).success, true)
     const payload = buildLotteryPlanPayload(BASE_FORM)
 
     assert.deepEqual(payload.prizes[0], {
       name: 'Quota prize',
       quantity: 2,
       reward_type: 'quota',
-      reward_amount: 10,
+      reward_amount: '10.5',
       reward_unit: 'usd',
       subscription_plan_id: 0,
       fulfillment_mode: 'self_claim',
@@ -169,7 +197,7 @@ describe('buildLotteryPlanPayload', () => {
           name: 'Subscription prize',
           quantity: 1,
           reward_type: 'subscription',
-          reward_amount: 1,
+          reward_amount: '',
           reward_unit: 'usd',
           subscription_plan_id: 4,
           fulfillment_mode: 'redemption_code',
@@ -187,34 +215,46 @@ describe('buildLotteryPlanPayload', () => {
   test('defaults quota prizes to one US dollar', () => {
     const defaults = createLotteryFormDefaults(new Date('2026-07-15T08:00:00'))
 
-    assert.equal(defaults.prizes[0]?.reward_amount, 1)
+    assert.equal(defaults.prizes[0]?.reward_amount, '1')
     assert.equal(defaults.prizes[0]?.reward_unit, 'usd')
   })
 
-  test('calculates equivalent USD, CNY and raw quota values', () => {
-    assert.deepEqual(getLotteryRewardEquivalent(10, 'usd', 500_000, 7.3), {
-      usd: 10,
-      cny: 73,
-      quota: 5_000_000,
+  test('does not expose or accept the legacy CNY unit in new forms', () => {
+    const result = lotteryAdminFormSchema.safeParse({
+      ...BASE_FORM,
+      prizes: [{ ...BASE_FORM.prizes[0], reward_unit: 'cny' }],
     })
-    assert.deepEqual(getLotteryRewardEquivalent(73, 'cny', 500_000, 7.3), {
-      usd: 10,
-      cny: 73,
-      quota: 5_000_000,
-    })
-    assert.deepEqual(
-      getLotteryRewardEquivalent(5_000_000, 'quota', 500_000, 7.3),
-      {
-        usd: 10,
-        cny: 73,
-        quota: 5_000_000,
-      }
-    )
+
+    assert.equal(result.success, false)
   })
 
-  test('rejects unusable conversion settings in the preview', () => {
-    assert.equal(getLotteryRewardEquivalent(10, 'usd', 0, 7.3), null)
-    assert.equal(getLotteryRewardEquivalent(10, 'usd', 500_000, 0), null)
-    assert.equal(getLotteryRewardEquivalent(-1, 'usd', 500_000, 7.3), null)
+  test('rejects fractional raw quota but skips hidden subscription amount validation', () => {
+    const quotaResult = lotteryAdminFormSchema.safeParse({
+      ...BASE_FORM,
+      prizes: [
+        { ...BASE_FORM.prizes[0], reward_amount: '1.5', reward_unit: 'quota' },
+      ],
+    })
+    assert.equal(quotaResult.success, false)
+    if (quotaResult.success) return
+    assert.equal(
+      quotaResult.error.issues.find(
+        (issue) => issue.path.at(-1) === 'reward_amount'
+      )?.message,
+      'Raw reward quota must be an integer'
+    )
+
+    const subscriptionResult = lotteryAdminFormSchema.safeParse({
+      ...BASE_FORM,
+      prizes: [
+        {
+          ...BASE_FORM.prizes[0],
+          reward_type: 'subscription',
+          reward_amount: '',
+          subscription_plan_id: 4,
+        },
+      ],
+    })
+    assert.equal(subscriptionResult.success, true)
   })
 })

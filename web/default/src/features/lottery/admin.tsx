@@ -24,6 +24,12 @@ import { toast } from 'sonner'
 
 import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
+import {
+  ADMIN_PERMISSION_ACTIONS,
+  ADMIN_PERMISSION_RESOURCES,
+  hasPermission,
+} from '@/lib/admin-permissions'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { cancelLotteryPlan, drawLotteryPlan, getAdminLotteryPlans } from './api'
 import { LotteryPlanCreateDrawer } from './components/lottery-plan-create-drawer'
@@ -38,6 +44,12 @@ import type { LotteryPlan } from './types'
 export function LotteryAdmin() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  const currentUser = useAuthStore((state) => state.auth.user)
+  const canOperate = hasPermission(
+    currentUser,
+    ADMIN_PERMISSION_RESOURCES.LOTTERY,
+    ADMIN_PERMISSION_ACTIONS.OPERATE
+  )
   const [createOpen, setCreateOpen] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [detailsTab, setDetailsTab] = useState<LotteryDetailsTab>('overview')
@@ -137,6 +149,7 @@ export function LotteryAdmin() {
       <LotteryPlanDetailsDrawer
         open={detailsOpen}
         plan={selectedPlan}
+        canOperate={canOperate}
         initialTab={detailsTab}
         onOpenChange={setDetailsOpen}
       />

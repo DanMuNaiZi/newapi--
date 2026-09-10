@@ -37,12 +37,14 @@ import {
 } from '@/components/ui/sheet'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useAuthStore } from '@/stores/auth-store'
 
 import {
   getLotteryParticipantsPageForSelf,
   getLotteryPlanForSelf,
   getLotteryPlanResultsPageForSelf,
 } from '../api'
+import { lotteryQueryKeys } from '../lib/query-keys'
 import { getLotteryPlanStatusLabel } from '../lib/status'
 import { LotteryIcon } from './lottery-icon'
 
@@ -85,17 +87,18 @@ function QueryFailure(props: {
 export function LotteryUserDetailsDrawer(props: LotteryUserDetailsDrawerProps) {
   const { t } = useTranslation()
   const planId = props.planId ?? 0
+  const userId = useAuthStore((state) => state.auth.user?.id ?? 0)
   const [activeTab, setActiveTab] = useState<DetailsTab>('overview')
 
   const planQuery = useQuery({
-    queryKey: ['lottery', 'self', 'plan', planId],
+    queryKey: lotteryQueryKeys.userPlan(userId, planId),
     queryFn: () => getLotteryPlanForSelf(planId),
-    enabled: props.open && planId > 0,
+    enabled: props.open && planId > 0 && userId > 0,
     refetchInterval: props.open ? 30_000 : false,
     meta: { errorMode: 'local' },
   })
   const participantsQuery = useInfiniteQuery({
-    queryKey: ['lottery', 'self', 'participants', 'page', planId],
+    queryKey: lotteryQueryKeys.userParticipants(userId, planId),
     initialPageParam: '',
     queryFn: ({ pageParam }) =>
       getLotteryParticipantsPageForSelf(planId, pageParam),
@@ -103,11 +106,12 @@ export function LotteryUserDetailsDrawer(props: LotteryUserDetailsDrawerProps) {
       if (!lastPage.success || !lastPage.data.has_more) return undefined
       return lastPage.data.next_cursor
     },
-    enabled: props.open && planId > 0 && activeTab === 'participants',
+    enabled:
+      props.open && planId > 0 && userId > 0 && activeTab === 'participants',
     meta: { errorMode: 'local' },
   })
   const resultsQuery = useInfiniteQuery({
-    queryKey: ['lottery', 'self', 'plan-results', 'page', planId],
+    queryKey: lotteryQueryKeys.userResults(userId, planId),
     initialPageParam: '',
     queryFn: ({ pageParam }) =>
       getLotteryPlanResultsPageForSelf(planId, pageParam),
@@ -115,7 +119,7 @@ export function LotteryUserDetailsDrawer(props: LotteryUserDetailsDrawerProps) {
       if (!lastPage.success || !lastPage.data.has_more) return undefined
       return lastPage.data.next_cursor
     },
-    enabled: props.open && planId > 0 && activeTab === 'results',
+    enabled: props.open && planId > 0 && userId > 0 && activeTab === 'results',
     meta: { errorMode: 'local' },
   })
 

@@ -84,6 +84,39 @@ func TestGetLotteryPlansForSelfReturnsOnlyVisiblePlans(t *testing.T) {
 	assert.Equal(t, publicPlan.Id, response.Data[0].Id)
 }
 
+func TestAdminGetLotteryPlanLoadsByIDIncludingDraftPlans(t *testing.T) {
+	db := setupLotteryControllerTestDB(t)
+	plan := &model.LotteryPlan{
+		Title:           "Admin draft",
+		Status:          model.LotteryPlanStatusDraft,
+		EligibilityMode: model.LotteryEligibilityUsers,
+		MaxParticipants: 1,
+	}
+	require.NoError(t, db.Create(plan).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/lottery/admin/plans/"+fmt.Sprint(plan.Id), nil)
+	ctx.Params = gin.Params{{Key: "id", Value: fmt.Sprint(plan.Id)}}
+	AdminGetLotteryPlan(ctx)
+
+	response := struct {
+		Success bool              `json:"success"`
+		Data    model.LotteryPlan `json:"data"`
+	}{}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.True(t, response.Success)
+	assert.Equal(t, plan.Id, response.Data.Id)
+	assert.Equal(t, model.LotteryPlanStatusDraft, response.Data.Status)
+
+	missingRecorder := httptest.NewRecorder()
+	missingContext, _ := gin.CreateTestContext(missingRecorder)
+	missingContext.Request = httptest.NewRequest(http.MethodGet, "/api/lottery/admin/plans/999999", nil)
+	missingContext.Params = gin.Params{{Key: "id", Value: "999999"}}
+	AdminGetLotteryPlan(missingContext)
+	assert.Equal(t, http.StatusNotFound, missingRecorder.Code)
+}
+
 func TestUserPreviewNeverReturnsLotteryRedemptionCodes(t *testing.T) {
 	db := setupLotteryControllerTestDB(t)
 	user := &model.User{Username: "lottery-controller-preview", Password: "password", Status: common.UserStatusEnabled, Group: "vip", AffCode: "lottery-controller-preview"}

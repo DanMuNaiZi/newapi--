@@ -40,27 +40,37 @@ import { toast } from 'sonner'
 import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
+import {
+  ADMIN_PERMISSION_ACTIONS,
+  ADMIN_PERMISSION_RESOURCES,
+  hasPermission,
+} from '@/lib/admin-permissions'
 import { isUserPreviewActive } from '@/lib/user-preview'
+import { useAuthStore } from '@/stores/auth-store'
 
 import {
   claimLotteryResult,
-  getLotteryNotificationsPageForSelf,
-  getLotteryPlansForSelf,
-  getLotteryResultsPageForSelf,
   joinLotteryPlan,
   leaveLotteryPlan,
   markLotteryNotificationsRead,
 } from './api'
 import { LotteryIcon } from './components/lottery-icon'
+import { LotteryPlanDetailsDrawer } from './components/lottery-plan-details-drawer'
 import { LotteryUserDetailsDrawer } from './components/lottery-user-details-drawer'
 import { mergeLotteryPages } from './lib/pagination'
+import { lotteryQueryKeys } from './lib/query-keys'
+import {
+  lotteryNotificationsInfiniteQueryOptions,
+  lotteryPlansQueryOptions,
+  lotteryResultsInfiniteQueryOptions,
+  refreshLotteryClaimQueries,
+  resetLotteryNotificationQueries,
+} from './lib/query-options'
 import {
   getLotteryPlanStatusLabel,
   getLotteryRewardStatusLabel,
 } from './lib/status'
 import type { LotteryPlan } from './types'
-
-const LOTTERY_QUERY_KEY = ['lottery', 'self'] as const
 
 function planTime(timestamp: number): string {
   return dayjs.unix(timestamp).format('YYYY-MM-DD HH:mm')
@@ -73,32 +83,26 @@ export function Lotteries() {
   const navigate = route.useNavigate()
   const queryClient = useQueryClient()
   const readOnlyPreview = isUserPreviewActive()
-  const plansQuery = useQuery({
-    queryKey: LOTTERY_QUERY_KEY,
-    queryFn: getLotteryPlansForSelf,
-    refetchInterval: 30_000,
-  })
-  const resultsQuery = useInfiniteQuery({
-    queryKey: ['lottery', 'results', 'page'],
-    initialPageParam: '',
-    queryFn: ({ pageParam }) => getLotteryResultsPageForSelf(pageParam),
-    getNextPageParam: (lastPage) => {
-      if (!lastPage.success || !lastPage.data.has_more) return undefined
-      return lastPage.data.next_cursor
-    },
-  })
-  const notificationsQuery = useInfiniteQuery({
-    queryKey: ['lottery', 'notifications', 'page', 'unread'],
-    initialPageParam: '',
-    queryFn: ({ pageParam }) =>
-      getLotteryNotificationsPageForSelf(pageParam, 20, true),
-    getNextPageParam: (lastPage) => {
-      if (!lastPage.success || !lastPage.data.has_more) return undefined
-      return lastPage.data.next_cursor
-    },
-  })
+  const currentUser = useAuthStore((state) => state.auth.user)
+  const userId = currentUser?.id ?? 0
+  const canViewAdminDetails =
+    !readOnlyPreview &&
+    hasPermission(
+      currentUser,
+      ADMIN_PERMISSION_RESOURCES.LOTTERY,
+      ADMIN_PERMISSION_ACTIONS.READ
+    )
+  const plansQuery = useQuery(lotteryPlansQueryOptions(userId))
+  const resultsQuery = useInfiniteQuery(
+    lotteryResultsInfiniteQueryOptions(userId)
+  )
+  const notificationsQuery = useInfiniteQuery(
+    lotteryNotificationsInfiniteQueryOptions(userId)
+  )
   const invalidatePlans = async (): Promise<void> => {
-    await queryClient.invalidateQueries({ queryKey: LOTTERY_QUERY_KEY })
+    await queryClient.invalidateQueries({
+      queryKey: lotteryQueryKeys.plans(userId),
+    })
   }
   const joinMutation = useMutation({
     mutationFn: joinLotteryPlan,
@@ -131,12 +135,7 @@ export function Lotteries() {
         return
       }
       toast.success(t('Lottery reward claimed'))
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['lottery', 'results'] }),
-        queryClient.invalidateQueries({
-          queryKey: ['lottery', 'notifications'],
-        }),
-      ])
+      await refreshLotteryClaimQueries(queryClient, userId)
     },
   })
   const markNotificationsReadMutation = useMutation({
@@ -146,9 +145,7 @@ export function Lotteries() {
         toast.error(t('Request failed'))
         return
       }
-      await queryClient.resetQueries({
-        queryKey: ['lottery', 'notifications', 'page'],
-      })
+      await resetLotteryNotificationQueries(queryClient, userId)
     },
     onError: () => toast.error(t('Request failed')),
   })
@@ -188,251 +185,284 @@ export function Lotteries() {
   }
 
   return (
-    <SectionPageLayout>
-      <SectionPageLayout.Title>{t('Lotteries')}</SectionPageLayout.Title>
-      <SectionPageLayout.Content>
-        <div className='grid gap-3'>
-          {plansQuery.isLoading && (
-            <div className='text-muted-foreground flex items-center justify-center gap-2 border border-dashed p-8 text-sm'>
-              <Spinner className='size-4' />
-              {t('Loading...')}
-            </div>
-          )}
-          {plansFailed && (
-            <div className='text-muted-foreground border border-dashed p-8 text-center text-sm'>
-              {t('Request failed')}
-            </div>
-          )}
-          {!plansQuery.isLoading &&
-            !plansFailed &&
-            plans.map((plan) => {
-              const isOpen = plan.status === 'open'
-              const pending = joinMutation.isPending || leaveMutation.isPending
-              return (
-                <section
-                  key={plan.id}
-                  className='bg-card flex flex-col gap-4 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between'
+    <>
+      <SectionPageLayout>
+        <SectionPageLayout.Title>{t('Lotteries')}</SectionPageLayout.Title>
+        <SectionPageLayout.Content>
+          <div className='grid gap-3'>
+            {plansQuery.isLoading && (
+              <div className='text-muted-foreground flex items-center justify-center gap-2 border border-dashed p-8 text-sm'>
+                <Spinner className='size-4' />
+                {t('Loading...')}
+              </div>
+            )}
+            {plansFailed && (
+              <div className='text-muted-foreground border border-dashed p-8 text-center text-sm'>
+                <p>{t('Request failed')}</p>
+                <Button
+                  className='mt-3'
+                  size='sm'
+                  variant='outline'
+                  onClick={() => void plansQuery.refetch()}
                 >
-                  <div className='flex min-w-0 items-start gap-3'>
-                    <LotteryIcon src={plan.icon} size='md' />
-                    <div className='min-w-0 space-y-1.5'>
-                      <div className='flex flex-wrap items-center gap-2'>
-                        <h2 className='truncate text-base font-semibold'>
-                          {plan.title}
-                        </h2>
-                        <span className='text-muted-foreground text-xs'>
-                          {getLotteryPlanStatusLabel(t, plan.status)}
-                        </span>
-                      </div>
-                      {plan.description && (
-                        <p className='text-muted-foreground line-clamp-2 text-sm'>
-                          {plan.description}
-                        </p>
-                      )}
-                      <div className='text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1 text-xs'>
-                        <span className='flex items-center gap-1.5'>
-                          <CalendarClock
-                            className='size-3.5'
-                            aria-hidden='true'
-                          />
-                          {t('Draw time')}: {planTime(plan.draw_time)}
-                        </span>
-                        <span className='flex items-center gap-1.5'>
-                          <Users className='size-3.5' aria-hidden='true' />
-                          {plan.participant_count ?? 0}/{plan.max_participants}
-                        </span>
-                        <span className='flex items-center gap-1.5'>
-                          <Trophy className='size-3.5' aria-hidden='true' />
-                          {plan.winner_count ?? 0}
-                        </span>
+                  {t('Retry')}
+                </Button>
+              </div>
+            )}
+            {!plansQuery.isLoading &&
+              !plansFailed &&
+              plans.map((plan) => {
+                const isOpen = plan.status === 'open'
+                const pending =
+                  joinMutation.isPending || leaveMutation.isPending
+                return (
+                  <section
+                    key={plan.id}
+                    className='bg-card flex flex-col gap-4 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between'
+                  >
+                    <div className='flex min-w-0 items-start gap-3'>
+                      <LotteryIcon src={plan.icon} size='md' />
+                      <div className='min-w-0 space-y-1.5'>
+                        <div className='flex flex-wrap items-center gap-2'>
+                          <h2 className='truncate text-base font-semibold'>
+                            {plan.title}
+                          </h2>
+                          <span className='text-muted-foreground text-xs'>
+                            {getLotteryPlanStatusLabel(t, plan.status)}
+                          </span>
+                        </div>
+                        {plan.description && (
+                          <p className='text-muted-foreground line-clamp-2 text-sm'>
+                            {plan.description}
+                          </p>
+                        )}
+                        <div className='text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1 text-xs'>
+                          <span className='flex items-center gap-1.5'>
+                            <CalendarClock
+                              className='size-3.5'
+                              aria-hidden='true'
+                            />
+                            {t('Draw time')}: {planTime(plan.draw_time)}
+                          </span>
+                          <span className='flex items-center gap-1.5'>
+                            <Users className='size-3.5' aria-hidden='true' />
+                            {plan.participant_count ?? 0}/
+                            {plan.max_participants}
+                          </span>
+                          <span className='flex items-center gap-1.5'>
+                            <Trophy className='size-3.5' aria-hidden='true' />
+                            {plan.winner_count ?? 0}
+                          </span>
+                        </div>
                       </div>
                     </div>
+                    <div className='flex shrink-0 flex-wrap gap-2'>
+                      <Button
+                        size='sm'
+                        variant='outline'
+                        onClick={() => selectPlan(plan)}
+                      >
+                        <Eye data-icon='inline-start' />
+                        {t('View details')}
+                      </Button>
+                      {isOpen &&
+                        !readOnlyPreview &&
+                        (plan.joined ? (
+                          <Button
+                            size='sm'
+                            variant='outline'
+                            disabled={pending}
+                            onClick={() => handleLeave(plan)}
+                          >
+                            <LogOut data-icon='inline-start' />
+                            {t('Leave lottery')}
+                          </Button>
+                        ) : (
+                          <Button
+                            size='sm'
+                            disabled={pending}
+                            onClick={() => handleJoin(plan)}
+                          >
+                            <LogIn data-icon='inline-start' />
+                            {t('Join lottery')}
+                          </Button>
+                        ))}
+                    </div>
+                  </section>
+                )
+              })}
+            {!plansQuery.isLoading && !plansFailed && plans.length === 0 && (
+              <div className='text-muted-foreground border border-dashed p-8 text-center text-sm'>
+                {t('No lottery plans are available')}
+              </div>
+            )}
+
+            {notificationsQuery.isLoading && (
+              <div className='text-muted-foreground flex items-center justify-center gap-2 text-sm'>
+                <Spinner className='size-4' />
+                {t('Loading...')}
+              </div>
+            )}
+            {notificationsFailed && (
+              <div className='text-muted-foreground border border-dashed p-4 text-center text-sm'>
+                {t('Request failed')}
+              </div>
+            )}
+            {!notificationsFailed && notifications.length > 0 && (
+              <section className='bg-card rounded-lg border p-4'>
+                <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
+                  <div className='flex items-center gap-2 text-sm font-semibold'>
+                    <Bell className='size-4' aria-hidden='true' />
+                    {t('Lottery notifications')}
+                    <span className='text-muted-foreground text-xs font-normal'>
+                      {t('{{count}} lottery result notifications', {
+                        count: unreadTotal,
+                      })}
+                    </span>
                   </div>
-                  <div className='flex shrink-0 flex-wrap gap-2'>
+                  {!readOnlyPreview && (
                     <Button
                       size='sm'
                       variant='outline'
-                      onClick={() => selectPlan(plan)}
+                      disabled={markNotificationsReadMutation.isPending}
+                      onClick={() =>
+                        markNotificationsReadMutation.mutate(
+                          notifications.map((notification) => notification.id)
+                        )
+                      }
                     >
-                      <Eye data-icon='inline-start' />
-                      {t('View details')}
+                      {t('Mark displayed as read')}
                     </Button>
-                    {isOpen &&
-                      !readOnlyPreview &&
-                      (plan.joined ? (
-                        <Button
-                          size='sm'
-                          variant='outline'
-                          disabled={pending}
-                          onClick={() => handleLeave(plan)}
-                        >
-                          <LogOut data-icon='inline-start' />
-                          {t('Leave lottery')}
-                        </Button>
-                      ) : (
-                        <Button
-                          size='sm'
-                          disabled={pending}
-                          onClick={() => handleJoin(plan)}
-                        >
-                          <LogIn data-icon='inline-start' />
-                          {t('Join lottery')}
-                        </Button>
-                      ))}
-                  </div>
-                </section>
-              )
-            })}
-          {!plansQuery.isLoading && !plansFailed && plans.length === 0 && (
-            <div className='text-muted-foreground border border-dashed p-8 text-center text-sm'>
-              {t('No lottery plans are available')}
-            </div>
-          )}
-
-          {notificationsQuery.isLoading && (
-            <div className='text-muted-foreground flex items-center justify-center gap-2 text-sm'>
-              <Spinner className='size-4' />
-              {t('Loading...')}
-            </div>
-          )}
-          {notificationsFailed && (
-            <div className='text-muted-foreground border border-dashed p-4 text-center text-sm'>
-              {t('Request failed')}
-            </div>
-          )}
-          {!notificationsFailed && notifications.length > 0 && (
-            <section className='bg-card rounded-lg border p-4'>
-              <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
-                <div className='flex items-center gap-2 text-sm font-semibold'>
-                  <Bell className='size-4' aria-hidden='true' />
-                  {t('Lottery notifications')}
-                  <span className='text-muted-foreground text-xs font-normal'>
-                    {t('{{count}} lottery result notifications', {
-                      count: unreadTotal,
-                    })}
-                  </span>
+                  )}
                 </div>
-                {!readOnlyPreview && (
+                <div className='grid gap-2'>
+                  {notifications.map((notification) => (
+                    <div
+                      key={notification.id}
+                      className='bg-muted/35 flex items-center justify-between gap-3 rounded-md px-3 py-2'
+                    >
+                      <span className='min-w-0 truncate text-sm'>
+                        {notification.type === 'lottery_result'
+                          ? t('Lottery result available')
+                          : notification.content}
+                      </span>
+                      <span className='text-muted-foreground shrink-0 text-xs'>
+                        {planTime(notification.created_at)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {notificationsQuery.hasNextPage && (
                   <Button
                     size='sm'
                     variant='outline'
-                    disabled={markNotificationsReadMutation.isPending}
-                    onClick={() =>
-                      markNotificationsReadMutation.mutate(
-                        notifications.map((notification) => notification.id)
-                      )
-                    }
+                    className='mt-3 w-full'
+                    disabled={notificationsQuery.isFetchingNextPage}
+                    onClick={() => notificationsQuery.fetchNextPage()}
                   >
-                    {t('Mark displayed as read')}
+                    {t('Load more')}
                   </Button>
-                )}
-              </div>
-              <div className='grid gap-2'>
-                {notifications.map((notification) => (
-                  <div
-                    key={notification.id}
-                    className='bg-muted/35 flex items-center justify-between gap-3 rounded-md px-3 py-2'
-                  >
-                    <span className='min-w-0 truncate text-sm'>
-                      {notification.type === 'lottery_result'
-                        ? t('Lottery result available')
-                        : notification.content}
-                    </span>
-                    <span className='text-muted-foreground shrink-0 text-xs'>
-                      {planTime(notification.created_at)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              {notificationsQuery.hasNextPage && (
-                <Button
-                  size='sm'
-                  variant='outline'
-                  className='mt-3 w-full'
-                  disabled={notificationsQuery.isFetchingNextPage}
-                  onClick={() => notificationsQuery.fetchNextPage()}
-                >
-                  {t('Load more')}
-                </Button>
-              )}
-            </section>
-          )}
-
-          {resultsQuery.isLoading && (
-            <div className='text-muted-foreground flex items-center justify-center gap-2 text-sm'>
-              <Spinner className='size-4' />
-              {t('Loading...')}
-            </div>
-          )}
-          {resultsFailed && (
-            <div className='text-muted-foreground border border-dashed p-4 text-center text-sm'>
-              {t('Request failed')}
-            </div>
-          )}
-          {!resultsQuery.isLoading &&
-            !resultsFailed &&
-            results.length === 0 && (
-              <div className='text-muted-foreground border border-dashed p-8 text-center text-sm'>
-                {t('No lottery results yet')}
-              </div>
-            )}
-          {!resultsFailed &&
-            results.map((result) => (
-              <section
-                key={result.id}
-                className='bg-card flex items-center justify-between gap-3 rounded-lg border p-4'
-              >
-                <span className='flex min-w-0 items-center gap-2 text-sm'>
-                  <Gift className='size-4 shrink-0' aria-hidden='true' />
-                  <span className='truncate'>
-                    {t('Lottery reward')} #{result.id}
-                  </span>
-                </span>
-                {result.claimable && !readOnlyPreview ? (
-                  <Button
-                    size='sm'
-                    disabled={claimMutation.isPending}
-                    onClick={() => claimMutation.mutate(result.id)}
-                  >
-                    {t('Claim lottery reward')}
-                  </Button>
-                ) : (
-                  <span className='text-muted-foreground max-w-52 truncate font-mono text-xs'>
-                    {result.redemption_code ||
-                      (result.claim_status === 'expired'
-                        ? t('Claim expired')
-                        : getLotteryRewardStatusLabel(
-                            t,
-                            result.fulfillment_status
-                          ))}
-                  </span>
                 )}
               </section>
-            ))}
-          {!resultsFailed && resultsQuery.hasNextPage && (
-            <Button
-              size='sm'
-              variant='outline'
-              className='w-full'
-              disabled={resultsQuery.isFetchingNextPage}
-              onClick={() => resultsQuery.fetchNextPage()}
-            >
-              {t('Load more')}
-            </Button>
+            )}
+
+            {resultsQuery.isLoading && (
+              <div className='text-muted-foreground flex items-center justify-center gap-2 text-sm'>
+                <Spinner className='size-4' />
+                {t('Loading...')}
+              </div>
+            )}
+            {resultsFailed && (
+              <div className='text-muted-foreground border border-dashed p-4 text-center text-sm'>
+                {t('Request failed')}
+              </div>
+            )}
+            {!resultsQuery.isLoading &&
+              !resultsFailed &&
+              results.length === 0 && (
+                <div className='text-muted-foreground border border-dashed p-8 text-center text-sm'>
+                  {t('No lottery results yet')}
+                </div>
+              )}
+            {!resultsFailed &&
+              results.map((result) => (
+                <section
+                  key={result.id}
+                  className='bg-card flex items-center justify-between gap-3 rounded-lg border p-4'
+                >
+                  <span className='flex min-w-0 items-center gap-2 text-sm'>
+                    <Gift className='size-4 shrink-0' aria-hidden='true' />
+                    <span className='truncate'>
+                      {t('Lottery reward')} #{result.id}
+                    </span>
+                  </span>
+                  {result.claimable && !readOnlyPreview ? (
+                    <Button
+                      size='sm'
+                      disabled={claimMutation.isPending}
+                      onClick={() => claimMutation.mutate(result.id)}
+                    >
+                      {t('Claim lottery reward')}
+                    </Button>
+                  ) : (
+                    <span className='text-muted-foreground max-w-52 truncate font-mono text-xs'>
+                      {result.redemption_code ||
+                        (result.claim_status === 'expired'
+                          ? t('Claim expired')
+                          : getLotteryRewardStatusLabel(
+                              t,
+                              result.fulfillment_status
+                            ))}
+                    </span>
+                  )}
+                </section>
+              ))}
+            {!resultsFailed && resultsQuery.hasNextPage && (
+              <Button
+                size='sm'
+                variant='outline'
+                className='w-full'
+                disabled={resultsQuery.isFetchingNextPage}
+                onClick={() => resultsQuery.fetchNextPage()}
+              >
+                {t('Load more')}
+              </Button>
+            )}
+          </div>
+        </SectionPageLayout.Content>
+      </SectionPageLayout>
+      {canViewAdminDetails ? (
+        <LotteryPlanDetailsDrawer
+          open={search.plan != null}
+          planId={search.plan ?? null}
+          plan={plans.find((item) => item.id === search.plan) ?? null}
+          canOperate={hasPermission(
+            currentUser,
+            ADMIN_PERMISSION_RESOURCES.LOTTERY,
+            ADMIN_PERMISSION_ACTIONS.OPERATE
           )}
-        </div>
-      </SectionPageLayout.Content>
-      <LotteryUserDetailsDrawer
-        open={search.plan != null}
-        planId={search.plan ?? null}
-        onOpenChange={(open) => {
-          if (!open) {
-            void navigate({
-              search: (previous) => ({ ...previous, plan: undefined }),
-            })
-          }
-        }}
-      />
-    </SectionPageLayout>
+          initialTab='overview'
+          onOpenChange={(open) => {
+            if (!open) {
+              void navigate({
+                search: (previous) => ({ ...previous, plan: undefined }),
+              })
+            }
+          }}
+        />
+      ) : (
+        <LotteryUserDetailsDrawer
+          open={search.plan != null}
+          planId={search.plan ?? null}
+          onOpenChange={(open) => {
+            if (!open) {
+              void navigate({
+                search: (previous) => ({ ...previous, plan: undefined }),
+              })
+            }
+          }}
+        />
+      )}
+    </>
   )
 }

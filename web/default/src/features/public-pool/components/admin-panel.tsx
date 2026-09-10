@@ -33,6 +33,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { RewardAmountField } from '@/components/reward-amount-field'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -44,6 +45,7 @@ import {
 } from '@/components/ui/card'
 import {
   Field,
+  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
@@ -54,13 +56,19 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { useRewardQuotaConfig } from '@/hooks/use-reward-quota-config'
 import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
   hasPermission,
 } from '@/lib/admin-permissions'
 import dayjs from '@/lib/dayjs'
-import { formatQuota } from '@/lib/format'
+import {
+  formatPlatformQuota,
+  getRewardEquivalent,
+  getRewardConversionError,
+  isRewardUnchanged,
+} from '@/lib/reward-amount'
 import { useAuthStore } from '@/stores/auth-store'
 
 import {
@@ -76,6 +84,7 @@ import {
 } from '../api'
 import {
   publicPoolSiteSchema,
+  publicPoolSiteToForm,
   toPublicPoolSitePayload,
   type PublicPoolSiteFormValues,
 } from '../lib/admin-form'
@@ -135,6 +144,26 @@ export function PublicPoolAdminPanel() {
     defaultValues: EMPTY_SITE,
   })
   const rewardType = form.watch('reward_type')
+  const rewardUnit = form.watch('reward_unit')
+  const rewardAmount = form.watch('reward_amount')
+  const subscriptionPlanId = form.watch('subscription_plan_id')
+  const quotaConfig = useRewardQuotaConfig(canWrite && rewardType === 'quota')
+  const preserveReward = Boolean(
+    editingSite &&
+    isRewardUnchanged(
+      {
+        reward_type: rewardType,
+        reward_amount: rewardAmount,
+        reward_unit: rewardUnit,
+        subscription_plan_id: subscriptionPlanId,
+      },
+      editingSite.reward
+    )
+  )
+  const preservedQuota =
+    preserveReward && rewardType === 'quota'
+      ? editingSite?.reward?.quota
+      : undefined
 
   const sitesQuery = useQuery({
     queryKey: ['public-pool', 'admin', 'sites'],
@@ -182,7 +211,7 @@ export function PublicPoolAdminPanel() {
   }
   const saveSiteMutation = useMutation({
     mutationFn: async (values: PublicPoolSiteFormValues) => {
-      const payload = toPublicPoolSitePayload(values)
+      const payload = toPublicPoolSitePayload(values, editingSite)
       return editingSite
         ? updateAdminPublicPoolSite(editingSite.id, payload)
         : createAdminPublicPoolSite(payload)
@@ -293,17 +322,34 @@ export function PublicPoolAdminPanel() {
 
   const editSite = (site: PublicPoolSite) => {
     setEditingSite(site)
-    form.reset({
-      name: site.name,
-      url: site.url,
-      description: site.description,
-      status: site.status,
-      sort_order: site.sort_order,
-      reward_type: site.reward?.type ?? 'none',
-      reward_amount: site.reward?.amount ?? '1',
-      reward_unit: site.reward?.unit ?? 'usd',
-      subscription_plan_id: site.reward?.subscription_plan_id ?? 0,
-    })
+    form.reset(publicPoolSiteToForm(site))
+  }
+
+  const submitSite = (values: PublicPoolSiteFormValues) => {
+    if (
+      values.reward_type === 'quota' &&
+      !(editingSite && isRewardUnchanged(values, editingSite.reward))
+    ) {
+      const error = quotaConfig.isError
+        ? quotaConfig.error.message
+        : getRewardConversionError(
+            values.reward_amount,
+            values.reward_unit,
+            quotaConfig.data
+          )
+      if (error || quotaConfig.isFetching) {
+        form.setError(
+          'reward_amount',
+          {
+            type: 'validate',
+            message: error || 'Loading reward configuration',
+          },
+          { shouldFocus: true }
+        )
+        return
+      }
+    }
+    saveSiteMutation.mutate(values)
   }
 
   const rewardLabel = (site: PublicPoolSite) => {
@@ -311,7 +357,21 @@ export function PublicPoolAdminPanel() {
     if (site.reward.type === 'subscription') {
       return site.reward.subscription_plan_title || t('Subscription reward')
     }
-    return `${site.reward.amount ?? site.reward.quota ?? 0} ${(site.reward.unit ?? 'quota').toUpperCase()} (${formatQuota(site.reward.quota ?? 0)})`
+    const quota = Number(site.reward.quota ?? 0)
+    const siteQuotaPerUnit = Number(site.reward.quota_per_unit)
+    const equivalent =
+      site.reward.unit === 'usd' || site.reward.unit === 'quota'
+        ? getRewardEquivalent(String(quota), 'quota', siteQuotaPerUnit)
+        : null
+    if (equivalent) {
+      return t('${{usd}} · {{quota}} platform quota', {
+        usd: equivalent.usd,
+        quota: formatPlatformQuota(equivalent.quota),
+      })
+    }
+    return t('{{quota}} platform quota', {
+      quota: formatPlatformQuota(Number.isFinite(quota) ? quota : null),
+    })
   }
 
   let siteSubmitIcon = <Plus data-icon='inline-start' />
@@ -394,11 +454,7 @@ export function PublicPoolAdminPanel() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <form
-                  onSubmit={form.handleSubmit((values) =>
-                    saveSiteMutation.mutate(values)
-                  )}
-                >
+                <form onSubmit={form.handleSubmit(submitSite)}>
                   <FieldGroup>
                     <Field data-invalid={Boolean(form.formState.errors.name)}>
                       <FieldLabel htmlFor='public-pool-admin-name'>
@@ -437,6 +493,11 @@ export function PublicPoolAdminPanel() {
                         id='public-pool-admin-description'
                         {...form.register('description')}
                       />
+                      <FieldError>
+                        {form.formState.errors.description?.message
+                          ? t(form.formState.errors.description.message)
+                          : null}
+                      </FieldError>
                     </Field>
                     <div className='grid gap-3 sm:grid-cols-2'>
                       <Field>
@@ -466,6 +527,11 @@ export function PublicPoolAdminPanel() {
                             valueAsNumber: true,
                           })}
                         />
+                        <FieldError>
+                          {form.formState.errors.sort_order?.message
+                            ? t(form.formState.errors.sort_order.message)
+                            : null}
+                        </FieldError>
                       </Field>
                     </div>
                     <Field>
@@ -488,46 +554,16 @@ export function PublicPoolAdminPanel() {
                       </NativeSelect>
                     </Field>
                     {rewardType === 'quota' && (
-                      <div className='grid gap-3 sm:grid-cols-2'>
-                        <Field
-                          data-invalid={Boolean(
-                            form.formState.errors.reward_amount
-                          )}
-                        >
-                          <FieldLabel htmlFor='public-pool-reward-amount'>
-                            {t('Reward amount')}
-                          </FieldLabel>
-                          <Input
-                            id='public-pool-reward-amount'
-                            inputMode='decimal'
-                            {...form.register('reward_amount')}
-                          />
-                          <FieldError>
-                            {form.formState.errors.reward_amount?.message
-                              ? t(form.formState.errors.reward_amount.message)
-                              : null}
-                          </FieldError>
-                        </Field>
-                        <Field>
-                          <FieldLabel htmlFor='public-pool-reward-unit'>
-                            {t('Reward unit')}
-                          </FieldLabel>
-                          <NativeSelect
-                            id='public-pool-reward-unit'
-                            {...form.register('reward_unit')}
-                          >
-                            <NativeSelectOption value='usd'>
-                              USD
-                            </NativeSelectOption>
-                            <NativeSelectOption value='cny'>
-                              CNY
-                            </NativeSelectOption>
-                            <NativeSelectOption value='quota'>
-                              {t('Raw quota')}
-                            </NativeSelectOption>
-                          </NativeSelect>
-                        </Field>
-                      </div>
+                      <RewardAmountField
+                        id='public-pool-reward'
+                        amount={rewardAmount}
+                        unit={rewardUnit}
+                        amountField={form.register('reward_amount')}
+                        unitField={form.register('reward_unit')}
+                        config={quotaConfig}
+                        preservedQuota={preservedQuota}
+                        error={form.formState.errors.reward_amount?.message}
+                      />
                     )}
                     {rewardType === 'subscription' && (
                       <Field
@@ -553,6 +589,32 @@ export function PublicPoolAdminPanel() {
                             </NativeSelectOption>
                           ))}
                         </NativeSelect>
+                        {plansQuery.isLoading && (
+                          <p role='status'>
+                            <Spinner />
+                            {t('Loading subscription plans')}
+                          </p>
+                        )}
+                        {(plansQuery.isError ||
+                          plansQuery.data?.success === false) && (
+                          <div role='alert'>
+                            <p>{t('Failed to load subscription plans')}</p>
+                            <Button
+                              type='button'
+                              variant='outline'
+                              onClick={() => void plansQuery.refetch()}
+                            >
+                              {t('Retry')}
+                            </Button>
+                          </div>
+                        )}
+                        {plansQuery.isSuccess &&
+                          plansQuery.data?.success &&
+                          plans.length === 0 && (
+                            <FieldDescription>
+                              {t('No subscription plans available')}
+                            </FieldDescription>
+                          )}
                         <FieldError>
                           {form.formState.errors.subscription_plan_id?.message
                             ? t(
@@ -566,7 +628,12 @@ export function PublicPoolAdminPanel() {
                     <div className='flex flex-wrap gap-2'>
                       <Button
                         type='submit'
-                        disabled={saveSiteMutation.isPending}
+                        disabled={
+                          saveSiteMutation.isPending ||
+                          (rewardType === 'quota' &&
+                            !preserveReward &&
+                            (!quotaConfig.isSuccess || quotaConfig.isFetching))
+                        }
                       >
                         {siteSubmitIcon}
                         {t(editingSite ? 'Save changes' : 'Add public site')}

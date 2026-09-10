@@ -444,16 +444,15 @@ func normalizeLotteryPrizeRequest(request lotteryPrizeRequest) (*model.LotteryPr
 	if common.QuotaPerUnit <= 0 || math.IsNaN(common.QuotaPerUnit) || math.IsInf(common.QuotaPerUnit, 0) {
 		return nil, lotteryPrizeConversionAudit{}, errors.New("invalid quota per unit configuration")
 	}
-	if operation_setting.USDExchangeRate <= 0 || math.IsNaN(operation_setting.USDExchangeRate) || math.IsInf(operation_setting.USDExchangeRate, 0) {
-		return nil, lotteryPrizeConversionAudit{}, errors.New("invalid USD exchange rate configuration")
-	}
-
 	amount := *request.RewardAmount
 	quotaDecimal := decimal.Zero
 	switch request.RewardUnit {
 	case lotteryRewardUnitUSD:
 		quotaDecimal = amount.Mul(decimal.NewFromFloat(common.QuotaPerUnit))
 	case lotteryRewardUnitCNY:
+		if operation_setting.USDExchangeRate <= 0 || math.IsNaN(operation_setting.USDExchangeRate) || math.IsInf(operation_setting.USDExchangeRate, 0) {
+			return nil, lotteryPrizeConversionAudit{}, errors.New("invalid USD exchange rate configuration")
+		}
 		quotaDecimal = amount.Div(decimal.NewFromFloat(operation_setting.USDExchangeRate)).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
 	case lotteryRewardUnitQuota:
 		if !amount.Equal(amount.Truncate(0)) {
@@ -482,6 +481,28 @@ func AdminListLotteryPlans(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, plans)
+}
+
+func AdminGetLotteryPlan(c *gin.Context) {
+	planId, err := lotteryPathID(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	plan, err := model.GetLotteryPlanForAdmin(planId)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"success":    false,
+				"message":    "lottery plan not found",
+				"request_id": c.GetString(common.RequestIdKey),
+			})
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, plan)
 }
 
 func AdminListLotteryPrizes(c *gin.Context) {

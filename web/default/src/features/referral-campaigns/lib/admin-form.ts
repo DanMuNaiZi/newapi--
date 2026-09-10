@@ -16,9 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
 import dayjs from 'dayjs'
 import { z } from 'zod'
+
+import {
+  getRewardAmountError,
+  isRewardUnchanged,
+  normalizeRewardAmount,
+  rewardSnapshotToForm,
+} from '@/lib/reward-amount'
 
 import type { ReferralCampaign, ReferralCampaignPayload } from '../types'
 
@@ -26,30 +32,56 @@ const invalidCampaignMessage = 'Please enter a valid campaign and time range'
 
 export const referralCampaignFormSchema = z
   .object({
-    title: z.string().trim().min(1, invalidCampaignMessage).max(128),
-    description: z.string().trim().max(4000),
+    title: z
+      .string()
+      .trim()
+      .min(1, 'Campaign title is required')
+      .max(128, 'Campaign title cannot exceed 128 characters'),
+    description: z
+      .string()
+      .trim()
+      .max(4000, 'Description cannot exceed 4000 characters'),
     enabled: z.boolean(),
     start: z.string().min(1, invalidCampaignMessage),
     end: z.string().min(1, invalidCampaignMessage),
     activation_hours: z
-      .number()
-      .finite()
-      .min(1 / 60, invalidCampaignMessage)
-      .max(365 * 24, invalidCampaignMessage),
+      .number({
+        error: 'Activation window must be between 1 minute and 365 days',
+      })
+      .finite('Activation window must be between 1 minute and 365 days')
+      .min(1 / 60, 'Activation window must be between 1 minute and 365 days')
+      .max(365 * 24, 'Activation window must be between 1 minute and 365 days'),
     max_rewards_per_inviter: z
-      .number()
-      .int()
-      .min(0, invalidCampaignMessage)
-      .max(2_147_483_647, invalidCampaignMessage),
+      .number({
+        error: 'Reward count must be an integer between 0 and 2147483647',
+      })
+      .int('Reward count must be an integer between 0 and 2147483647')
+      .min(0, 'Reward count must be an integer between 0 and 2147483647')
+      .max(
+        2_147_483_647,
+        'Reward count must be an integer between 0 and 2147483647'
+      ),
     total_reward_limit: z
-      .number()
-      .int()
-      .min(0, invalidCampaignMessage)
-      .max(2_147_483_647, invalidCampaignMessage),
-    reward_type: z.enum(['quota', 'subscription']),
+      .number({
+        error: 'Reward count must be an integer between 0 and 2147483647',
+      })
+      .int('Reward count must be an integer between 0 and 2147483647')
+      .min(0, 'Reward count must be an integer between 0 and 2147483647')
+      .max(
+        2_147_483_647,
+        'Reward count must be an integer between 0 and 2147483647'
+      ),
+    reward_type: z.enum(['quota', 'subscription'], {
+      error: 'Select a reward type',
+    }),
     reward_amount: z.string(),
-    reward_unit: z.enum(['usd', 'cny', 'quota']),
-    subscription_plan_id: z.number().int().min(0),
+    reward_unit: z.enum(['usd', 'quota'], {
+      error: 'Select USD or platform quota',
+    }),
+    subscription_plan_id: z
+      .number({ error: 'Please select a subscription plan' })
+      .int('Please select a subscription plan')
+      .min(0, 'Please select a subscription plan'),
   })
   .superRefine((values, context) => {
     const startTime = dayjs(values.start)
@@ -77,20 +109,15 @@ export const referralCampaignFormSchema = z
       return
     }
 
-    const amount = values.reward_amount.trim()
-    if (!/^\d+(?:\.\d+)?$/.test(amount) || Number(amount) <= 0) {
+    const amountError = getRewardAmountError(
+      values.reward_amount,
+      values.reward_unit
+    )
+    if (amountError) {
       context.addIssue({
         code: 'custom',
         path: ['reward_amount'],
-        message: invalidCampaignMessage,
-      })
-      return
-    }
-    if (values.reward_unit === 'quota' && !/^\d+$/.test(amount)) {
-      context.addIssue({
-        code: 'custom',
-        path: ['reward_amount'],
-        message: invalidCampaignMessage,
+        message: amountError,
       })
     }
   })
@@ -119,6 +146,7 @@ export function emptyReferralCampaignForm(): ReferralCampaignFormValues {
 export function referralCampaignToForm(
   campaign: ReferralCampaign
 ): ReferralCampaignFormValues {
+  const reward = rewardSnapshotToForm(campaign.reward)
   return {
     title: campaign.title,
     description: campaign.description,
@@ -128,15 +156,14 @@ export function referralCampaignToForm(
     activation_hours: campaign.activation_window_seconds / 3600,
     max_rewards_per_inviter: campaign.max_rewards_per_inviter,
     total_reward_limit: campaign.total_reward_limit,
-    reward_type: campaign.reward?.type ?? 'quota',
-    reward_amount: campaign.reward?.amount ?? '1',
-    reward_unit: campaign.reward?.unit ?? 'usd',
-    subscription_plan_id: campaign.reward?.subscription_plan_id ?? 0,
+    ...reward,
+    reward_type: reward.reward_type === 'none' ? 'quota' : reward.reward_type,
   }
 }
 
 export function buildReferralCampaignPayload(
-  values: ReferralCampaignFormValues
+  values: ReferralCampaignFormValues,
+  campaign?: ReferralCampaign | null
 ): ReferralCampaignPayload {
   const form = referralCampaignFormSchema.parse(values)
   return {
@@ -148,9 +175,15 @@ export function buildReferralCampaignPayload(
     activation_window_seconds: Math.round(form.activation_hours * 3600),
     max_rewards_per_inviter: form.max_rewards_per_inviter,
     total_reward_limit: form.total_reward_limit,
+    ...(campaign
+      ? { preserve_reward: isRewardUnchanged(form, campaign.reward) }
+      : {}),
     reward: {
       type: form.reward_type,
-      amount: form.reward_type === 'quota' ? form.reward_amount.trim() : '',
+      amount:
+        form.reward_type === 'quota'
+          ? normalizeRewardAmount(form.reward_amount)
+          : '',
       unit: form.reward_type === 'quota' ? form.reward_unit : 'quota',
       subscription_plan_id:
         form.reward_type === 'subscription' ? form.subscription_plan_id : 0,

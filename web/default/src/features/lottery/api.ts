@@ -188,6 +188,16 @@ export async function getAdminLotteryPlans(): Promise<
   return response.data
 }
 
+export async function getAdminLotteryPlan(
+  planId: number
+): Promise<ApiResponse<LotteryPlan>> {
+  const response = await api.get(`/api/lottery/admin/plans/${planId}`, {
+    skipBusinessError: true,
+    skipErrorHandler: true,
+  })
+  return response.data
+}
+
 export async function getLotteryAdminGroups(): Promise<ApiResponse<string[]>> {
   const result = await getGroups()
   return {

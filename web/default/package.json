@@ -44,6 +44,7 @@
     "clsx": "catalog:",
     "cmdk": "^1.1.1",
     "dayjs": "catalog:",
+    "decimal.js-light": "2.5.1",
     "dompurify": "3.4.15",
     "i18next": "^26.3.4",
     "i18next-browser-languagedetector": "^8.2.1",

@@ -53,15 +53,15 @@ func normalizeQuotaReward(spec dto.RewardSpec) (model.RewardSnapshot, error) {
 	if common.QuotaPerUnit <= 0 || math.IsNaN(common.QuotaPerUnit) || math.IsInf(common.QuotaPerUnit, 0) {
 		return model.RewardSnapshot{}, errors.New("invalid quota per unit configuration")
 	}
-	if operation_setting.USDExchangeRate <= 0 || math.IsNaN(operation_setting.USDExchangeRate) || math.IsInf(operation_setting.USDExchangeRate, 0) {
-		return model.RewardSnapshot{}, errors.New("invalid USD exchange rate configuration")
-	}
 	unit := strings.TrimSpace(spec.Unit)
 	quotaDecimal := decimal.Zero
 	switch unit {
 	case "usd":
 		quotaDecimal = amount.Mul(decimal.NewFromFloat(common.QuotaPerUnit))
 	case "cny":
+		if operation_setting.USDExchangeRate <= 0 || math.IsNaN(operation_setting.USDExchangeRate) || math.IsInf(operation_setting.USDExchangeRate, 0) {
+			return model.RewardSnapshot{}, errors.New("invalid USD exchange rate configuration")
+		}
 		quotaDecimal = amount.Div(decimal.NewFromFloat(operation_setting.USDExchangeRate)).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
 	case "quota":
 		if !amount.Equal(amount.Truncate(0)) {

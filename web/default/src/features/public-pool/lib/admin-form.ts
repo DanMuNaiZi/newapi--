@@ -16,8 +16,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
 import { z } from 'zod'
+
+import {
+  getRewardAmountError,
+  isRewardUnchanged,
+  normalizeRewardAmount,
+  rewardSnapshotToForm,
+} from '@/lib/reward-amount'
+
+import type { PublicPoolSite, PublicPoolSitePayload } from '../types'
 
 function isCredentialFreeHttpUrl(value: string): boolean {
   try {
@@ -35,41 +43,49 @@ function isCredentialFreeHttpUrl(value: string): boolean {
 
 export const publicPoolSiteSchema = z
   .object({
-    name: z.string().trim().min(1, 'Site name is required').max(128),
+    name: z
+      .string()
+      .trim()
+      .min(1, 'Site name is required')
+      .max(128, 'Site name cannot exceed 128 characters'),
     url: z
       .string()
       .trim()
-      .max(1024)
+      .max(1024, 'URL cannot exceed 1024 characters')
       .refine(
         isCredentialFreeHttpUrl,
         'Enter an HTTP or HTTPS URL without credentials'
       ),
     description: z.string().trim().max(4000, 'Description is too long'),
-    status: z.enum(['enabled', 'disabled']),
+    status: z.enum(['enabled', 'disabled'], { error: 'Select a site status' }),
     sort_order: z
-      .number()
-      .int()
+      .number({ error: 'Sort order must be an integer' })
+      .int('Sort order must be an integer')
       .min(-2147483648, 'Sort order is outside the supported range')
       .max(2147483647, 'Sort order is outside the supported range'),
-    reward_type: z.enum(['none', 'quota', 'subscription']),
+    reward_type: z.enum(['none', 'quota', 'subscription'], {
+      error: 'Select a reward type',
+    }),
     reward_amount: z.string().trim(),
-    reward_unit: z.enum(['usd', 'cny', 'quota']),
-    subscription_plan_id: z.number().int().min(0),
+    reward_unit: z.enum(['usd', 'quota'], {
+      error: 'Select USD or platform quota',
+    }),
+    subscription_plan_id: z
+      .number({ error: 'Please select a subscription plan' })
+      .int('Please select a subscription plan')
+      .min(0, 'Please select a subscription plan'),
   })
   .superRefine((value, context) => {
     if (value.reward_type === 'quota') {
-      const amount = value.reward_amount.trim()
-      if (!/^\d+(?:\.\d+)?$/.test(amount) || Number(amount) <= 0) {
+      const amountError = getRewardAmountError(
+        value.reward_amount,
+        value.reward_unit
+      )
+      if (amountError) {
         context.addIssue({
           code: 'custom',
           path: ['reward_amount'],
-          message: 'Reward amount must be positive',
-        })
-      } else if (value.reward_unit === 'quota' && !/^\d+$/.test(amount)) {
-        context.addIssue({
-          code: 'custom',
-          path: ['reward_amount'],
-          message: 'Raw reward quota must be an integer',
+          message: amountError,
         })
       }
     }
@@ -87,13 +103,32 @@ export const publicPoolSiteSchema = z
 
 export type PublicPoolSiteFormValues = z.infer<typeof publicPoolSiteSchema>
 
-export function toPublicPoolSitePayload(values: PublicPoolSiteFormValues) {
+export function publicPoolSiteToForm(
+  site: PublicPoolSite
+): PublicPoolSiteFormValues {
+  return {
+    name: site.name,
+    url: site.url,
+    description: site.description,
+    status: site.status,
+    sort_order: site.sort_order,
+    ...rewardSnapshotToForm(site.reward),
+  }
+}
+
+export function toPublicPoolSitePayload(
+  values: PublicPoolSiteFormValues,
+  site?: PublicPoolSite | null
+): PublicPoolSitePayload {
   const base = {
     name: values.name,
     url: values.url,
     description: values.description,
     status: values.status,
     sort_order: values.sort_order,
+    ...(site
+      ? { preserve_reward: isRewardUnchanged(values, site.reward) }
+      : {}),
   }
   if (values.reward_type === 'none') {
     return { ...base, reward: null }
@@ -113,7 +148,7 @@ export function toPublicPoolSitePayload(values: PublicPoolSiteFormValues) {
     ...base,
     reward: {
       type: 'quota' as const,
-      amount: values.reward_amount,
+      amount: normalizeRewardAmount(values.reward_amount),
       unit: values.reward_unit,
       subscription_plan_id: 0,
     },

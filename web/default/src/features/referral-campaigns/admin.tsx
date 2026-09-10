@@ -16,13 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
-import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import dayjs from 'dayjs'
-import { Check, Pencil, Plus, RefreshCw } from 'lucide-react'
+import { Pencil, Plus, RefreshCw } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -30,33 +27,22 @@ import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Textarea } from '@/components/ui/textarea'
 import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
   hasPermission,
 } from '@/lib/admin-permissions'
-import { formatQuota } from '@/lib/format'
+import { formatPlatformQuota } from '@/lib/reward-amount'
 import { useAuthStore } from '@/stores/auth-store'
 
 import {
-  createReferralCampaign,
   getAdminReferralCampaigns,
   getReferralRewardPlans,
   getReferralCampaignEvents,
   retryReferralCampaignReward,
-  updateReferralCampaign,
 } from './api'
-import {
-  buildReferralCampaignPayload,
-  emptyReferralCampaignForm,
-  referralCampaignFormSchema,
-  referralCampaignToForm,
-  type ReferralCampaignFormValues,
-} from './lib/admin-form'
+import { ReferralCampaignFormDrawer } from './components/referral-campaign-form-drawer'
 import type { ReferralCampaign } from './types'
 
 export function ReferralCampaignAdmin() {
@@ -74,11 +60,7 @@ export function ReferralCampaignAdmin() {
     ADMIN_PERMISSION_ACTIONS.OPERATE
   )
   const [editing, setEditing] = useState<ReferralCampaign | null>(null)
-  const form = useForm<ReferralCampaignFormValues>({
-    resolver: zodResolver(referralCampaignFormSchema),
-    defaultValues: emptyReferralCampaignForm(),
-  })
-  const rewardType = form.watch('reward_type')
+  const [formOpen, setFormOpen] = useState(false)
   const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(
     null
   )
@@ -111,25 +93,6 @@ export function ReferralCampaignAdmin() {
     [plansQuery.data?.data]
   )
 
-  const saveMutation = useMutation({
-    mutationFn: async (values: ReferralCampaignFormValues) => {
-      const payload = buildReferralCampaignPayload(values)
-      return editing
-        ? updateReferralCampaign(editing.id, payload)
-        : createReferralCampaign(payload)
-    },
-    onSuccess: async (response) => {
-      if (!response.success) throw new Error(response.message)
-      toast.success(t(editing ? 'Campaign updated' : 'Campaign created'))
-      setEditing(null)
-      form.reset(emptyReferralCampaignForm())
-      await queryClient.invalidateQueries({
-        queryKey: ['referral-campaigns', 'admin'],
-      })
-    },
-    onError: (error) => toast.error(error.message),
-  })
-
   const retryMutation = useMutation({
     mutationFn: retryReferralCampaignReward,
     onSuccess: async (response) => {
@@ -156,150 +119,32 @@ export function ReferralCampaignAdmin() {
       return campaign.reward.subscription_plan_title || t('Subscription')
     }
     if (campaign.reward?.quota) {
-      return formatQuota(campaign.reward.quota)
+      return formatPlatformQuota(campaign.reward.quota)
     }
     return '—'
   }
 
   return (
-    <SectionPageLayout>
-      <SectionPageLayout.Title>
-        {t('Referral campaigns')}
-      </SectionPageLayout.Title>
-      <SectionPageLayout.Content>
-        <div
-          className={
-            canWrite
-              ? 'grid gap-4 xl:grid-cols-[minmax(320px,0.8fr)_minmax(0,1.2fr)]'
-              : 'grid gap-4'
-          }
-        >
+    <>
+      <SectionPageLayout>
+        <SectionPageLayout.Title>
+          {t('Referral campaigns')}
+        </SectionPageLayout.Title>
+        <SectionPageLayout.Actions>
           {canWrite && (
-            <Card>
-              <CardHeader>
-                <CardTitle>
-                  {t(editing ? 'Edit campaign' : 'Create campaign')}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <form
-                  className='space-y-3'
-                  onSubmit={form.handleSubmit(
-                    (values) => saveMutation.mutate(values),
-                    (errors) =>
-                      toast.error(
-                        t(
-                          errors.subscription_plan_id?.message ??
-                            'Please enter a valid campaign and time range'
-                        )
-                      )
-                  )}
-                >
-                  <Input
-                    {...form.register('title')}
-                    placeholder={t('Campaign title')}
-                  />
-                  <Textarea
-                    {...form.register('description')}
-                    placeholder={t('Campaign description')}
-                  />
-                  <div className='grid gap-3 sm:grid-cols-2'>
-                    <Input type='datetime-local' {...form.register('start')} />
-                    <Input type='datetime-local' {...form.register('end')} />
-                  </div>
-                  <div className='grid gap-3 sm:grid-cols-3'>
-                    <Input
-                      type='number'
-                      min={1}
-                      {...form.register('activation_hours', {
-                        valueAsNumber: true,
-                      })}
-                      aria-label={t('Activation window hours')}
-                    />
-                    <Input
-                      type='number'
-                      min={0}
-                      {...form.register('max_rewards_per_inviter', {
-                        valueAsNumber: true,
-                      })}
-                      aria-label={t('Per-inviter reward limit')}
-                    />
-                    <Input
-                      type='number'
-                      min={0}
-                      {...form.register('total_reward_limit', {
-                        valueAsNumber: true,
-                      })}
-                      aria-label={t('Total reward limit')}
-                    />
-                  </div>
-                  <div className='grid gap-3 sm:grid-cols-2'>
-                    <NativeSelect {...form.register('reward_type')}>
-                      <NativeSelectOption value='quota'>
-                        {t('Main account quota')}
-                      </NativeSelectOption>
-                      <NativeSelectOption value='subscription'>
-                        {t('Subscription')}
-                      </NativeSelectOption>
-                    </NativeSelect>
-                    <label className='flex items-center gap-2 rounded-md border px-3 text-sm'>
-                      <input type='checkbox' {...form.register('enabled')} />
-                      {t('Enabled')}
-                    </label>
-                  </div>
-                  {rewardType === 'quota' ? (
-                    <div className='grid grid-cols-[1fr_120px] gap-3'>
-                      <Input
-                        inputMode='decimal'
-                        {...form.register('reward_amount')}
-                      />
-                      <NativeSelect {...form.register('reward_unit')}>
-                        <NativeSelectOption value='usd'>USD</NativeSelectOption>
-                        <NativeSelectOption value='cny'>CNY</NativeSelectOption>
-                        <NativeSelectOption value='quota'>
-                          {t('Raw quota')}
-                        </NativeSelectOption>
-                      </NativeSelect>
-                    </div>
-                  ) : (
-                    <NativeSelect
-                      {...form.register('subscription_plan_id', {
-                        valueAsNumber: true,
-                      })}
-                    >
-                      <NativeSelectOption value={0}>
-                        {t('Select a subscription plan')}
-                      </NativeSelectOption>
-                      {plans.map((plan) => (
-                        <NativeSelectOption key={plan.id} value={plan.id}>
-                          {plan.title}
-                        </NativeSelectOption>
-                      ))}
-                    </NativeSelect>
-                  )}
-                  <div className='flex gap-2'>
-                    <Button type='submit' disabled={saveMutation.isPending}>
-                      {editing ? <Check /> : <Plus />}
-                      {t(editing ? 'Save changes' : 'Create campaign')}
-                    </Button>
-                    {editing && (
-                      <Button
-                        type='button'
-                        variant='outline'
-                        onClick={() => {
-                          setEditing(null)
-                          form.reset(emptyReferralCampaignForm())
-                        }}
-                      >
-                        {t('Cancel')}
-                      </Button>
-                    )}
-                  </div>
-                </form>
-              </CardContent>
-            </Card>
+            <Button
+              size='sm'
+              onClick={() => {
+                setEditing(null)
+                setFormOpen(true)
+              }}
+            >
+              <Plus data-icon='inline-start' />
+              {t('Create campaign')}
+            </Button>
           )}
-
+        </SectionPageLayout.Actions>
+        <SectionPageLayout.Content>
           <div className='space-y-4'>
             <Card>
               <CardHeader>
@@ -359,7 +204,7 @@ export function ReferralCampaignAdmin() {
                             variant='ghost'
                             onClick={() => {
                               setEditing(campaign)
-                              form.reset(referralCampaignToForm(campaign))
+                              setFormOpen(true)
                             }}
                             aria-label={t('Edit campaign')}
                           >
@@ -506,8 +351,25 @@ export function ReferralCampaignAdmin() {
               </Card>
             )}
           </div>
-        </div>
-      </SectionPageLayout.Content>
-    </SectionPageLayout>
+        </SectionPageLayout.Content>
+      </SectionPageLayout>
+      <ReferralCampaignFormDrawer
+        open={formOpen}
+        campaign={editing}
+        plans={plans}
+        plansLoading={plansQuery.isLoading}
+        plansFailed={plansQuery.isError || plansQuery.data?.success === false}
+        onRetryPlans={() => void plansQuery.refetch()}
+        onOpenChange={(open) => {
+          setFormOpen(open)
+          if (!open) setEditing(null)
+        }}
+        onSaved={() => {
+          void queryClient.invalidateQueries({
+            queryKey: ['referral-campaigns', 'admin'],
+          })
+        }}
+      />
+    </>
   )
 }

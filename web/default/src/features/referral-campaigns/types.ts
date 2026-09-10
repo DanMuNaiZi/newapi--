@@ -16,9 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
 export type RewardType = 'quota' | 'subscription'
-export type RewardUnit = 'usd' | 'cny' | 'quota'
+export type RewardUnit = 'usd' | 'quota'
+/** Legacy snapshots may still contain CNY; forms never submit it. */
+export type StoredRewardUnit = RewardUnit | 'cny'
 
 export interface RewardSubscriptionPlanOption {
   id: number
@@ -28,7 +29,7 @@ export interface RewardSubscriptionPlanOption {
 export interface RewardSnapshot {
   type: RewardType
   amount?: string
-  unit?: RewardUnit
+  unit?: StoredRewardUnit
   quota?: number
   subscription_plan_id?: number
   subscription_plan_title?: string
@@ -72,6 +73,7 @@ export interface ReferralCampaignSelfView {
 }
 
 export interface ReferralCampaignPayload {
+  preserve_reward?: boolean
   title: string
   description: string
   enabled: boolean

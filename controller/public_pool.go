@@ -14,12 +14,13 @@ import (
 )
 
 type publicPoolSiteRequest struct {
-	Name        string                     `json:"name"`
-	URL         string                     `json:"url"`
-	Description string                     `json:"description"`
-	Status      model.PublicPoolSiteStatus `json:"status"`
-	SortOrder   int                        `json:"sort_order"`
-	Reward      *dto.RewardSpec            `json:"reward"`
+	Name           string                     `json:"name"`
+	URL            string                     `json:"url"`
+	Description    string                     `json:"description"`
+	Status         model.PublicPoolSiteStatus `json:"status"`
+	SortOrder      int                        `json:"sort_order"`
+	PreserveReward bool                       `json:"preserve_reward"`
+	Reward         *dto.RewardSpec            `json:"reward"`
 }
 
 type publicPoolContributionRequest struct {
@@ -153,7 +154,11 @@ func AdminUpdatePublicPoolSite(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	recordManageAudit(c, "public_pool.site_update", publicPoolSiteAudit(site))
+	audit := publicPoolSiteAudit(site)
+	if request.PreserveReward {
+		audit["preserve_reward"] = true
+	}
+	recordManageAudit(c, "public_pool.site_update", audit)
 	common.ApiSuccess(c, site)
 }
 
@@ -231,12 +236,16 @@ func AdminRetryPublicPoolContributionReward(c *gin.Context) {
 
 func publicPoolSiteFromRequest(id int, request publicPoolSiteRequest) (*model.PublicPoolSite, error) {
 	site := &model.PublicPoolSite{
-		Id:          id,
-		Name:        request.Name,
-		URL:         request.URL,
-		Description: request.Description,
-		Status:      request.Status,
-		SortOrder:   request.SortOrder,
+		Id:             id,
+		Name:           request.Name,
+		URL:            request.URL,
+		Description:    request.Description,
+		Status:         request.Status,
+		SortOrder:      request.SortOrder,
+		PreserveReward: id > 0 && request.PreserveReward,
+	}
+	if site.PreserveReward {
+		return site, nil
 	}
 	if request.Reward == nil {
 		return site, nil

@@ -551,6 +551,19 @@ func ListLotteryPlansForAdmin() ([]LotteryPlan, error) {
 	return plans, nil
 }
 
+// GetLotteryPlanForAdmin loads a plan by ID without applying end-user
+// eligibility rules. The admin router is responsible for authorization.
+func GetLotteryPlanForAdmin(planId int) (*LotteryPlan, error) {
+	if planId <= 0 {
+		return nil, errors.New("invalid lottery plan")
+	}
+	var plan LotteryPlan
+	if err := DB.First(&plan, planId).Error; err != nil {
+		return nil, err
+	}
+	return &plan, nil
+}
+
 func ListLotteryPrizes(planId int) ([]LotteryPrize, error) {
 	if planId <= 0 {
 		return nil, errors.New("invalid lottery plan")

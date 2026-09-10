@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ExternalLink, HandHeart, Send } from 'lucide-react'
@@ -53,7 +52,7 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { Textarea } from '@/components/ui/textarea'
-import { formatQuota } from '@/lib/format'
+import { formatPlatformQuota, getRewardEquivalent } from '@/lib/reward-amount'
 import { isUserPreviewActive } from '@/lib/user-preview'
 
 import {
@@ -83,6 +82,7 @@ function rewardDescription(
     amount?: string
     unit?: string
     quota?: number
+    quota_per_unit?: string
   },
   t: (key: string, options?: Record<string, unknown>) => string
 ): string {
@@ -91,10 +91,20 @@ function rewardDescription(
       plan: reward.subscription_plan_title || t('Subscription'),
     })
   }
-  return t('Reward: {{amount}} {{unit}} ({{quota}})', {
-    amount: reward.amount ?? reward.quota ?? 0,
-    unit: (reward.unit ?? 'quota').toUpperCase(),
-    quota: formatQuota(reward.quota ?? 0),
+  const quota = Number(reward.quota ?? 0)
+  const quotaPerUnit = Number(reward.quota_per_unit)
+  const equivalent =
+    reward.unit === 'usd' || reward.unit === 'quota'
+      ? getRewardEquivalent(String(quota), 'quota', quotaPerUnit)
+      : null
+  if (equivalent) {
+    return t('${{usd}} · {{quota}} platform quota', {
+      usd: equivalent.usd,
+      quota: formatPlatformQuota(equivalent.quota),
+    })
+  }
+  return t('{{quota}} platform quota', {
+    quota: formatPlatformQuota(Number.isFinite(quota) ? quota : null),
   })
 }
 

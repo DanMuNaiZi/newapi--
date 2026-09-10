@@ -20,6 +20,7 @@ type referralCampaignRequest struct {
 	ActivationWindowSeconds int64          `json:"activation_window_seconds"`
 	MaxRewardsPerInviter    int            `json:"max_rewards_per_inviter"`
 	TotalRewardLimit        int            `json:"total_reward_limit"`
+	PreserveReward          bool           `json:"preserve_reward"`
 	Reward                  dto.RewardSpec `json:"reward"`
 }
 
@@ -87,7 +88,11 @@ func AdminUpdateReferralCampaign(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	recordManageAudit(c, "referral_campaign.update", referralCampaignAudit(campaign))
+	audit := referralCampaignAudit(campaign)
+	if request.PreserveReward {
+		audit["preserve_reward"] = true
+	}
+	recordManageAudit(c, "referral_campaign.update", audit)
 	common.ApiSuccess(c, campaign)
 }
 
@@ -130,16 +135,7 @@ func AdminRetryReferralCampaignReward(c *gin.Context) {
 }
 
 func referralCampaignFromRequest(id int, createdBy int, request referralCampaignRequest) (*model.ReferralCampaign, error) {
-	snapshot, err := service.NormalizeRewardSpec(request.Reward)
-	if err != nil {
-		return nil, err
-	}
-	rawReward, err := model.EncodeRewardSnapshot(snapshot)
-	if err != nil {
-		return nil, err
-	}
-	snapshot.SubscriptionPlanSnapshot = ""
-	return &model.ReferralCampaign{
+	campaign := &model.ReferralCampaign{
 		Id:                      id,
 		Title:                   request.Title,
 		Description:             request.Description,
@@ -149,10 +145,24 @@ func referralCampaignFromRequest(id int, createdBy int, request referralCampaign
 		ActivationWindowSeconds: request.ActivationWindowSeconds,
 		MaxRewardsPerInviter:    request.MaxRewardsPerInviter,
 		TotalRewardLimit:        request.TotalRewardLimit,
-		RewardSnapshotJSON:      rawReward,
-		Reward:                  &snapshot,
 		CreatedBy:               createdBy,
-	}, nil
+	}
+	if id > 0 && request.PreserveReward {
+		campaign.PreserveReward = true
+		return campaign, nil
+	}
+	snapshot, err := service.NormalizeRewardSpec(request.Reward)
+	if err != nil {
+		return nil, err
+	}
+	rawReward, err := model.EncodeRewardSnapshot(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	snapshot.SubscriptionPlanSnapshot = ""
+	campaign.RewardSnapshotJSON = rawReward
+	campaign.Reward = &snapshot
+	return campaign, nil
 }
 
 func referralCampaignAudit(campaign *model.ReferralCampaign) map[string]interface{} {

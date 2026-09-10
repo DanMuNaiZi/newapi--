@@ -16,10 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
 export type PublicPoolSiteStatus = 'enabled' | 'disabled'
 export type PublicPoolContributionStatus = 'pending' | 'approved' | 'rejected'
 export type RewardGrantStatus = 'pending' | 'succeeded' | 'failed'
+export type RewardUnit = 'usd' | 'quota'
+export type StoredRewardUnit = RewardUnit | 'cny'
 
 export interface RewardSubscriptionPlanOption {
   id: number
@@ -29,7 +30,7 @@ export interface RewardSubscriptionPlanOption {
 export interface RewardSpec {
   type: 'quota' | 'subscription'
   amount?: string
-  unit?: 'usd' | 'cny' | 'quota'
+  unit?: StoredRewardUnit
   quota?: number
   quota_per_unit?: string
   usd_exchange_rate?: string
@@ -84,6 +85,7 @@ export interface PublicPoolContributionPayload {
 }
 
 export interface PublicPoolSitePayload {
+  preserve_reward?: boolean
   name: string
   url: string
   description: string
@@ -92,7 +94,7 @@ export interface PublicPoolSitePayload {
   reward: {
     type: 'quota' | 'subscription'
     amount: string
-    unit: 'usd' | 'cny' | 'quota'
+    unit: RewardUnit
     subscription_plan_id: number
   } | null
 }

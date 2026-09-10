@@ -27,6 +27,7 @@ type ReferralCampaign struct {
 	TotalRewardLimit        int             `json:"total_reward_limit"`
 	RewardSnapshotJSON      string          `json:"-" gorm:"column:reward_snapshot;type:text;not null"`
 	Reward                  *RewardSnapshot `json:"reward,omitempty" gorm:"-"`
+	PreserveReward          bool            `json:"-" gorm:"-"`
 	CreatedBy               int             `json:"created_by" gorm:"index"`
 	CreatedAt               int64           `json:"created_at" gorm:"type:bigint"`
 	UpdatedAt               int64           `json:"updated_at" gorm:"type:bigint"`
@@ -78,7 +79,7 @@ type ReferralCampaignSelfView struct {
 	Events   []ReferralCampaignEvent `json:"events"`
 }
 
-func normalizeReferralCampaign(campaign *ReferralCampaign) error {
+func normalizeReferralCampaign(campaign *ReferralCampaign, validateReward bool) error {
 	if campaign == nil {
 		return errors.New("referral campaign is required")
 	}
@@ -100,14 +101,16 @@ func normalizeReferralCampaign(campaign *ReferralCampaign) error {
 		campaign.TotalRewardLimit < 0 || campaign.TotalRewardLimit > referralCampaignLimitMax {
 		return errors.New("invalid referral campaign limits")
 	}
-	if _, err := DecodeRewardSnapshot(campaign.RewardSnapshotJSON); err != nil {
-		return err
+	if validateReward {
+		if _, err := DecodeRewardSnapshot(campaign.RewardSnapshotJSON); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 func CreateReferralCampaign(campaign *ReferralCampaign) error {
-	if err := normalizeReferralCampaign(campaign); err != nil {
+	if err := normalizeReferralCampaign(campaign, true); err != nil {
 		return err
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
@@ -134,16 +137,22 @@ func UpdateReferralCampaign(campaign *ReferralCampaign) error {
 	if campaign == nil || campaign.Id <= 0 {
 		return errors.New("invalid referral campaign")
 	}
-	if err := normalizeReferralCampaign(campaign); err != nil {
+	if err := normalizeReferralCampaign(campaign, !campaign.PreserveReward); err != nil {
 		return err
 	}
-	return DB.Transaction(func(tx *gorm.DB) error {
+	err := DB.Transaction(func(tx *gorm.DB) error {
 		if err := lockReferralCampaignSchedule(tx); err != nil {
 			return err
 		}
 		var current ReferralCampaign
 		if err := lockForUpdate(tx).First(&current, campaign.Id).Error; err != nil {
 			return err
+		}
+		if campaign.PreserveReward {
+			if _, err := DecodeRewardSnapshot(current.RewardSnapshotJSON); err != nil {
+				return err
+			}
+			campaign.RewardSnapshotJSON = current.RewardSnapshotJSON
 		}
 		if campaign.Enabled {
 			var count int64
@@ -167,6 +176,11 @@ func UpdateReferralCampaign(campaign *ReferralCampaign) error {
 			"updated_at":                common.GetTimestamp(),
 		}).Error
 	})
+	if err != nil {
+		return err
+	}
+	campaign.Reward = hydrateReferralReward(campaign.RewardSnapshotJSON)
+	return nil
 }
 
 func lockReferralCampaignSchedule(tx *gorm.DB) error {

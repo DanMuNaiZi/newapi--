@@ -158,8 +158,8 @@ export interface LotteryPlanCreatePayload {
     name: string
     quantity: number
     reward_type: 'quota' | 'subscription'
-    reward_amount?: number
-    reward_unit?: 'usd' | 'cny' | 'quota'
+    reward_amount?: string
+    reward_unit?: 'usd' | 'quota'
     subscription_plan_id: number
     fulfillment_mode: 'auto' | 'self_claim' | 'redemption_code'
     claim_expire_seconds: number

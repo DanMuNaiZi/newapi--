@@ -1,16 +1,51 @@
 package controller
 
 import (
+	"bytes"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestLotteryPrizeRequestParsesStringAndNumberDecimalAmounts(t *testing.T) {
+	previousQuotaPerUnit := common.QuotaPerUnit
+	previousExchangeRate := operation_setting.USDExchangeRate
+	common.QuotaPerUnit = 500_000
+	operation_setting.USDExchangeRate = 0
+	t.Cleanup(func() {
+		common.QuotaPerUnit = previousQuotaPerUnit
+		operation_setting.USDExchangeRate = previousExchangeRate
+	})
+
+	for _, payload := range []string{
+		`{"prizes":[{"reward_type":"quota","reward_amount":"0.000249","reward_unit":"usd"}]}`,
+		`{"prizes":[{"reward_type":"quota","reward_amount":0.000249,"reward_unit":"usd"}]}`,
+	} {
+		t.Run(payload, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/api/lottery/admin/plans", bytes.NewBufferString(payload))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+			request := lotteryPlanRequest{}
+			require.NoError(t, ctx.ShouldBindJSON(&request))
+			require.Len(t, request.Prizes, 1)
+			prize, audit, err := normalizeLotteryPrizeRequest(request.Prizes[0])
+			require.NoError(t, err)
+			assert.Equal(t, 125, prize.Quota)
+			assert.Equal(t, "0.000249", audit.InputAmount)
+			assert.Equal(t, "0", audit.USDExchangeRate)
+		})
+	}
+}
 
 func lotteryDecimal(value string) *decimal.Decimal {
 	parsed := decimal.RequireFromString(value)
@@ -155,9 +190,10 @@ func TestNormalizeLotteryPrizeRequestRejectsNonFiniteCurrencyConfigurationWithou
 		name            string
 		quotaPerUnit    float64
 		usdExchangeRate float64
+		unit            lotteryRewardUnit
 	}{
-		{name: "NaN quota per unit", quotaPerUnit: math.NaN(), usdExchangeRate: 7.3},
-		{name: "infinite exchange rate", quotaPerUnit: 500_000, usdExchangeRate: math.Inf(1)},
+		{name: "NaN quota per unit", quotaPerUnit: math.NaN(), usdExchangeRate: 7.3, unit: lotteryRewardUnitUSD},
+		{name: "infinite exchange rate", quotaPerUnit: 500_000, usdExchangeRate: math.Inf(1), unit: lotteryRewardUnitCNY},
 	}
 
 	for _, testCase := range tests {
@@ -169,7 +205,7 @@ func TestNormalizeLotteryPrizeRequestRejectsNonFiniteCurrencyConfigurationWithou
 				_, _, err := normalizeLotteryPrizeRequest(lotteryPrizeRequest{
 					RewardType:   model.LotteryRewardQuota,
 					RewardAmount: lotteryDecimal("1"),
-					RewardUnit:   lotteryRewardUnitUSD,
+					RewardUnit:   testCase.unit,
 				})
 				assert.Error(t, err)
 			})

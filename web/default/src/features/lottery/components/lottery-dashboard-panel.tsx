@@ -25,34 +25,27 @@ import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { isUserPreviewActive } from '@/lib/user-preview'
+import { useAuthStore } from '@/stores/auth-store'
 
+import { claimLotteryResult } from '../api'
 import {
-  claimLotteryResult,
-  getClaimableLotteryResultsForSelf,
-  getLotteryNotificationsPageForSelf,
-  getLotteryPlansForSelf,
-} from '../api'
+  lotteryNotificationsSummaryQueryOptions,
+  lotteryPendingResultsQueryOptions,
+  lotteryPlansQueryOptions,
+  refreshLotteryClaimQueries,
+} from '../lib/query-options'
 import { LotteryIcon } from './lottery-icon'
 
 export function LotteryDashboardPanel() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const readOnlyPreview = isUserPreviewActive()
-  const plansQuery = useQuery({
-    queryKey: ['lottery', 'self'],
-    queryFn: getLotteryPlansForSelf,
-    refetchInterval: 30_000,
-  })
-  const resultsQuery = useQuery({
-    queryKey: ['lottery', 'results', 'pending'],
-    queryFn: getClaimableLotteryResultsForSelf,
-    refetchInterval: 30_000,
-  })
-  const notificationsQuery = useQuery({
-    queryKey: ['lottery', 'notifications', 'page', 'unread'],
-    queryFn: () => getLotteryNotificationsPageForSelf(undefined, 20, true),
-    refetchInterval: 30_000,
-  })
+  const userId = useAuthStore((state) => state.auth.user?.id ?? 0)
+  const plansQuery = useQuery(lotteryPlansQueryOptions(userId))
+  const resultsQuery = useQuery(lotteryPendingResultsQueryOptions(userId))
+  const notificationsQuery = useQuery(
+    lotteryNotificationsSummaryQueryOptions(userId)
+  )
   const claimMutation = useMutation({
     mutationFn: ({ resultId }: { resultId: number }) =>
       claimLotteryResult(resultId),
@@ -62,12 +55,7 @@ export function LotteryDashboardPanel() {
         return
       }
       toast.success(t('Lottery reward claimed'))
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['lottery', 'results'] }),
-        queryClient.invalidateQueries({
-          queryKey: ['lottery', 'notifications'],
-        }),
-      ])
+      await refreshLotteryClaimQueries(queryClient, userId)
     },
     onError: () => toast.error(t('Failed to claim lottery reward')),
   })

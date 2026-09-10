@@ -283,6 +283,7 @@ func SetApiRouter(router *gin.Engine) {
 		lotteryAdminRoute.Use(middleware.ManagedAdminAuth())
 		{
 			lotteryAdminRoute.GET("/plans", middleware.RequirePermission(authz.LotteryRead), controller.AdminListLotteryPlans)
+			lotteryAdminRoute.GET("/plans/:id", middleware.RequirePermission(authz.LotteryRead), controller.AdminGetLotteryPlan)
 			lotteryAdminRoute.POST("/plans", middleware.RequirePermission(authz.LotteryWrite), controller.AdminCreateLotteryPlan)
 			lotteryAdminRoute.PATCH("/plans/:id", middleware.RequirePermission(authz.LotteryWrite), controller.AdminUpdateLotteryPlan)
 			lotteryAdminRoute.POST("/plans/:id/cancel", middleware.RequirePermission(authz.LotteryOperate), controller.AdminCancelLotteryPlan)
