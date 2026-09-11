@@ -20,6 +20,8 @@ type OAuthUser struct {
 	DisplayName string
 	// Email is the email from the OAuth provider
 	Email string
+	// CreatedAt is the provider-verified account creation time as a Unix timestamp.
+	CreatedAt int64
 	// Extra contains any additional provider-specific data
 	Extra map[string]any
 }

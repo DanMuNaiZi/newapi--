@@ -110,13 +110,15 @@ func TestReferralCampaignActivatesOnlyOnEligibleCallAndRewardsOnce(t *testing.T)
 	assert.Equal(t, 1, inviter.AffCount)
 	assert.Zero(t, inviter.AffQuota)
 
-	require.NoError(t, ActivateReferralCampaignForUser(users[1].Id, "public-request", constant.PublicPoolGroup))
+	require.NoError(t, recordReferralTestUsage(users[1].Id, "public-request", constant.PublicPoolGroup))
 	var pending ReferralCampaignEvent
 	require.NoError(t, DB.Where("invitee_user_id = ?", users[1].Id).First(&pending).Error)
 	assert.Equal(t, ReferralEventPending, pending.Status)
 
-	require.NoError(t, ActivateReferralCampaignForUser(users[1].Id, "paid-request", "default"))
-	require.NoError(t, ActivateReferralCampaignForUser(users[1].Id, "paid-request-again", "default"))
+	require.NoError(t, recordReferralTestUsage(users[1].Id, "paid-request", "default"))
+	require.NoError(t, recordReferralTestUsage(users[1].Id, "paid-request-again", "default"))
+	_, err = ReviewReferralCampaignEvent(pending.Id, 1, "approve", "checked")
+	require.NoError(t, err)
 	require.NoError(t, DB.First(&inviter, users[0].Id).Error)
 	assert.Equal(t, 250, inviter.Quota)
 	require.NoError(t, DB.First(&pending, pending.Id).Error)
@@ -131,12 +133,18 @@ func TestReferralCampaignRewardLimitReservesFailedAndSucceededEvents(t *testing.
 	require.NoError(t, func() error { _, err := HandleInvitationRegistration(users[0].Id, users[1].Id); return err }())
 	require.NoError(t, func() error { _, err := HandleInvitationRegistration(users[0].Id, users[2].Id); return err }())
 
-	require.NoError(t, ActivateReferralCampaignForUser(users[1].Id, "first", "default"))
-	require.NoError(t, ActivateReferralCampaignForUser(users[2].Id, "second", "default"))
+	require.NoError(t, recordReferralTestUsage(users[1].Id, "first", "default"))
+	require.NoError(t, recordReferralTestUsage(users[2].Id, "second", "default"))
+	var first ReferralCampaignEvent
+	require.NoError(t, DB.Where("invitee_user_id = ?", users[1].Id).First(&first).Error)
+	_, err := ReviewReferralCampaignEvent(first.Id, 1, "approve", "checked")
+	require.NoError(t, err)
 
 	var second ReferralCampaignEvent
 	require.NoError(t, DB.Where("invitee_user_id = ?", users[2].Id).First(&second).Error)
-	assert.Equal(t, ReferralEventLimitReached, second.Status)
+	_, err = ReviewReferralCampaignEvent(second.Id, 1, "approve", "checked")
+	assert.ErrorContains(t, err, "limit reached")
+	assert.Equal(t, ReferralEventPendingReview, second.Status)
 	var inviter User
 	require.NoError(t, DB.First(&inviter, users[0].Id).Error)
 	assert.Equal(t, 100, inviter.Quota)
@@ -156,11 +164,16 @@ func TestReferralCampaignTotalRewardLimitAppliesAcrossInviters(t *testing.T) {
 	_, err = HandleInvitationRegistration(users[2].Id, users[3].Id)
 	require.NoError(t, err)
 
-	require.NoError(t, ActivateReferralCampaignForUser(users[1].Id, "first", "default"))
-	require.NoError(t, ActivateReferralCampaignForUser(users[3].Id, "second", "default"))
+	require.NoError(t, recordReferralTestUsage(users[1].Id, "first", "default"))
+	require.NoError(t, recordReferralTestUsage(users[3].Id, "second", "default"))
+	var first ReferralCampaignEvent
+	require.NoError(t, DB.Where("invitee_user_id = ?", users[1].Id).First(&first).Error)
+	_, err = ReviewReferralCampaignEvent(first.Id, 1, "approve", "checked")
+	require.NoError(t, err)
 	var second ReferralCampaignEvent
 	require.NoError(t, DB.Where("invitee_user_id = ?", users[3].Id).First(&second).Error)
-	assert.Equal(t, ReferralEventLimitReached, second.Status)
+	_, err = ReviewReferralCampaignEvent(second.Id, 1, "approve", "checked")
+	assert.ErrorContains(t, err, "limit reached")
 }
 
 func TestReferralCampaignFailedRewardCanBeRetriedWithoutDuplicateCredit(t *testing.T) {
@@ -171,10 +184,12 @@ func TestReferralCampaignFailedRewardCanBeRetriedWithoutDuplicateCredit(t *testi
 	_, err := HandleInvitationRegistration(users[0].Id, users[1].Id)
 	require.NoError(t, err)
 
-	err = ActivateReferralCampaignForUser(users[1].Id, "first", "default")
-	require.Error(t, err)
+	require.NoError(t, recordReferralTestUsage(users[1].Id, "first", "default"))
 	var event ReferralCampaignEvent
 	require.NoError(t, DB.Where("invitee_user_id = ?", users[1].Id).First(&event).Error)
+	_, err = ReviewReferralCampaignEvent(event.Id, 1, "approve", "checked")
+	require.Error(t, err)
+	require.NoError(t, DB.First(&event, event.Id).Error)
 	assert.Equal(t, ReferralEventRewardFailed, event.Status)
 
 	require.NoError(t, DB.Model(&User{}).Where("id = ?", users[0].Id).Update("quota", common.MaxQuota-100).Error)
@@ -248,10 +263,10 @@ func TestReferralCampaignUsesTheRegistrationActivationWindowAfterCampaignEnd(t *
 	require.NoError(t, err)
 	require.NoError(t, DB.Model(campaign).Update("end_time", common.GetTimestamp()-1).Error)
 
-	require.NoError(t, ActivateReferralCampaignForUser(users[1].Id, "after-end", "default"))
+	require.NoError(t, recordReferralTestUsage(users[1].Id, "after-end", "default"))
 	var event ReferralCampaignEvent
 	require.NoError(t, DB.Where("invitee_user_id = ?", users[1].Id).First(&event).Error)
-	assert.Equal(t, ReferralEventRewarded, event.Status)
+	assert.Equal(t, ReferralEventPendingReview, event.Status)
 }
 
 func TestReferralCampaignExpiresAnUnactivatedRegistration(t *testing.T) {
@@ -264,7 +279,7 @@ func TestReferralCampaignExpiresAnUnactivatedRegistration(t *testing.T) {
 		Where("invitee_user_id = ?", users[1].Id).
 		Update("activation_deadline", common.GetTimestamp()-1).Error)
 
-	require.NoError(t, ActivateReferralCampaignForUser(users[1].Id, "late", "default"))
+	require.NoError(t, recordReferralTestUsage(users[1].Id, "late", "default"))
 	var event ReferralCampaignEvent
 	require.NoError(t, DB.Where("invitee_user_id = ?", users[1].Id).First(&event).Error)
 	assert.Equal(t, ReferralEventExpired, event.Status)
@@ -274,20 +289,32 @@ func TestReferralCampaignExpiresAnUnactivatedRegistration(t *testing.T) {
 }
 
 func TestReferralActivationEligibilityRejectsPoolAndFailedStreams(t *testing.T) {
-	assert.False(t, isReferralActivationEligible(RecordConsumeLogParams{ActivateReferral: false, Group: "default"}))
-	assert.False(t, isReferralActivationEligible(RecordConsumeLogParams{ActivateReferral: true, Group: constant.PublicPoolGroup}))
+	assert.False(t, isReferralActivationEligible(RecordConsumeLogParams{ActivateReferral: false, BillingSettled: true, Group: "default", Quota: 1}))
+	assert.False(t, isReferralActivationEligible(RecordConsumeLogParams{ActivateReferral: true, BillingSettled: true, Group: constant.PublicPoolGroup, Quota: 1}))
+	assert.False(t, isReferralActivationEligible(RecordConsumeLogParams{ActivateReferral: true, BillingSettled: true, Group: "default"}))
+	assert.False(t, isReferralActivationEligible(RecordConsumeLogParams{ActivateReferral: true, BillingSettled: true, Group: "default", Quota: 1, IsChannelTest: true}))
 	assert.False(t, isReferralActivationEligible(RecordConsumeLogParams{
-		ActivateReferral: true,
-		Group:            "default",
+		ActivateReferral: true, BillingSettled: true,
+		Group: "default", Quota: 1, IsStream: true,
 		Other: map[string]interface{}{
-			"stream_status": map[string]interface{}{"status": "error", "end_reason": "client_gone"},
+			"stream_status":      map[string]interface{}{"status": "error", "end_reason": "client_gone"},
+			"realtime_completed": true,
 		},
 	}))
 	assert.True(t, isReferralActivationEligible(RecordConsumeLogParams{
-		ActivateReferral: true,
-		Group:            "default",
+		ActivateReferral: true, BillingSettled: true,
+		Group: "default", Quota: 1, IsStream: true,
 		Other: map[string]interface{}{
 			"stream_status": map[string]interface{}{"status": "ok", "end_reason": "eof"},
 		},
+	}))
+	assert.True(t, isReferralActivationEligible(RecordConsumeLogParams{
+		ActivateReferral: true, BillingSettled: true,
+		Group: "default", Quota: 1, IsStream: true,
+		Other: map[string]interface{}{"realtime_completed": true},
+	}))
+	assert.False(t, isReferralActivationEligible(RecordConsumeLogParams{
+		ActivateReferral: true, BillingSettled: true,
+		Group: "default", Quota: 1, IsStream: true,
 	}))
 }

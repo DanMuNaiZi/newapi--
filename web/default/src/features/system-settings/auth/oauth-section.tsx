@@ -50,6 +50,7 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { GitHubRegistrationWhitelist } from './github-registration-whitelist'
 import {
   buildOAuthCallbackUrl,
   resolveOAuthSiteUrl,
@@ -65,6 +66,7 @@ const oauthSchema = z.object({
   GitHubOAuthEnabled: z.boolean(),
   GitHubClientId: z.string(),
   GitHubClientSecret: z.string(),
+  GitHubRegistrationMinAgeDays: z.number().int().min(0).max(36500),
   discord: z.object({
     enabled: z.boolean(),
     client_id: z.string(),
@@ -98,6 +100,7 @@ type FlatOAuthDefaults = {
   GitHubOAuthEnabled: boolean
   GitHubClientId: string
   GitHubClientSecret: string
+  GitHubRegistrationMinAgeDays: number
   'discord.enabled': boolean
   'discord.client_id': string
   'discord.client_secret': string
@@ -177,6 +180,7 @@ const buildFormDefaults = (defaults: FlatOAuthDefaults): OAuthFormValues => ({
   GitHubOAuthEnabled: defaults.GitHubOAuthEnabled,
   GitHubClientId: defaults.GitHubClientId ?? '',
   GitHubClientSecret: defaults.GitHubClientSecret ?? '',
+  GitHubRegistrationMinAgeDays: defaults.GitHubRegistrationMinAgeDays ?? 180,
   discord: {
     enabled: defaults['discord.enabled'],
     client_id: defaults['discord.client_id'] ?? '',
@@ -208,6 +212,7 @@ const normalizeFormValues = (values: OAuthFormValues): FlatOAuthDefaults => ({
   GitHubOAuthEnabled: values.GitHubOAuthEnabled,
   GitHubClientId: values.GitHubClientId,
   GitHubClientSecret: values.GitHubClientSecret,
+  GitHubRegistrationMinAgeDays: values.GitHubRegistrationMinAgeDays,
   'discord.enabled': values.discord.enabled,
   'discord.client_id': values.discord.client_id,
   'discord.client_secret': values.discord.client_secret,
@@ -472,6 +477,41 @@ export function OAuthSection(props: OAuthSectionProps) {
                     </FormItem>
                   )}
                 />
+
+                <FormField
+                  control={form.control}
+                  name='GitHubRegistrationMinAgeDays'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        {t('Minimum GitHub account age (days)')}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={0}
+                          max={36500}
+                          step={1}
+                          value={field.value}
+                          onChange={(event) =>
+                            field.onChange(event.target.valueAsNumber)
+                          }
+                          name={field.name}
+                          onBlur={field.onBlur}
+                          ref={field.ref}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'New GitHub accounts younger than this are rejected. Set 0 to disable the age limit.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <GitHubRegistrationWhitelist />
               </TabsContent>
 
               <TabsContent value='discord' className={oauthTabContentClassName}>

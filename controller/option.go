@@ -187,6 +187,12 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "GitHubRegistrationMinAgeDays":
+		days, parseErr := strconv.Atoi(option.Value.(string))
+		if parseErr != nil || days < 0 || days > 36500 {
+			common.ApiErrorMsg(c, "GitHub minimum account age must be between 0 and 36500 days")
+			return
+		}
 	case "discord.enabled":
 		if option.Value == "true" && system_setting.GetDiscordSettings().ClientId == "" {
 			c.JSON(http.StatusOK, gin.H{

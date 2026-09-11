@@ -29,6 +29,9 @@ import type {
   UpdateOptionResponse,
   UpstreamChannelsResponse,
   UpstreamRatiosResponse,
+  GitHubRegistrationIdentityResponse,
+  GitHubRegistrationWhitelistMutationResponse,
+  GitHubRegistrationWhitelistResponse,
 } from './types'
 
 export async function getSystemOptions() {
@@ -38,6 +41,51 @@ export async function getSystemOptions() {
 
 export async function updateSystemOption(request: UpdateOptionRequest) {
   const res = await api.put<UpdateOptionResponse>('/api/option/', request)
+  return res.data
+}
+
+export async function resolveGitHubRegistrationIdentity(username: string) {
+  const res = await api.post<GitHubRegistrationIdentityResponse>(
+    '/api/github-registration/resolve',
+    { username }
+  )
+  return res.data
+}
+
+export async function listGitHubRegistrationWhitelist() {
+  const res = await api.get<GitHubRegistrationWhitelistResponse>(
+    '/api/github-registration/whitelist'
+  )
+  return res.data
+}
+
+export async function createGitHubRegistrationWhitelist(request: {
+  username: string
+  github_id: string
+  remark: string
+}) {
+  const res = await api.post<GitHubRegistrationWhitelistMutationResponse>(
+    '/api/github-registration/whitelist',
+    request
+  )
+  return res.data
+}
+
+export async function updateGitHubRegistrationWhitelist(
+  id: number,
+  remark: string
+) {
+  const res = await api.patch<GitHubRegistrationWhitelistMutationResponse>(
+    `/api/github-registration/whitelist/${id}`,
+    { remark }
+  )
+  return res.data
+}
+
+export async function deleteGitHubRegistrationWhitelist(id: number) {
+  const res = await api.delete<UpdateOptionResponse>(
+    `/api/github-registration/whitelist/${id}`
+  )
   return res.data
 }
 

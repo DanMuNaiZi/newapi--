@@ -391,18 +391,21 @@ type RecordConsumeLogParams struct {
 	Group            string                 `json:"group"`
 	Other            map[string]interface{} `json:"other"`
 	ActivateReferral bool                   `json:"-"`
+	BillingSettled   bool                   `json:"-"`
+	IsChannelTest    bool                   `json:"-"`
 }
 
 func isReferralActivationEligible(params RecordConsumeLogParams) bool {
-	if !params.ActivateReferral || params.Group == constant.PublicPoolGroup {
+	if !params.ActivateReferral || !params.BillingSettled || params.Quota <= 0 || params.IsChannelTest || params.Group == constant.PublicPoolGroup || params.Other["violation_fee"] == true {
 		return false
 	}
 	streamStatus, ok := params.Other["stream_status"].(map[string]interface{})
 	if !ok {
-		return true
+		return !params.IsStream || params.Other["realtime_completed"] == true
 	}
 	status, _ := streamStatus["status"].(string)
-	return status != "error"
+	reason, _ := streamStatus["end_reason"].(string)
+	return status == "ok" && reason != "client_gone" && reason != "timeout"
 }
 
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
@@ -410,6 +413,13 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		activateReferralCampaignFromConsumeLog(c, userId, params)
 		return
 	}
+	if params.Other == nil {
+		params.Other = make(map[string]interface{})
+	}
+	// These markers originate only in the settlement path, never the client or
+	// an upstream body. They permit safe recovery when the event update failed.
+	params.Other["billing_settlement_succeeded"] = params.BillingSettled
+	params.Other["referral_activation_eligible"] = isReferralActivationEligible(params)
 	logger.LogInfo(c, fmt.Sprintf("record consume log: userId=%d, params=%s", userId, common.GetJsonString(params)))
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
@@ -475,7 +485,7 @@ func activateReferralCampaignFromConsumeLog(c *gin.Context, userId int, params R
 	if !isReferralActivationEligible(params) {
 		return
 	}
-	if err := ActivateReferralCampaignForUser(userId, c.GetString(common.RequestIdKey), params.Group); err != nil {
+	if err := ActivateReferralCampaignForUser(userId, c.GetString(common.RequestIdKey), params.Group, params); err != nil {
 		logger.LogError(c, "failed to activate referral campaign: "+err.Error())
 	}
 }

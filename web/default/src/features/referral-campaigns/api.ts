@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
 import { api } from '@/lib/api'
 
 import type {
@@ -26,6 +25,7 @@ import type {
   ReferralCampaignEventPage,
   ReferralCampaignPayload,
   ReferralCampaignSelfView,
+  ReferralEventReview,
   RewardSubscriptionPlanOption,
 } from './types'
 
@@ -88,6 +88,27 @@ export async function retryReferralCampaignReward(
 ): Promise<ApiResponse<ReferralCampaignEvent>> {
   const response = await api.post(
     `/api/referral-campaign/admin/events/${eventId}/retry-reward`
+  )
+  return response.data
+}
+
+export async function getReferralEventReview(
+  eventId: number
+): Promise<ApiResponse<ReferralEventReview>> {
+  const response = await api.get(
+    `/api/referral-campaign/admin/events/${eventId}/review`
+  )
+  return response.data
+}
+
+export async function reviewReferralEvent(
+  eventId: number,
+  decision: 'approve' | 'reject',
+  remark: string
+): Promise<ApiResponse<ReferralCampaignEvent>> {
+  const response = await api.post(
+    `/api/referral-campaign/admin/events/${eventId}/review`,
+    { decision, remark }
   )
   return response.data
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
@@ -118,6 +119,8 @@ func HandleOAuth(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgUserRegisterDisabled)
 		case *OAuthEmailAlreadyTakenError:
 			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
+		case *oauth.OAuthError:
+			handleOAuthError(c, err)
 		default:
 			common.ApiError(c, err)
 		}
@@ -243,6 +246,17 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	if !common.RegisterEnabled {
 		return nil, &OAuthRegistrationDisabledError{}
 	}
+	if _, ok := provider.(*oauth.GitHubProvider); !ok {
+		return nil, oauth.NewOAuthErrorWithRaw(
+			i18n.MsgOAuthGitHubRegistrationOnly,
+			nil,
+			"new public accounts must register with GitHub",
+		)
+	}
+	decision, err := evaluateGitHubRegistration(oauthUser, time.Now())
+	if err != nil {
+		return nil, err
+	}
 
 	// Set up new user
 	user.Username = provider.GetProviderPrefix() + strconv.Itoa(model.GetMaxUserId()+1)
@@ -274,6 +288,8 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	}
 	user.Role = common.RoleCommonUser
 	user.Status = common.UserStatusEnabled
+	user.GithubCreatedAt = decision.CreatedAt
+	user.GithubAgeExempt = decision.AgeExempt
 
 	// Handle affiliate code
 	affCode := session.Get("aff")
@@ -320,12 +336,14 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 			// Set the provider user ID on the user model and update
 			provider.SetProviderUserID(user, oauthUser.ProviderUserID)
 			if err := tx.Model(user).Updates(map[string]interface{}{
-				"github_id":   user.GitHubId,
-				"discord_id":  user.DiscordId,
-				"oidc_id":     user.OidcId,
-				"linux_do_id": user.LinuxDOId,
-				"wechat_id":   user.WeChatId,
-				"telegram_id": user.TelegramId,
+				"github_id":         user.GitHubId,
+				"github_created_at": user.GithubCreatedAt,
+				"github_age_exempt": user.GithubAgeExempt,
+				"discord_id":        user.DiscordId,
+				"oidc_id":           user.OidcId,
+				"linux_do_id":       user.LinuxDOId,
+				"wechat_id":         user.WeChatId,
+				"telegram_id":       user.TelegramId,
 			}).Error; err != nil {
 				return err
 			}

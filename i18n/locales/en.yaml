@@ -250,6 +250,9 @@ oauth.connect_failed: "Unable to connect to {{.Provider}} server, please try aga
 oauth.token_failed: "Failed to get token from {{.Provider}}, please check settings"
 oauth.user_info_empty: "{{.Provider}} returned empty user info, please check settings"
 oauth.trust_level_low: "Linux DO trust level does not meet the minimum required by administrator"
+oauth.github_registration_only: "New accounts can only be registered with GitHub"
+oauth.github_identity_unverified: "Unable to verify the GitHub account identity or creation date"
+oauth.github_account_too_young: "The GitHub account must be at least {{.Days}} days old"
 
 # Model layer error messages
 redeem.failed: "Redemption failed, please try again later"

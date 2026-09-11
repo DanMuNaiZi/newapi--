@@ -39,6 +39,42 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type GitHubRegistrationIdentity = {
+  id: number
+  login: string
+  created_at: number
+}
+
+export type GitHubRegistrationWhitelistEntry = {
+  id: number
+  github_id: string
+  github_login: string
+  github_created_at: number
+  remark: string
+  created_by: number
+  updated_by: number
+  created_at: number
+  updated_at: number
+}
+
+export type GitHubRegistrationIdentityResponse = {
+  success: boolean
+  message: string
+  data?: GitHubRegistrationIdentity
+}
+
+export type GitHubRegistrationWhitelistResponse = {
+  success: boolean
+  message: string
+  data?: GitHubRegistrationWhitelistEntry[]
+}
+
+export type GitHubRegistrationWhitelistMutationResponse = {
+  success: boolean
+  message: string
+  data?: GitHubRegistrationWhitelistEntry
+}
+
 export type ConfirmPaymentComplianceResponse = {
   success: boolean
   message: string
@@ -133,6 +169,7 @@ export type AuthSettings = {
   GitHubOAuthEnabled: boolean
   GitHubClientId: string
   GitHubClientSecret: string
+  GitHubRegistrationMinAgeDays: number
   'discord.enabled': boolean
   'discord.client_id': string
   'discord.client_secret': string

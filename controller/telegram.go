@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 
 	"github.com/gin-contrib/sessions"
@@ -93,6 +94,10 @@ func TelegramLogin(c *gin.Context) {
 			"message": err.Error(),
 			"success": false,
 		})
+		return
+	}
+	if user.Id == 0 {
+		common.ApiErrorI18n(c, i18n.MsgOAuthGitHubRegistrationOnly)
 		return
 	}
 	setupLogin(&user, c)

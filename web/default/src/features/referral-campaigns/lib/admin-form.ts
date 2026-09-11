@@ -19,13 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 import dayjs from 'dayjs'
 import { z } from 'zod'
 
-import {
-  getRewardAmountError,
-  isRewardUnchanged,
-  normalizeRewardAmount,
-  rewardSnapshotToForm,
-} from '@/lib/reward-amount'
-
 import type { ReferralCampaign, ReferralCampaignPayload } from '../types'
 
 const invalidCampaignMessage = 'Please enter a valid campaign and time range'
@@ -71,17 +64,21 @@ export const referralCampaignFormSchema = z
         2_147_483_647,
         'Reward count must be an integer between 0 and 2147483647'
       ),
-    reward_type: z.enum(['quota', 'subscription'], {
-      error: 'Select a reward type',
-    }),
-    reward_amount: z.string(),
-    reward_unit: z.enum(['usd', 'quota'], {
-      error: 'Select USD or platform quota',
-    }),
-    subscription_plan_id: z
-      .number({ error: 'Please select a subscription plan' })
-      .int('Please select a subscription plan')
-      .min(0, 'Please select a subscription plan'),
+    replace_rewards: z.boolean(),
+    inviter_reward_usd: z
+      .string()
+      .trim()
+      .regex(
+        /^(0|[1-9][0-9]{0,9})(\.[0-9]{1,12})?$/,
+        'Enter a non-negative USD amount with at most 12 decimal places'
+      ),
+    invitee_reward_usd: z
+      .string()
+      .trim()
+      .regex(
+        /^(0|[1-9][0-9]{0,9})(\.[0-9]{1,12})?$/,
+        'Enter a non-negative USD amount with at most 12 decimal places'
+      ),
   })
   .superRefine((values, context) => {
     const startTime = dayjs(values.start)
@@ -95,29 +92,6 @@ export const referralCampaignFormSchema = z
         code: 'custom',
         path: ['end'],
         message: invalidCampaignMessage,
-      })
-    }
-
-    if (values.reward_type === 'subscription') {
-      if (values.subscription_plan_id <= 0) {
-        context.addIssue({
-          code: 'custom',
-          path: ['subscription_plan_id'],
-          message: 'Please select a subscription plan',
-        })
-      }
-      return
-    }
-
-    const amountError = getRewardAmountError(
-      values.reward_amount,
-      values.reward_unit
-    )
-    if (amountError) {
-      context.addIssue({
-        code: 'custom',
-        path: ['reward_amount'],
-        message: amountError,
       })
     }
   })
@@ -136,17 +110,15 @@ export function emptyReferralCampaignForm(): ReferralCampaignFormValues {
     activation_hours: 24,
     max_rewards_per_inviter: 0,
     total_reward_limit: 0,
-    reward_type: 'quota',
-    reward_amount: '1',
-    reward_unit: 'usd',
-    subscription_plan_id: 0,
+    replace_rewards: true,
+    inviter_reward_usd: '1',
+    invitee_reward_usd: '0',
   }
 }
 
 export function referralCampaignToForm(
   campaign: ReferralCampaign
 ): ReferralCampaignFormValues {
-  const reward = rewardSnapshotToForm(campaign.reward)
   return {
     title: campaign.title,
     description: campaign.description,
@@ -156,8 +128,13 @@ export function referralCampaignToForm(
     activation_hours: campaign.activation_window_seconds / 3600,
     max_rewards_per_inviter: campaign.max_rewards_per_inviter,
     total_reward_limit: campaign.total_reward_limit,
-    ...reward,
-    reward_type: reward.reward_type === 'none' ? 'quota' : reward.reward_type,
+    replace_rewards: false,
+    inviter_reward_usd:
+      campaign.reward?.unit === 'usd' ? campaign.reward.amount || '0' : '0',
+    invitee_reward_usd:
+      campaign.invitee_reward?.unit === 'usd'
+        ? campaign.invitee_reward.amount || '0'
+        : '0',
   }
 }
 
@@ -175,18 +152,11 @@ export function buildReferralCampaignPayload(
     activation_window_seconds: Math.round(form.activation_hours * 3600),
     max_rewards_per_inviter: form.max_rewards_per_inviter,
     total_reward_limit: form.total_reward_limit,
-    ...(campaign
-      ? { preserve_reward: isRewardUnchanged(form, campaign.reward) }
-      : {}),
-    reward: {
-      type: form.reward_type,
-      amount:
-        form.reward_type === 'quota'
-          ? normalizeRewardAmount(form.reward_amount)
-          : '',
-      unit: form.reward_type === 'quota' ? form.reward_unit : 'quota',
-      subscription_plan_id:
-        form.reward_type === 'subscription' ? form.subscription_plan_id : 0,
-    },
+    ...(campaign && !form.replace_rewards
+      ? { preserve_reward: true }
+      : {
+          inviter_reward_usd: form.inviter_reward_usd,
+          invitee_reward_usd: form.invitee_reward_usd,
+        }),
   }
 }

@@ -33,6 +33,7 @@ import type { SystemStatus } from '../types'
 
 type OAuthProvidersProps = {
   status: SystemStatus | null
+  registrationOnly?: boolean
   disabled?: boolean
   className?: string
   onWeChatLogin?: () => void
@@ -49,6 +50,7 @@ type ProviderButton = {
 
 export function OAuthProviders({
   status,
+  registrationOnly = false,
   disabled = false,
   className,
   onWeChatLogin,
@@ -69,7 +71,7 @@ export function OAuthProviders({
 
   const providerButtons: ProviderButton[] = []
 
-  if (status?.wechat_login && onWeChatLogin) {
+  if (!registrationOnly && status?.wechat_login && onWeChatLogin) {
     providerButtons.push({
       key: 'wechat',
       label: t('Continue with WeChat'),
@@ -89,7 +91,7 @@ export function OAuthProviders({
     })
   }
 
-  if (status?.discord_oauth) {
+  if (!registrationOnly && status?.discord_oauth) {
     providerButtons.push({
       key: 'discord',
       label: t('Continue with Discord'),
@@ -98,7 +100,7 @@ export function OAuthProviders({
     })
   }
 
-  if (status?.oidc_enabled) {
+  if (!registrationOnly && status?.oidc_enabled) {
     providerButtons.push({
       key: 'oidc',
       label: t('Continue with OIDC'),
@@ -106,7 +108,7 @@ export function OAuthProviders({
     })
   }
 
-  if (status?.linuxdo_oauth) {
+  if (!registrationOnly && status?.linuxdo_oauth) {
     providerButtons.push({
       key: 'linuxdo',
       label: t('Continue with LinuxDO'),
@@ -115,7 +117,7 @@ export function OAuthProviders({
     })
   }
 
-  if (status?.telegram_oauth) {
+  if (!registrationOnly && status?.telegram_oauth) {
     providerButtons.push({
       key: 'telegram',
       label: t('Continue with Telegram'),
@@ -125,7 +127,7 @@ export function OAuthProviders({
 
   // Custom OAuth providers
   const customProviders = status?.custom_oauth_providers
-  if (customProviders && customProviders.length > 0) {
+  if (!registrationOnly && customProviders && customProviders.length > 0) {
     for (const provider of customProviders) {
       providerButtons.push({
         key: `custom-${provider.slug}`,
@@ -139,16 +141,18 @@ export function OAuthProviders({
 
   return (
     <div className={cn('space-y-3', className)}>
-      <div className='relative'>
-        <div className='absolute inset-0 flex items-center'>
-          <span className='w-full border-t' />
+      {!registrationOnly && (
+        <div className='relative'>
+          <div className='absolute inset-0 flex items-center'>
+            <span className='w-full border-t' />
+          </div>
+          <div className='relative flex justify-center text-xs uppercase'>
+            <span className='bg-background text-muted-foreground px-2'>
+              {t('Or continue with')}
+            </span>
+          </div>
         </div>
-        <div className='relative flex justify-center text-xs uppercase'>
-          <span className='bg-background text-muted-foreground px-2'>
-            {t('Or continue with')}
-          </span>
-        </div>
-      </div>
+      )}
 
       <div className='flex flex-col gap-2'>
         {providerButtons.map(

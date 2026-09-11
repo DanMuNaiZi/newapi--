@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import dayjs from 'dayjs'
 import { Pencil, Plus, RefreshCw } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -38,12 +38,12 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import {
   getAdminReferralCampaigns,
-  getReferralRewardPlans,
   getReferralCampaignEvents,
   retryReferralCampaignReward,
 } from './api'
 import { ReferralCampaignFormDrawer } from './components/referral-campaign-form-drawer'
-import type { ReferralCampaign } from './types'
+import { ReferralReviewDrawer } from './components/referral-review-drawer'
+import type { ReferralCampaign, RewardSnapshot } from './types'
 
 export function ReferralCampaignAdmin() {
   const { t } = useTranslation()
@@ -65,20 +65,20 @@ export function ReferralCampaignAdmin() {
     null
   )
   const [eventPage, setEventPage] = useState(1)
+  const [reviewEventId, setReviewEventId] = useState<number | null>(null)
 
   const campaignsQuery = useQuery({
-    queryKey: ['referral-campaigns', 'admin'],
+    queryKey: ['referral-campaigns', 'admin', currentUser?.id],
     queryFn: getAdminReferralCampaigns,
     meta: { errorMode: 'local' },
   })
-  const plansQuery = useQuery({
-    queryKey: ['referral-campaigns', 'reward-plans'],
-    queryFn: getReferralRewardPlans,
-    enabled: canWrite,
-    meta: { errorMode: 'local' },
-  })
   const eventsQuery = useQuery({
-    queryKey: ['referral-campaign-events', selectedCampaignId, eventPage],
+    queryKey: [
+      'referral-campaign-events',
+      currentUser?.id,
+      selectedCampaignId,
+      eventPage,
+    ],
     queryFn: () => {
       if (selectedCampaignId == null) {
         throw new Error('A referral campaign must be selected')
@@ -88,10 +88,6 @@ export function ReferralCampaignAdmin() {
     enabled: selectedCampaignId != null,
     meta: { errorMode: 'local' },
   })
-  const plans = useMemo(
-    () => plansQuery.data?.data ?? [],
-    [plansQuery.data?.data]
-  )
 
   const retryMutation = useMutation({
     mutationFn: retryReferralCampaignReward,
@@ -114,14 +110,17 @@ export function ReferralCampaignAdmin() {
   const eventsFailed =
     eventsQuery.isError || eventsQuery.data?.success === false
 
-  const campaignRewardLabel = (campaign: ReferralCampaign) => {
-    if (campaign.reward?.type === 'subscription') {
-      return campaign.reward.subscription_plan_title || t('Subscription')
+  const rewardLabel = (reward?: RewardSnapshot) => {
+    if (reward?.type === 'subscription') {
+      return reward.subscription_plan_title || t('Subscription')
     }
-    if (campaign.reward?.quota) {
-      return formatPlatformQuota(campaign.reward.quota)
+    if (reward?.quota) {
+      const quotaLabel = `${formatPlatformQuota(reward.quota)} ${t('Platform quota')}`
+      return reward.unit === 'usd' && reward.amount
+        ? `$${reward.amount} (${quotaLabel})`
+        : quotaLabel
     }
-    return '—'
+    return t('No reward')
   }
 
   return (
@@ -194,7 +193,10 @@ export function ReferralCampaignAdmin() {
                               .format('YYYY-MM-DD HH:mm')}
                           </p>
                           <p className='text-muted-foreground mt-1 text-xs'>
-                            {t('Reward')}: {campaignRewardLabel(campaign)} ·{' '}
+                            {t('Inviter reward')}:{' '}
+                            {rewardLabel(campaign.reward)} ·{' '}
+                            {t('New user reward')}:{' '}
+                            {rewardLabel(campaign.invitee_reward)} ·{' '}
                             {t('Rewarded')}: {campaign.rewarded_count}
                           </p>
                         </div>
@@ -273,7 +275,16 @@ export function ReferralCampaignAdmin() {
                     <div className='divide-y'>
                       {(eventData?.items ?? []).map((event) => {
                         let statusLabel = t('Pending')
-                        if (event.status === 'rewarded') {
+                        if (
+                          event.status === 'pending_review' ||
+                          ((event.status === 'reward_pending' ||
+                            event.status === 'reward_failed') &&
+                            !event.review_decision)
+                        ) {
+                          statusLabel = t('Pending manual review')
+                        } else if (event.status === 'rejected') {
+                          statusLabel = t('Rejected')
+                        } else if (event.status === 'rewarded') {
                           statusLabel = t('Rewarded')
                         } else if (event.status === 'reward_failed') {
                           statusLabel = t('Reward delivery failed')
@@ -305,7 +316,15 @@ export function ReferralCampaignAdmin() {
                             </div>
                             <div className='flex items-center gap-2'>
                               <Badge variant='outline'>{statusLabel}</Badge>
+                              <Button
+                                size='sm'
+                                variant='outline'
+                                onClick={() => setReviewEventId(event.id)}
+                              >
+                                {t('Review details')}
+                              </Button>
                               {canOperate &&
+                                event.review_decision === 'approved' &&
                                 (event.status === 'reward_failed' ||
                                   event.status === 'reward_pending') && (
                                   <Button
@@ -356,10 +375,6 @@ export function ReferralCampaignAdmin() {
       <ReferralCampaignFormDrawer
         open={formOpen}
         campaign={editing}
-        plans={plans}
-        plansLoading={plansQuery.isLoading}
-        plansFailed={plansQuery.isError || plansQuery.data?.success === false}
-        onRetryPlans={() => void plansQuery.refetch()}
         onOpenChange={(open) => {
           setFormOpen(open)
           if (!open) setEditing(null)
@@ -367,6 +382,22 @@ export function ReferralCampaignAdmin() {
         onSaved={() => {
           void queryClient.invalidateQueries({
             queryKey: ['referral-campaigns', 'admin'],
+          })
+        }}
+      />
+      <ReferralReviewDrawer
+        key={reviewEventId ?? 'closed'}
+        eventId={reviewEventId}
+        onClose={() => setReviewEventId(null)}
+        onChanged={() => {
+          void queryClient.invalidateQueries({
+            queryKey: ['referral-campaign-events'],
+          })
+          void queryClient.invalidateQueries({
+            queryKey: ['referral-campaigns'],
+          })
+          void queryClient.invalidateQueries({
+            queryKey: ['referral-campaign', 'self'],
           })
         }}
       />

@@ -204,6 +204,7 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.POST("/waffo-pancake/subscription-product", middleware.RequirePermission(authz.PaymentWrite), controller.CreateWaffoPancakeSubscriptionProduct)
 			optionRoute.GET("/waffo-pancake/subscription-product-options", middleware.RequirePermission(authz.PaymentRead), controller.ListWaffoPancakeSubscriptionProductOptions)
 		}
+		registerGitHubRegistrationRoutes(apiRouter)
 
 		// Custom OAuth provider management (root only)
 		customOAuthRoute := apiRouter.Group("/custom-oauth-provider")

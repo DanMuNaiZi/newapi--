@@ -27,144 +27,103 @@ import {
   referralCampaignToForm,
 } from './admin-form'
 
-describe('referral campaign form', () => {
-  test('preserves the saved USD reward across metadata edits and reloads', () => {
-    const campaign: ReferralCampaign = {
-      id: 5,
-      title: 'Historical USD',
-      description: '',
-      enabled: true,
-      start_time: 1800000000,
-      end_time: 1800086400,
-      activation_window_seconds: 86400,
-      max_rewards_per_inviter: 0,
-      total_reward_limit: 0,
-      registration_count: 0,
-      activated_count: 0,
-      rewarded_count: 0,
-      failed_reward_count: 0,
-      reward: { type: 'quota', amount: '1', unit: 'usd', quota: 500000 },
-    }
+const campaign: ReferralCampaign = {
+  id: 5,
+  title: 'Existing campaign',
+  description: '',
+  enabled: true,
+  start_time: 1800000000,
+  end_time: 1800086400,
+  activation_window_seconds: 86400,
+  max_rewards_per_inviter: 0,
+  total_reward_limit: 0,
+  registration_count: 0,
+  activated_count: 0,
+  rewarded_count: 0,
+  failed_reward_count: 0,
+  reward: { type: 'quota', amount: '1', unit: 'usd', quota: 500000 },
+}
+
+describe('referral campaign manual-review form', () => {
+  test('new campaigns configure independent USD rewards, with 0 disabling a side', () => {
+    const values = { ...emptyReferralCampaignForm(), title: 'September' }
+    const payload = buildReferralCampaignPayload(values)
+    assert.equal(payload.activation_window_seconds, 86400)
+    assert.equal(payload.inviter_reward_usd, '1')
+    assert.equal(payload.invitee_reward_usd, '0')
+    assert.equal(payload.reward, undefined)
+    assert.equal(
+      buildReferralCampaignPayload({
+        ...values,
+        inviter_reward_usd: '0',
+        invitee_reward_usd: '2.5',
+      }).invitee_reward_usd,
+      '2.5'
+    )
+  })
+
+  test('metadata edits preserve both stored rewards despite changed system conversion', () => {
     const values = referralCampaignToForm(campaign)
     values.title = 'Renamed'
-    values.reward_amount = '1.00'
-    assert.equal(
-      buildReferralCampaignPayload(values, campaign).preserve_reward,
-      true
-    )
-    assert.equal(values.reward_unit, 'usd')
-    const reloaded = referralCampaignToForm({
-      ...campaign,
-      title: values.title,
-    })
-    assert.equal(reloaded.reward_amount, '1')
-    assert.equal(
-      buildReferralCampaignPayload(reloaded, campaign).preserve_reward,
-      true
-    )
-    assert.equal(
-      buildReferralCampaignPayload(
-        { ...reloaded, reward_amount: '2' },
-        campaign
-      ).preserve_reward,
-      false
-    )
+    const payload = buildReferralCampaignPayload(values, campaign)
+    assert.equal(payload.preserve_reward, true)
+    assert.equal(payload.inviter_reward_usd, undefined)
+    assert.equal(payload.invitee_reward_usd, undefined)
   })
 
-  test('rejects quota overflow and ignores hidden subscription amounts', () => {
+  test('replacing rewards is explicit and submits both USD amounts', () => {
     const values = {
-      ...emptyReferralCampaignForm(),
-      title: 'Boundaries',
-      reward_unit: 'quota' as const,
-      reward_amount: '2147483648',
+      ...referralCampaignToForm(campaign),
+      replace_rewards: true,
+      inviter_reward_usd: '2',
+      invitee_reward_usd: '1',
     }
-    assert.equal(referralCampaignFormSchema.safeParse(values).success, false)
-    const subscription = {
-      ...values,
-      reward_type: 'subscription' as const,
-      reward_amount: '',
-      subscription_plan_id: 3,
-    }
-    assert.equal(
-      referralCampaignFormSchema.safeParse(subscription).success,
-      true
-    )
-    assert.equal(buildReferralCampaignPayload(subscription).reward.amount, '')
+    const payload = buildReferralCampaignPayload(values, campaign)
+    assert.equal(payload.preserve_reward, undefined)
+    assert.equal(payload.inviter_reward_usd, '2')
+    assert.equal(payload.invitee_reward_usd, '1')
   })
 
-  test('builds a quota reward with the default 24 hour activation window', () => {
-    const values = emptyReferralCampaignForm()
-    values.title = 'September referral'
-
-    const payload = buildReferralCampaignPayload(values)
-
-    assert.equal(payload.activation_window_seconds, 24 * 60 * 60)
-    assert.deepEqual(payload.reward, {
-      type: 'quota',
-      amount: '1',
-      unit: 'usd',
-      subscription_plan_id: 0,
-    })
-  })
-
-  test('builds a subscription reward without an ambiguous amount', () => {
-    const values = emptyReferralCampaignForm()
-    values.title = 'Subscription referral'
-    values.reward_type = 'subscription'
-    values.subscription_plan_id = 3
-
-    assert.deepEqual(buildReferralCampaignPayload(values).reward, {
-      type: 'subscription',
-      amount: '',
-      unit: 'quota',
-      subscription_plan_id: 3,
-    })
-  })
-
-  test('rejects invalid time ranges and fractional raw quota', () => {
-    const values = emptyReferralCampaignForm()
-    values.title = 'Invalid referral'
-    values.end = values.start
-    values.reward_unit = 'quota'
-    values.reward_amount = '1.5'
-
-    assert.equal(referralCampaignFormSchema.safeParse(values).success, false)
-  })
-
-  test('does not accept CNY in new campaign forms', () => {
-    const values = emptyReferralCampaignForm()
-    const result = referralCampaignFormSchema.safeParse({
-      ...values,
-      reward_unit: 'cny',
-    })
-
-    assert.equal(result.success, false)
-  })
-
-  test('maps a legacy CNY snapshot to its persisted quota when editing', () => {
-    const values = referralCampaignToForm({
-      id: 1,
-      title: 'Legacy campaign',
-      description: '',
-      enabled: true,
-      start_time: 1_800_000_000,
-      end_time: 1_800_086_400,
-      activation_window_seconds: 86_400,
-      max_rewards_per_inviter: 0,
-      total_reward_limit: 0,
-      reward: {
-        type: 'quota',
+  test('legacy CNY and subscription snapshots remain untouched until explicitly replaced', () => {
+    for (const reward of [
+      {
+        type: 'quota' as const,
         amount: '73',
-        unit: 'cny',
-        quota: 5_000_000,
+        unit: 'cny' as const,
+        quota: 5000000,
       },
-      registration_count: 0,
-      activated_count: 0,
-      rewarded_count: 0,
-      failed_reward_count: 0,
-    })
+      {
+        type: 'subscription' as const,
+        subscription_plan_id: 3,
+        subscription_plan_title: 'Old plan',
+      },
+    ]) {
+      const legacy = { ...campaign, reward }
+      const payload = buildReferralCampaignPayload(
+        referralCampaignToForm(legacy),
+        legacy
+      )
+      assert.equal(payload.preserve_reward, true)
+      assert.equal(payload.reward, undefined)
+    }
+  })
 
-    assert.equal(values.reward_unit, 'quota')
-    assert.equal(values.reward_amount, '5000000')
+  test('rejects invalid dates, fractional limits, negative and unbounded decimal input', () => {
+    const values = { ...emptyReferralCampaignForm(), title: 'Validation' }
+    for (const invalid of [
+      { end: values.start },
+      { max_rewards_per_inviter: 0.5 },
+      { activation_hours: 0 },
+      { total_reward_limit: 2147483648 },
+      { inviter_reward_usd: '-1' },
+      { invitee_reward_usd: '1e2147483647' },
+      { invitee_reward_usd: 'NaN' },
+      { inviter_reward_usd: '' },
+    ]) {
+      assert.equal(
+        referralCampaignFormSchema.safeParse({ ...values, ...invalid }).success,
+        false
+      )
+    }
   })
 })

@@ -22,6 +22,8 @@ type referralCampaignRequest struct {
 	TotalRewardLimit        int            `json:"total_reward_limit"`
 	PreserveReward          bool           `json:"preserve_reward"`
 	Reward                  dto.RewardSpec `json:"reward"`
+	InviterRewardUSD        *string        `json:"inviter_reward_usd"`
+	InviteeRewardUSD        *string        `json:"invitee_reward_usd"`
 }
 
 type referralCampaignEventPage struct {
@@ -151,6 +153,38 @@ func referralCampaignFromRequest(id int, createdBy int, request referralCampaign
 		campaign.PreserveReward = true
 		return campaign, nil
 	}
+	if request.InviterRewardUSD != nil || request.InviteeRewardUSD != nil {
+		if request.InviterRewardUSD == nil || request.InviteeRewardUSD == nil || request.Reward.Type != "" {
+			return nil, errors.New("provide both USD rewards without the legacy reward parameter")
+		}
+		var err error
+		campaign.RewardSnapshotJSON, err = service.NormalizeReferralUSDReward(*request.InviterRewardUSD)
+		if err != nil {
+			return nil, err
+		}
+		campaign.InviteeRewardSnapshotJSON, err = service.NormalizeReferralUSDReward(*request.InviteeRewardUSD)
+		if err != nil {
+			return nil, err
+		}
+		if campaign.RewardSnapshotJSON != "" {
+			snapshot, err := model.DecodeRewardSnapshot(campaign.RewardSnapshotJSON)
+			if err != nil {
+				return nil, err
+			}
+			campaign.Reward = &snapshot
+		}
+		if campaign.InviteeRewardSnapshotJSON != "" {
+			snapshot, err := model.DecodeRewardSnapshot(campaign.InviteeRewardSnapshotJSON)
+			if err != nil {
+				return nil, err
+			}
+			campaign.InviteeReward = &snapshot
+		}
+		return campaign, nil
+	}
+	// An older client can edit the inviter reward without erasing an invitee
+	// reward configured by the current client.
+	campaign.PreserveInviteeReward = id > 0
 	snapshot, err := service.NormalizeRewardSpec(request.Reward)
 	if err != nil {
 		return nil, err
@@ -184,7 +218,54 @@ func referralCampaignAudit(campaign *model.ReferralCampaign) map[string]interfac
 		audit["usd_exchange_rate"] = campaign.Reward.USDExchangeRate
 		audit["subscription_plan_id"] = campaign.Reward.SubscriptionPlanId
 	}
+	if campaign.InviteeReward != nil {
+		audit["invitee_reward_amount"] = campaign.InviteeReward.InputAmount
+		audit["invitee_reward_quota"] = campaign.InviteeReward.Quota
+		audit["invitee_quota_per_unit"] = campaign.InviteeReward.QuotaPerUnit
+	}
 	return audit
+}
+
+func AdminGetReferralEventReview(c *gin.Context) {
+	id, err := referralCampaignPathID(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	view, err := model.GetReferralCampaignEventReview(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, view)
+}
+
+func AdminReviewReferralEvent(c *gin.Context) {
+	id, err := referralCampaignPathID(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	var request struct {
+		Decision string `json:"decision"`
+		Remark   string `json:"remark"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	event, err := model.ReviewReferralCampaignEvent(id, c.GetInt("id"), request.Decision, request.Remark)
+	if event != nil && event.ReviewedBy == c.GetInt("id") && event.ReviewDecision != "" {
+		recordManageAudit(c, "referral_campaign.review", map[string]interface{}{
+			"event_id": event.Id, "campaign_id": event.CampaignId, "decision": event.ReviewDecision,
+			"qualified_quota": event.QualifiedQuota, "reward_status": event.Status,
+		})
+	}
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, event)
 }
 
 func referralCampaignPathID(c *gin.Context) (int, error) {

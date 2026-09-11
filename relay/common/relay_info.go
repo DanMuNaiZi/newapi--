@@ -129,7 +129,8 @@ type RelayInfo struct {
 	ForcePreConsume bool
 	// Billing 是计费会话，封装了预扣费/结算/退款的统一生命周期。
 	// 免费模型时为 nil。
-	Billing BillingSettler
+	Billing                    BillingSettler
+	BillingSettlementSucceeded bool
 	// BillingSource indicates whether this request is billed from wallet quota or subscription.
 	// "" or "wallet" => wallet; "subscription" => subscription
 	BillingSource string
@@ -183,7 +184,8 @@ type RelayInfo struct {
 	// 若为空，调用 GetFinalRequestRelayFormat 会回退到 RequestConversionChain 的最后一项或 RelayFormat。
 	FinalRequestRelayFormat types.RelayFormat
 
-	StreamStatus *StreamStatus
+	StreamStatus      *StreamStatus
+	RealtimeCompleted bool
 
 	ThinkingContentInfo
 	TokenCountMeta
@@ -377,14 +379,19 @@ func isModelNameCharacter(char byte) bool {
 // standard log fields. Callers redact the upstream field unless the viewer
 // has UsageLogActualModelView permission.
 func AppendMappedModelLogInfo(info *RelayInfo, other map[string]interface{}) {
-	if info == nil || info.ChannelMeta == nil || other == nil || !info.IsModelMapped {
+	if info == nil || other == nil {
 		return
 	}
 	requestModelName := info.ClientModelName()
+	if requestModelName != "" {
+		other["request_model_name"] = requestModelName
+	}
+	if info.ChannelMeta == nil || !info.IsModelMapped {
+		return
+	}
 	if requestModelName == "" || info.UpstreamModelName == "" || requestModelName == info.UpstreamModelName {
 		return
 	}
-	other["request_model_name"] = requestModelName
 	other["is_model_mapped"] = true
 	other["upstream_model_name"] = info.UpstreamModelName
 }

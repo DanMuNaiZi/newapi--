@@ -138,5 +138,5 @@ func TestClientVisibleErrorMessageLeavesUnmappedModelUntouched(t *testing.T) {
 
 	other := make(map[string]interface{})
 	AppendMappedModelLogInfo(info, other)
-	assert.Empty(t, other)
+	assert.Equal(t, map[string]interface{}{"request_model_name": "gpt-5.6-sol"}, other)
 }

@@ -50,8 +50,9 @@ export function AffiliateRewardsCard({
 }: AffiliateRewardsCardProps) {
   const { t } = useTranslation()
   const campaignQuery = useQuery({
-    queryKey: ['referral-campaign', 'self'],
+    queryKey: ['referral-campaign', 'self', user?.id, readOnly],
     queryFn: getReferralCampaignSelf,
+    enabled: Boolean(user?.id),
     meta: { errorMode: 'local' },
   })
   if (loading) {
@@ -77,9 +78,14 @@ export function AffiliateRewardsCard({
     ? campaignEvents.filter((event) => event.campaign_id === campaign.id)
     : campaignEvents
   const activatedCount = progressEvents.filter((event) =>
-    ['reward_pending', 'rewarded', 'reward_failed', 'limit_reached'].includes(
-      event.status
-    )
+    [
+      'pending_review',
+      'rejected',
+      'reward_pending',
+      'rewarded',
+      'reward_failed',
+      'limit_reached',
+    ].includes(event.status)
   ).length
   const rewardedCount = progressEvents.filter(
     (event) => event.status === 'rewarded'
@@ -105,7 +111,9 @@ export function AffiliateRewardsCard({
             </h3>
             <p className='text-muted-foreground line-clamp-1 text-xs'>
               {t(
-                'Earn rewards when users join through your referral link. Transfer accumulated rewards to your balance anytime.'
+                campaign
+                  ? 'Rewards are issued only after actual consumption and manual approval.'
+                  : 'Earn rewards when users join through your referral link. Transfer accumulated rewards to your balance anytime.'
               )}
             </p>
           </div>
@@ -185,16 +193,19 @@ export function AffiliateRewardsCard({
             </div>
             {campaign && (
               <p className='text-muted-foreground mt-1'>
-                {campaign.description ||
-                  t(
-                    'Invited users qualify after their first successful non-public-pool API call.'
-                  )}
+                {campaign.description}
+                {campaign.description && <br />}
+                {t(
+                  'Rewards are issued only after actual consumption and manual approval.'
+                )}
               </p>
             )}
             <div className='text-muted-foreground mt-2 flex flex-wrap gap-x-4 gap-y-1'>
               {campaign && (
                 <span>
-                  {t('Reward')}: {campaignReward || '—'}
+                  {t('Inviter reward')}: {campaignReward || '—'} ·{' '}
+                  {t('New user reward')}:{' '}
+                  {formatQuota(campaign.invitee_reward?.quota ?? 0)}
                 </span>
               )}
               <span>
@@ -211,7 +222,16 @@ export function AffiliateRewardsCard({
               <div className='mt-2 flex flex-wrap gap-2'>
                 {campaignEvents.slice(0, 5).map((event) => {
                   let statusLabel = t('Pending')
-                  if (event.status === 'rewarded') {
+                  if (
+                    event.status === 'pending_review' ||
+                    ((event.status === 'reward_failed' ||
+                      event.status === 'reward_pending') &&
+                      !event.review_decision)
+                  ) {
+                    statusLabel = t('Pending manual review')
+                  } else if (event.status === 'rejected') {
+                    statusLabel = t('Rejected')
+                  } else if (event.status === 'rewarded') {
                     statusLabel = t('Rewarded')
                   } else if (event.status === 'reward_failed') {
                     statusLabel = t('Reward delivery failed')

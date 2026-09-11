@@ -30,7 +30,6 @@ import {
   sideDrawerFormClassName,
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
-import { RewardAmountField } from '@/components/reward-amount-field'
 import { Button } from '@/components/ui/button'
 import {
   Field,
@@ -40,7 +39,6 @@ import {
   FieldLabel,
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import {
   Sheet,
   SheetContent,
@@ -55,7 +53,7 @@ import { useRewardQuotaConfig } from '@/hooks/use-reward-quota-config'
 import {
   getRewardConversionError,
   getRewardEquivalent,
-  isRewardUnchanged,
+  formatPlatformQuota,
 } from '@/lib/reward-amount'
 
 import { createReferralCampaign, updateReferralCampaign } from '../api'
@@ -66,15 +64,11 @@ import {
   referralCampaignToForm,
   type ReferralCampaignFormValues,
 } from '../lib/admin-form'
-import type { ReferralCampaign, RewardSubscriptionPlanOption } from '../types'
+import type { ReferralCampaign } from '../types'
 
 type ReferralCampaignFormDrawerProps = {
   open: boolean
   campaign: ReferralCampaign | null
-  plans: RewardSubscriptionPlanOption[]
-  plansLoading: boolean
-  plansFailed: boolean
-  onRetryPlans: () => void
   onOpenChange: (open: boolean) => void
   onSaved: () => void
 }
@@ -87,32 +81,14 @@ export function ReferralCampaignFormDrawer(
     resolver: zodResolver(referralCampaignFormSchema),
     defaultValues: emptyReferralCampaignForm(),
   })
-  const rewardType = form.watch('reward_type')
-  const rewardUnit = form.watch('reward_unit')
-  const rewardAmount = form.watch('reward_amount')
-  const subscriptionPlanId = form.watch('subscription_plan_id')
+  const replaceRewards = form.watch('replace_rewards')
+  const inviterUSD = form.watch('inviter_reward_usd')
+  const inviteeUSD = form.watch('invitee_reward_usd')
   const activationHours = form.watch('activation_hours')
-  const quotaConfig = useRewardQuotaConfig(props.open && rewardType === 'quota')
-  const preserveReward = Boolean(
-    props.campaign &&
-    isRewardUnchanged(
-      {
-        reward_type: rewardType,
-        reward_amount: rewardAmount,
-        reward_unit: rewardUnit,
-        subscription_plan_id: subscriptionPlanId,
-      },
-      props.campaign.reward
-    )
-  )
-  const preservedQuota =
-    preserveReward && rewardType === 'quota'
-      ? props.campaign?.reward?.quota
-      : undefined
-  const rewardEquivalent =
-    rewardType === 'quota' && quotaConfig.isSuccess
-      ? getRewardEquivalent(rewardAmount, rewardUnit, quotaConfig.data)
-      : null
+  const preserveReward = Boolean(props.campaign && !replaceRewards)
+  const needsQuotaConfig =
+    !preserveReward && (Number(inviterUSD) > 0 || Number(inviteeUSD) > 0)
+  const quotaConfig = useRewardQuotaConfig(props.open && needsQuotaConfig)
 
   useEffect(() => {
     if (!props.open) return
@@ -144,59 +120,28 @@ export function ReferralCampaignFormDrawer(
   })
 
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
-  let rewardSummary: string
-  if (rewardType === 'subscription') {
-    const planTitle =
-      props.plans.find((plan) => plan.id === subscriptionPlanId)?.title ||
-      (preserveReward ? props.campaign?.reward?.subscription_plan_title : '')
-    rewardSummary = planTitle
-      ? t('The inviter receives the {{plan}} subscription after activation.', {
-          plan: planTitle,
-        })
-      : t('Please select a subscription plan')
-  } else if (preservedQuota != null) {
-    rewardSummary = t(
-      'The inviter receives {{quota}} platform quota after activation.',
-      {
-        quota: preservedQuota.toLocaleString(),
-      }
-    )
-  } else if (rewardEquivalent) {
-    rewardSummary = t(
-      'The inviter receives {{quota}} platform quota (${{usd}}) after activation.',
-      {
-        usd: rewardEquivalent.usd,
-        quota: rewardEquivalent.quota.toLocaleString(),
-      }
-    )
-  } else {
-    rewardSummary = t(
-      'Enter a valid reward amount to preview the platform quota.'
-    )
-  }
 
   const submit = (values: ReferralCampaignFormValues) => {
-    if (
-      values.reward_type === 'quota' &&
-      !(props.campaign && isRewardUnchanged(values, props.campaign.reward))
-    ) {
-      const error = quotaConfig.isError
-        ? quotaConfig.error.message
-        : getRewardConversionError(
-            values.reward_amount,
-            values.reward_unit,
-            quotaConfig.data
+    if (!preserveReward) {
+      for (const field of [
+        'inviter_reward_usd',
+        'invitee_reward_usd',
+      ] as const) {
+        if (Number(values[field]) === 0) continue
+        const error = quotaConfig.isError
+          ? quotaConfig.error.message
+          : getRewardConversionError(values[field], 'usd', quotaConfig.data)
+        if (error || quotaConfig.isFetching) {
+          form.setError(
+            field,
+            {
+              type: 'validate',
+              message: error || 'Loading reward configuration',
+            },
+            { shouldFocus: true }
           )
-      if (error || quotaConfig.isFetching) {
-        form.setError(
-          'reward_amount',
-          {
-            type: 'validate',
-            message: error || 'Loading reward configuration',
-          },
-          { shouldFocus: true }
-        )
-        return
+          return
+        }
       }
     }
     saveMutation.mutate(values)
@@ -211,7 +156,7 @@ export function ReferralCampaignFormDrawer(
           </SheetTitle>
           <SheetDescription>
             {t(
-              'Share an invite link, wait for a qualifying first call, then reward the inviter.'
+              'Rewards are issued only after actual consumption and manual approval.'
             )}
           </SheetDescription>
         </SheetHeader>
@@ -221,7 +166,7 @@ export function ReferralCampaignFormDrawer(
             <p className='font-medium'>{t('How it works')}</p>
             <p className='text-muted-foreground mt-1 leading-6'>
               {t(
-                'Share invite link → friend registers → friend makes the first successful non-public-pool API call before the activation deadline → inviter receives the reward.'
+                'Share invite link → friend registers with GitHub → successful paid non-public-pool call → administrator reviews → both rewards are issued.'
               )}
             </p>
           </div>
@@ -391,89 +336,91 @@ export function ReferralCampaignFormDrawer(
                 </Field>
               </div>
 
-              <Field>
-                <FieldLabel htmlFor='referral-campaign-reward-type'>
-                  {t('Reward type')}
-                </FieldLabel>
-                <NativeSelect
-                  id='referral-campaign-reward-type'
-                  {...form.register('reward_type')}
-                >
-                  <NativeSelectOption value='quota'>
-                    {t('Main account quota')}
-                  </NativeSelectOption>
-                  <NativeSelectOption value='subscription'>
-                    {t('Subscription')}
-                  </NativeSelectOption>
-                </NativeSelect>
-              </Field>
-
-              {rewardType === 'quota' ? (
-                <RewardAmountField
-                  id='referral-campaign-reward'
-                  amount={rewardAmount}
-                  unit={rewardUnit}
-                  amountField={form.register('reward_amount')}
-                  unitField={form.register('reward_unit')}
-                  config={quotaConfig}
-                  preservedQuota={preservedQuota}
-                  error={form.formState.errors.reward_amount?.message}
-                />
-              ) : (
-                <Field
-                  data-invalid={Boolean(
-                    form.formState.errors.subscription_plan_id
-                  )}
-                >
-                  <FieldLabel htmlFor='referral-campaign-subscription-plan'>
-                    {t('Subscription plan')}
-                  </FieldLabel>
-                  <NativeSelect
-                    id='referral-campaign-subscription-plan'
-                    {...form.register('subscription_plan_id', {
-                      valueAsNumber: true,
-                    })}
-                  >
-                    <NativeSelectOption value={0}>
-                      {t('Select a subscription plan')}
-                    </NativeSelectOption>
-                    {props.plans.map((plan) => (
-                      <NativeSelectOption key={plan.id} value={plan.id}>
-                        {plan.title}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                  {props.plansLoading && (
-                    <p role='status'>
-                      <Spinner />
-                      {t('Loading subscription plans')}
-                    </p>
-                  )}
-                  {props.plansFailed && (
-                    <div role='alert'>
-                      <p>{t('Failed to load subscription plans')}</p>
-                      <Button
-                        type='button'
-                        variant='outline'
-                        onClick={props.onRetryPlans}
-                      >
-                        {t('Retry')}
-                      </Button>
-                    </div>
-                  )}
-                  {!props.plansLoading &&
-                    !props.plansFailed &&
-                    props.plans.length === 0 && (
-                      <FieldDescription>
-                        {t('No subscription plans available')}
-                      </FieldDescription>
+              {props.campaign && (
+                <FieldGroup>
+                  <FieldDescription>
+                    {t(
+                      'Existing reward snapshots stay unchanged unless you replace them. Already registered users keep their original rewards.'
                     )}
-                  <FieldError>
-                    {form.formState.errors.subscription_plan_id?.message
-                      ? t(form.formState.errors.subscription_plan_id.message)
-                      : null}
-                  </FieldError>
-                </Field>
+                  </FieldDescription>
+                  <p className='text-sm'>
+                    {t('Inviter reward')}:{' '}
+                    {props.campaign.reward?.type === 'subscription'
+                      ? props.campaign.reward.subscription_plan_title
+                      : formatPlatformQuota(props.campaign.reward?.quota ?? 0)}
+                    {' · '}
+                    {t('New user reward')}:{' '}
+                    {formatPlatformQuota(
+                      props.campaign.invitee_reward?.quota ?? 0
+                    )}
+                  </p>
+                  <Field orientation='horizontal'>
+                    <input
+                      id='referral-replace-rewards'
+                      type='checkbox'
+                      {...form.register('replace_rewards')}
+                    />
+                    <FieldLabel htmlFor='referral-replace-rewards'>
+                      {t('Replace rewards for future registrations')}
+                    </FieldLabel>
+                  </Field>
+                </FieldGroup>
+              )}
+              <div className='grid gap-4 sm:grid-cols-2'>
+                {(
+                  [
+                    ['inviter_reward_usd', 'Inviter reward (USD)', inviterUSD],
+                    ['invitee_reward_usd', 'New user reward (USD)', inviteeUSD],
+                  ] as const
+                ).map(([name, label, amount]) => {
+                  const equivalent =
+                    !preserveReward &&
+                    Number(amount) > 0 &&
+                    quotaConfig.isSuccess
+                      ? getRewardEquivalent(amount, 'usd', quotaConfig.data)
+                      : null
+                  const error = form.formState.errors[name]?.message
+                  return (
+                    <Field
+                      key={name}
+                      data-invalid={Boolean(error)}
+                      data-disabled={preserveReward}
+                    >
+                      <FieldLabel htmlFor={name}>{t(label)}</FieldLabel>
+                      <Input
+                        id={name}
+                        inputMode='decimal'
+                        maxLength={24}
+                        disabled={preserveReward}
+                        aria-invalid={Boolean(error)}
+                        {...form.register(name)}
+                      />
+                      <FieldDescription>
+                        {t('0 means no reward for this person.')}
+                      </FieldDescription>
+                      {equivalent && (
+                        <FieldDescription>
+                          {t('Actual payout: {{quota}} platform quota', {
+                            quota: equivalent.quota.toLocaleString(),
+                          })}
+                        </FieldDescription>
+                      )}
+                      <FieldError>{error ? t(error) : null}</FieldError>
+                    </Field>
+                  )
+                })}
+              </div>
+              {needsQuotaConfig && quotaConfig.isError && (
+                <div role='alert'>
+                  <p>{t('Failed to load reward configuration')}</p>
+                  <Button
+                    type='button'
+                    variant='outline'
+                    onClick={() => void quotaConfig.refetch()}
+                  >
+                    {t('Retry')}
+                  </Button>
+                </div>
               )}
 
               <Field orientation='horizontal'>
@@ -491,11 +438,16 @@ export function ReferralCampaignFormDrawer(
               <div className='border-border/70 bg-muted/20 rounded-md border px-3 py-3 text-sm'>
                 <p className='font-medium'>{t('Rule summary')}</p>
                 <p className='text-muted-foreground mt-1 leading-6'>
-                  {rewardSummary}
+                  {preserveReward
+                    ? t('Existing reward snapshots will be preserved.')
+                    : t(
+                        'After manual approval: inviter ${{inviter}}, new user ${{invitee}}.',
+                        { inviter: inviterUSD, invitee: inviteeUSD }
+                      )}
                 </p>
                 <p className='text-muted-foreground mt-1 leading-6'>
                   {t(
-                    'Only the first qualifying successful non-public-pool call within {{hours}} hours after registration counts.',
+                    'A successful non-public-pool call with quota consumption is required within {{hours}} hours after registration. Rewards wait for manual approval.',
                     { hours: activationHours }
                   )}
                 </p>
@@ -517,8 +469,7 @@ export function ReferralCampaignFormDrawer(
             form='referral-campaign-form'
             disabled={
               saveMutation.isPending ||
-              (rewardType === 'quota' &&
-                !preserveReward &&
+              (needsQuotaConfig &&
                 (!quotaConfig.isSuccess || quotaConfig.isFetching))
             }
           >

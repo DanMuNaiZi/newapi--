@@ -51,6 +51,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = info.UpstreamModelName
 	}
+	relaycommon.AppendMappedModelLogInfo(info, other)
 	attachQuotaSaturation(c, info, other)
 	resourceQuota := info.PriceData.ResourceQuota
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
@@ -64,6 +65,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		Group:            info.UsingGroup,
 		Other:            other,
 		ActivateReferral: true,
+		BillingSettled:   info.BillingSettlementSucceeded,
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
 	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)

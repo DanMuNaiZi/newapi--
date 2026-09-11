@@ -30,6 +30,8 @@ type User struct {
 	Status           int                        `json:"status" gorm:"type:int;default:1"` // enabled, disabled
 	Email            string                     `json:"email" gorm:"index" validate:"max=50"`
 	GitHubId         string                     `json:"github_id" gorm:"column:github_id;index"`
+	GithubCreatedAt  int64                      `json:"github_created_at" gorm:"column:github_created_at"`
+	GithubAgeExempt  bool                       `json:"github_age_exempt" gorm:"column:github_age_exempt"`
 	DiscordId        string                     `json:"discord_id" gorm:"column:discord_id;index"`
 	OidcId           string                     `json:"oidc_id" gorm:"column:oidc_id;index"`
 	WeChatId         string                     `json:"wechat_id" gorm:"column:wechat_id;index"`
@@ -618,18 +620,18 @@ func finishInvitationRegistration(inviteeId int, inviterId int) {
 	if inviterId == 0 || !operation_setting.IsPaymentComplianceConfirmed() {
 		return
 	}
-	if common.QuotaForInvitee > 0 {
-		_ = IncreaseUserQuota(inviteeId, common.QuotaForInvitee, true)
-		RecordLog(inviteeId, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
-	}
 	usedCampaign, err := HandleInvitationRegistration(inviterId, inviteeId)
 	if err != nil {
 		common.SysLog("failed to register referral invitation: " + err.Error())
 		return
 	}
 	if usedCampaign {
-		RecordLog(inviterId, LogTypeSystem, "邀请用户已进入拉新活动，等待首次有效调用")
+		RecordLog(inviterId, LogTypeSystem, "邀请用户已进入拉新活动，等待有效消费和人工审核")
 		return
+	}
+	if common.QuotaForInvitee > 0 {
+		_ = IncreaseUserQuota(inviteeId, common.QuotaForInvitee, true)
+		RecordLog(inviteeId, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
 	}
 	if common.QuotaForInviter > 0 {
 		RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))

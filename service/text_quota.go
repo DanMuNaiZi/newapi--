@@ -536,6 +536,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		Group:            relayInfo.UsingGroup,
 		Other:            other,
 		ActivateReferral: summary.Quota > 0 || summary.PromptTokens+summary.CompletionTokens > 0,
+		BillingSettled:   relayInfo.BillingSettlementSucceeded,
 	})
 	gopool.Go(func() {
 		perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens))

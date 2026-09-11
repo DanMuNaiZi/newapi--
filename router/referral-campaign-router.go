@@ -23,5 +23,7 @@ func registerReferralCampaignRoutes(apiRouter *gin.RouterGroup) {
 		adminRoute.PUT("/campaigns/:id", middleware.RequirePermission(authz.ReferralCampaignWrite), controller.AdminUpdateReferralCampaign)
 		adminRoute.GET("/campaigns/:id/events", middleware.RequirePermission(authz.ReferralCampaignRead), controller.AdminListReferralCampaignEvents)
 		adminRoute.POST("/events/:id/retry-reward", middleware.RequirePermission(authz.ReferralCampaignOperate), controller.AdminRetryReferralCampaignReward)
+		adminRoute.GET("/events/:id/review", middleware.RequirePermission(authz.ReferralCampaignRead), controller.AdminGetReferralEventReview)
+		adminRoute.POST("/events/:id/review", middleware.RequirePermission(authz.ReferralCampaignOperate), controller.AdminReviewReferralEvent)
 	}
 }

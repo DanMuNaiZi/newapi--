@@ -46,6 +46,7 @@ export interface ReferralCampaign {
   max_rewards_per_inviter: number
   total_reward_limit: number
   reward?: RewardSnapshot
+  invitee_reward?: RewardSnapshot
   registration_count: number
   activated_count: number
   rewarded_count: number
@@ -65,11 +66,32 @@ export interface ReferralCampaignEvent {
   activated_at: number
   reward_status?: string
   reward_failure_reason?: string
+  qualified_quota: number
+  qualified_at: number
+  review_decision?: string
+  reviewed_by?: number
+  reviewed_at?: number
+  review_remark?: string
+  reward?: RewardSnapshot
+  invitee_reward?: RewardSnapshot
 }
 
 export interface ReferralCampaignSelfView {
   campaign: ReferralCampaign | null
-  events: ReferralCampaignEvent[]
+  events: Pick<
+    ReferralCampaignEvent,
+    | 'id'
+    | 'campaign_id'
+    | 'invitee_username'
+    | 'status'
+    | 'registered_at'
+    | 'activation_deadline'
+    | 'activated_at'
+    | 'review_decision'
+    | 'reward_status'
+    | 'reward'
+    | 'invitee_reward'
+  >[]
 }
 
 export interface ReferralCampaignPayload {
@@ -82,7 +104,9 @@ export interface ReferralCampaignPayload {
   activation_window_seconds: number
   max_rewards_per_inviter: number
   total_reward_limit: number
-  reward: {
+  inviter_reward_usd?: string
+  invitee_reward_usd?: string
+  reward?: {
     type: RewardType
     amount: string
     unit: RewardUnit
@@ -101,4 +125,48 @@ export interface ReferralCampaignEventPage {
   total: number
   page: number
   page_size: number
+}
+
+export interface ReferralReviewUser {
+  id: number
+  username: string
+  created_at: number
+  github_id: string
+  github_created_at: number
+  github_age_exempt: boolean
+}
+
+export interface ReferralEventReview {
+  event: ReferralCampaignEvent
+  inviter: ReferralReviewUser
+  invitee: ReferralReviewUser
+  has_consumption: boolean
+  can_approve: boolean
+  usage: {
+    requests: number
+    consumed_quota: number
+    logs_available: boolean
+    period_start: number
+    period_end: number
+    recent_calls: {
+      id: number
+      created_at: number
+      request_id: string
+      model_name: string
+      quota: number
+      prompt_tokens: number
+      completion_tokens: number
+      successful: boolean
+      qualifying: boolean
+      public_pool: boolean
+    }[]
+  }
+  related_events: ReferralCampaignEvent[]
+  reward_grants: {
+    id: number
+    recipient_user_id: number
+    status: string
+    quota: number
+    failure_reason: string
+  }[]
 }

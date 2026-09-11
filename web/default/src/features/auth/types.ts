@@ -94,6 +94,8 @@ export interface SystemStatus {
     logo?: string
     github_oauth?: boolean
     github_client_id?: string
+    github_only_registration?: boolean
+    github_registration_min_age_days?: number
     discord_oauth?: boolean
     discord_client_id?: string
     oidc_enabled?: boolean
@@ -137,6 +139,8 @@ export interface SystemStatus {
   logo?: string
   github_oauth?: boolean
   github_client_id?: string
+  github_only_registration?: boolean
+  github_registration_min_age_days?: number
   discord_oauth?: boolean
   discord_client_id?: string
   oidc_enabled?: boolean
