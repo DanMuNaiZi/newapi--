@@ -18,6 +18,12 @@ func TestChannelStatusRoutesUseOperatePermission(t *testing.T) {
 	assertChannelRoutePermission(t, http.MethodPut, "/", authz.ChannelWrite, controller.UpdateChannel)
 }
 
+func TestChannelErrorRoutesUseReadAndWritePermissions(t *testing.T) {
+	assertChannelRoutePermission(t, http.MethodGet, "/:id/errors", authz.ChannelRead, controller.GetChannelErrors)
+	assertChannelRoutePermission(t, http.MethodPut, "/:id/error-display", authz.ChannelWrite, controller.UpdateChannelErrorDisplay)
+	assertChannelRoutePermission(t, http.MethodPut, "/:id/errors/:error_id/display", authz.ChannelWrite, controller.UpdateChannelErrorRecordDisplay)
+}
+
 func TestChannelDeleteRoutesUseSensitiveWritePermission(t *testing.T) {
 	assertChannelRoutePermission(t, http.MethodDelete, "/:id", authz.ChannelSensitiveWrite, controller.DeleteChannel)
 	assertChannelRoutePermission(t, http.MethodPost, "/batch", authz.ChannelSensitiveWrite, controller.DeleteChannelBatch)

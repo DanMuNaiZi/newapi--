@@ -64,6 +64,28 @@ func TestChannelHasSensitiveChanges(t *testing.T) {
 		assert.True(t, channelHasSensitiveChanges(&updated, origin, map[string]any{"header_override": newHeaderOverride}))
 	})
 
+	t.Run("upstream error display is writable with channel write", func(t *testing.T) {
+		originWithSettings := *origin
+		originWithSettings.OtherSettings = `{"allow_service_tier":true}`
+		updated := PatchChannel{Channel: originWithSettings}
+		updated.OtherSettings = `{"allow_service_tier":true,"upstream_error_display":{"show_details":false,"status_code":503,"message":"temporary unavailable"}}`
+
+		assert.False(t, channelHasSensitiveChanges(&updated, &originWithSettings, map[string]any{
+			"settings": updated.OtherSettings,
+		}))
+	})
+
+	t.Run("other settings remain sensitive", func(t *testing.T) {
+		originWithSettings := *origin
+		originWithSettings.OtherSettings = `{"allow_service_tier":false}`
+		updated := PatchChannel{Channel: originWithSettings}
+		updated.OtherSettings = `{"allow_service_tier":true,"upstream_error_display":{"show_details":false,"status_code":503,"message":"temporary unavailable"}}`
+
+		assert.True(t, channelHasSensitiveChanges(&updated, &originWithSettings, map[string]any{
+			"settings": updated.OtherSettings,
+		}))
+	})
+
 	t.Run("omitted sensitive fields do not use zero values", func(t *testing.T) {
 		updated := PatchChannel{}
 		updated.Id = origin.Id

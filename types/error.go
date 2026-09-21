@@ -69,14 +69,15 @@ const (
 	ErrorCodeBadRequestBody ErrorCode = "bad_request_body"
 
 	// response error
-	ErrorCodeReadResponseBodyFailed ErrorCode = "read_response_body_failed"
-	ErrorCodeBadResponseStatusCode  ErrorCode = "bad_response_status_code"
-	ErrorCodeBadResponse            ErrorCode = "bad_response"
-	ErrorCodeBadResponseBody        ErrorCode = "bad_response_body"
-	ErrorCodeEmptyResponse          ErrorCode = "empty_response"
-	ErrorCodeAwsInvokeError         ErrorCode = "aws_invoke_error"
-	ErrorCodeModelNotFound          ErrorCode = "model_not_found"
-	ErrorCodePromptBlocked          ErrorCode = "prompt_blocked"
+	ErrorCodeReadResponseBodyFailed     ErrorCode = "read_response_body_failed"
+	ErrorCodeBadResponseStatusCode      ErrorCode = "bad_response_status_code"
+	ErrorCodeBadResponse                ErrorCode = "bad_response"
+	ErrorCodeBadResponseBody            ErrorCode = "bad_response_body"
+	ErrorCodeEmptyResponse              ErrorCode = "empty_response"
+	ErrorCodeAwsInvokeError             ErrorCode = "aws_invoke_error"
+	ErrorCodeModelNotFound              ErrorCode = "model_not_found"
+	ErrorCodePromptBlocked              ErrorCode = "prompt_blocked"
+	ErrorCodeUpstreamServiceUnavailable ErrorCode = "upstream_service_unavailable"
 
 	// sql error
 	ErrorCodeQueryDataError  ErrorCode = "query_data_error"
@@ -88,14 +89,15 @@ const (
 )
 
 type NewAPIError struct {
-	Err            error
-	RelayError     any
-	skipRetry      bool
-	recordErrorLog *bool
-	errorType      ErrorType
-	errorCode      ErrorCode
-	StatusCode     int
-	Metadata       json.RawMessage
+	Err                error
+	RelayError         any
+	skipRetry          bool
+	recordErrorLog     *bool
+	errorType          ErrorType
+	errorCode          ErrorCode
+	StatusCode         int
+	originalStatusCode int
+	Metadata           json.RawMessage
 }
 
 // Unwrap enables errors.Is / errors.As to work with NewAPIError by exposing the underlying error.
@@ -118,6 +120,26 @@ func (e *NewAPIError) GetErrorType() ErrorType {
 		return ""
 	}
 	return e.errorType
+}
+
+func (e *NewAPIError) GetOriginalStatusCode() int {
+	if e == nil {
+		return 0
+	}
+	if e.originalStatusCode != 0 {
+		return e.originalStatusCode
+	}
+	return e.StatusCode
+}
+
+func (e *NewAPIError) SetMappedStatusCode(statusCode int) {
+	if e == nil {
+		return
+	}
+	if e.originalStatusCode == 0 {
+		e.originalStatusCode = e.StatusCode
+	}
+	e.StatusCode = statusCode
 }
 
 func (e *NewAPIError) Error() string {
@@ -175,6 +197,76 @@ func (e *NewAPIError) MaskSensitiveErrorWithStatusCode() string {
 
 func (e *NewAPIError) SetMessage(message string) {
 	e.Err = errors.New(message)
+	switch relayErr := e.RelayError.(type) {
+	case OpenAIError:
+		relayErr.Message = message
+		e.RelayError = relayErr
+	case ClaudeError:
+		relayErr.Message = message
+		e.RelayError = relayErr
+	}
+}
+
+func (e *NewAPIError) ClientCopy() *NewAPIError {
+	if e == nil {
+		return nil
+	}
+	copyError := *e
+	copyError.originalStatusCode = e.GetOriginalStatusCode()
+	copyError.Metadata = append(json.RawMessage(nil), e.Metadata...)
+	if relayErr, ok := e.RelayError.(OpenAIError); ok {
+		relayErr.Metadata = append(json.RawMessage(nil), relayErr.Metadata...)
+		copyError.RelayError = relayErr
+	}
+	return &copyError
+}
+
+func (e *NewAPIError) SetOpenAIClientError(message string, wireType string, code ErrorCode, statusCode int) {
+	if e == nil {
+		return
+	}
+	if e.originalStatusCode == 0 {
+		e.originalStatusCode = e.StatusCode
+	}
+	e.Err = errors.New(message)
+	e.RelayError = OpenAIError{
+		Message: message,
+		Type:    wireType,
+		Code:    code,
+	}
+	e.errorType = ErrorTypeOpenAIError
+	e.errorCode = code
+	e.StatusCode = statusCode
+	e.Metadata = nil
+}
+
+func (e *NewAPIError) SetClaudeClientError(message string, wireType string, code ErrorCode, statusCode int) {
+	if e == nil {
+		return
+	}
+	if e.originalStatusCode == 0 {
+		e.originalStatusCode = e.StatusCode
+	}
+	e.Err = errors.New(message)
+	e.RelayError = ClaudeError{
+		Type:    wireType,
+		Message: message,
+	}
+	e.errorType = ErrorTypeClaudeError
+	e.errorCode = code
+	e.StatusCode = statusCode
+	e.Metadata = nil
+}
+
+func (e *NewAPIError) ClearMetadata() {
+	if e == nil {
+		return
+	}
+	e.Metadata = nil
+	if relayErr, ok := e.RelayError.(OpenAIError); ok {
+		relayErr.Metadata = nil
+		e.RelayError = relayErr
+	}
 }
 
 func (e *NewAPIError) ToOpenAIError() OpenAIError {
@@ -260,6 +352,7 @@ func NewError(err error, errorCode ErrorCode, ops ...NewAPIErrorOptions) *NewAPI
 	for _, op := range ops {
 		op(e)
 	}
+	e.originalStatusCode = e.StatusCode
 	return e
 }
 
@@ -310,6 +403,7 @@ func NewErrorWithStatusCode(err error, errorCode ErrorCode, statusCode int, ops 
 	for _, op := range ops {
 		op(e)
 	}
+	e.originalStatusCode = statusCode
 
 	return e
 }
@@ -327,11 +421,12 @@ func WithOpenAIError(openAIError OpenAIError, statusCode int, ops ...NewAPIError
 		openAIError.Type = "upstream_error"
 	}
 	e := &NewAPIError{
-		RelayError: openAIError,
-		errorType:  ErrorTypeOpenAIError,
-		StatusCode: statusCode,
-		Err:        errors.New(openAIError.Message),
-		errorCode:  ErrorCode(code),
+		RelayError:         openAIError,
+		errorType:          ErrorTypeOpenAIError,
+		StatusCode:         statusCode,
+		Err:                errors.New(openAIError.Message),
+		errorCode:          ErrorCode(code),
+		originalStatusCode: statusCode,
 	}
 	// OpenRouter
 	if len(openAIError.Metadata) > 0 {
@@ -351,11 +446,12 @@ func WithClaudeError(claudeError ClaudeError, statusCode int, ops ...NewAPIError
 		claudeError.Type = "upstream_error"
 	}
 	e := &NewAPIError{
-		RelayError: claudeError,
-		errorType:  ErrorTypeClaudeError,
-		StatusCode: statusCode,
-		Err:        errors.New(claudeError.Message),
-		errorCode:  ErrorCode(claudeError.Type),
+		RelayError:         claudeError,
+		errorType:          ErrorTypeClaudeError,
+		StatusCode:         statusCode,
+		Err:                errors.New(claudeError.Message),
+		errorCode:          ErrorCode(claudeError.Type),
+		originalStatusCode: statusCode,
 	}
 	for _, op := range ops {
 		op(e)

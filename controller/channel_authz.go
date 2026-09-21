@@ -1,6 +1,12 @@
 package controller
 
-import "github.com/QuantumNous/new-api/model"
+import (
+	"reflect"
+	"strings"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
+)
 
 func channelHasSensitiveChanges(channel *PatchChannel, origin *model.Channel, requestData map[string]any) bool {
 	if _, ok := requestData["type"]; ok && channel.Type != origin.Type {
@@ -27,7 +33,7 @@ func channelHasSensitiveChanges(channel *PatchChannel, origin *model.Channel, re
 	if _, ok := requestData["other"]; ok && channel.Other != origin.Other {
 		return true
 	}
-	if _, ok := requestData["settings"]; ok && channel.OtherSettings != origin.OtherSettings {
+	if _, ok := requestData["settings"]; ok && channelSettingsRequireSensitiveWrite(channel.OtherSettings, origin.OtherSettings) {
 		return true
 	}
 	if _, ok := requestData["key_mode"]; ok && channel.KeyMode != nil {
@@ -54,6 +60,30 @@ func channelHasSensitiveChanges(channel *PatchChannel, origin *model.Channel, re
 		return true
 	}
 	return false
+}
+
+func channelSettingsRequireSensitiveWrite(updated string, origin string) bool {
+	if updated == origin {
+		return false
+	}
+	parse := func(raw string) (map[string]any, bool) {
+		value := map[string]any{}
+		if strings.TrimSpace(raw) == "" {
+			return value, true
+		}
+		if err := common.UnmarshalJsonStr(raw, &value); err != nil {
+			return nil, false
+		}
+		return value, true
+	}
+	updatedSettings, updatedValid := parse(updated)
+	originSettings, originValid := parse(origin)
+	if !updatedValid || !originValid {
+		return true
+	}
+	delete(updatedSettings, "upstream_error_display")
+	delete(originSettings, "upstream_error_display")
+	return !reflect.DeepEqual(updatedSettings, originSettings)
 }
 
 // channelSensitiveFields lists the channel fields whose modification requires

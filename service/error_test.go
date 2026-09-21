@@ -64,6 +64,28 @@ func TestResetStatusCode(t *testing.T) {
 	}
 }
 
+func TestResetStatusCodePreservesOriginalUpstreamStatus(t *testing.T) {
+	newAPIError := types.WithOpenAIError(types.OpenAIError{
+		Message: "unsupported model",
+		Type:    "invalid_request_error",
+		Code:    "unsupported_model",
+	}, http.StatusBadRequest)
+
+	ResetStatusCode(newAPIError, `{"400":503}`)
+
+	require.Equal(t, http.StatusServiceUnavailable, newAPIError.StatusCode)
+	require.Equal(t, http.StatusBadRequest, newAPIError.GetOriginalStatusCode())
+}
+
+func TestResetStatusCodePreservesOriginalStatusForLegacyErrorConstruction(t *testing.T) {
+	newAPIError := &types.NewAPIError{StatusCode: http.StatusBadRequest}
+
+	ResetStatusCode(newAPIError, `{"400":503}`)
+
+	require.Equal(t, http.StatusServiceUnavailable, newAPIError.StatusCode)
+	require.Equal(t, http.StatusBadRequest, newAPIError.GetOriginalStatusCode())
+}
+
 func TestRelayErrorHandlerTruncatesInvalidJSONBodyInLog(t *testing.T) {
 	withDebugEnabled(t, false)
 

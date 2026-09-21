@@ -18,7 +18,8 @@ var (
 	maskDomainPattern = regexp.MustCompile(`\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b`)
 	maskIPPattern     = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 	// maskApiKeyPattern matches patterns like 'api_key:xxx' or "api_key:xxx" to mask the API key value
-	maskApiKeyPattern = regexp.MustCompile(`(['"]?)api_key:([^\s'"]+)(['"]?)`)
+	maskApiKeyPattern            = regexp.MustCompile(`(['"]?)api_key:([^\s'"]+)(['"]?)`)
+	channelErrorRequestIDPattern = regexp.MustCompile(`(?i)\b(request[_ -]?id)\s*[:=]\s*[a-z0-9._:-]+`)
 )
 
 const LocalLogContentLimit = 2048
@@ -262,4 +263,9 @@ func MaskSensitiveInfo(str string) string {
 	str = maskApiKeyPattern.ReplaceAllString(str, "${1}api_key:***${3}")
 
 	return str
+}
+
+func NormalizeChannelErrorMessage(message string) string {
+	message = channelErrorRequestIDPattern.ReplaceAllString(message, `${1}=<id>`)
+	return strings.Join(strings.Fields(message), " ")
 }
