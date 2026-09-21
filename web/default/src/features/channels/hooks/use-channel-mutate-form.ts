@@ -27,7 +27,7 @@ import {
 } from '@/lib/admin-permissions'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { createChannel, updateChannel } from '../api'
+import { createChannel, updateChannel, updateChannelErrorDisplay } from '../api'
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import {
   transformFormDataToCreatePayload,
@@ -121,6 +121,21 @@ export function useChannelMutateForm(props: UseChannelMutateFormParams) {
         )
         if (!response.success) {
           throw new Error(response.message || t(ERROR_MESSAGES.UPDATE_FAILED))
+        }
+        if (!canEditSensitive) {
+          const displayResponse = await updateChannelErrorDisplay(
+            props.currentRow.id,
+            {
+              show_details: data.upstream_error_show_details === true,
+              status_code: data.upstream_error_status_code,
+              message: data.upstream_error_message.trim(),
+            }
+          )
+          if (!displayResponse.success) {
+            throw new Error(
+              displayResponse.message || t(ERROR_MESSAGES.UPDATE_FAILED)
+            )
+          }
         }
         return SUCCESS_MESSAGES.UPDATED
       }

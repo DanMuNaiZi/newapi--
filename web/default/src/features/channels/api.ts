@@ -25,12 +25,15 @@ import type {
   BatchSetTagParams,
   Channel,
   ChannelBalanceResponse,
+  ChannelErrorDisplayRule,
   ChannelOpsResponse,
   ChannelTestResponse,
   CopyChannelParams,
   CopyChannelResponse,
   FetchModelsResponse,
   GetChannelResponse,
+  GetChannelErrorsParams,
+  GetChannelErrorsResponse,
   GetChannelsParams,
   GetChannelsResponse,
   MultiKeyManageParams,
@@ -102,6 +105,46 @@ export async function searchChannels(
  */
 export async function getChannel(id: number): Promise<GetChannelResponse> {
   const res = await api.get(`/api/channel/${id}`)
+  return res.data
+}
+
+export async function getChannelErrors(
+  id: number,
+  params: GetChannelErrorsParams = {}
+): Promise<GetChannelErrorsResponse> {
+  const res = await api.get(
+    `/api/channel/${id}/errors`,
+    channelActionConfig({ params })
+  )
+  return res.data
+}
+
+export async function updateChannelErrorDisplay(
+  id: number,
+  data: {
+    show_details: boolean
+    status_code: number
+    message: string
+  }
+): Promise<{ success: boolean; message?: string; data?: unknown }> {
+  const res = await api.put(
+    `/api/channel/${id}/error-display`,
+    data,
+    channelActionConfig()
+  )
+  return res.data
+}
+
+export async function updateChannelErrorRecordDisplay(
+  channelId: number,
+  errorId: number,
+  data: ChannelErrorDisplayRule
+): Promise<{ success: boolean; message?: string; data?: unknown }> {
+  const res = await api.put(
+    `/api/channel/${channelId}/errors/${errorId}/display`,
+    data,
+    channelActionConfig()
+  )
   return res.data
 }
 

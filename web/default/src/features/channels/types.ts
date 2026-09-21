@@ -107,7 +107,44 @@ export interface ChannelOtherSettings {
   upstream_model_update_ignored_models?: string[]
   upstream_model_update_last_check_time?: number
   upstream_model_update_last_detected_models?: string[]
+  upstream_error_display?: UpstreamErrorDisplaySettings
   advanced_custom?: AdvancedCustomConfig
+}
+
+export interface UpstreamErrorDisplaySettings {
+  show_details: boolean
+  status_code: number
+  message: string
+}
+
+export type ChannelErrorDisplayMode =
+  | 'inherit'
+  | 'generic'
+  | 'original'
+  | 'custom'
+
+export interface ChannelErrorDisplayRule {
+  display_mode: ChannelErrorDisplayMode
+  display_status_code?: number
+  display_message?: string
+}
+
+export interface ChannelErrorRecord extends ChannelErrorDisplayRule {
+  id: number
+  channel_id: number
+  signature: string
+  request_path: string
+  request_model: string
+  upstream_status_code: number
+  final_status_code: number
+  error_type: string
+  error_code: string
+  sample_message: string
+  occurrence_count: number
+  first_seen_time: number
+  last_seen_time: number
+  last_request_id: string
+  last_multi_key_index: number
 }
 
 export interface AdvancedCustomConfig {
@@ -168,6 +205,17 @@ export interface GetChannelResponse {
   success: boolean
   message?: string
   data?: Channel
+}
+
+export interface GetChannelErrorsResponse {
+  success: boolean
+  message?: string
+  data?: {
+    items: ChannelErrorRecord[]
+    total: number
+    page: number
+    page_size: number
+  }
 }
 
 export interface ChannelOpsResponse {
@@ -286,6 +334,14 @@ export interface SearchChannelsParams {
   sort_order?: ChannelSortOrder
   p?: number
   page_size?: number
+}
+
+export interface GetChannelErrorsParams {
+  page?: number
+  page_size?: number
+  status_code?: number
+  request_model?: string
+  keyword?: string
 }
 
 export interface ChannelTestParams {

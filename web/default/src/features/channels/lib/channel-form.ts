@@ -32,6 +32,10 @@ import {
   validateAdvancedCustomConfig,
 } from './advanced-custom'
 
+export const DEFAULT_UPSTREAM_ERROR_STATUS_CODE = 503
+export const DEFAULT_UPSTREAM_ERROR_MESSAGE = '上游服务暂时不可用，请稍后重试'
+export const MAX_UPSTREAM_ERROR_MESSAGE_LENGTH = 500
+
 // ============================================================================
 // Form Validation Schema
 // ============================================================================
@@ -185,6 +189,20 @@ export const channelFormSchema = z
       .string()
       .optional()
       .refine(isOptionalJsonObject, ERROR_MESSAGES.INVALID_JSON),
+    upstream_error_show_details: z.boolean().optional(),
+    upstream_error_status_code: z
+      .number()
+      .int()
+      .min(400, 'Status code must be between 400 and 599')
+      .max(599, 'Status code must be between 400 and 599'),
+    upstream_error_message: z
+      .string()
+      .trim()
+      .min(1, 'Client error message is required')
+      .refine(
+        (value) => [...value].length <= MAX_UPSTREAM_ERROR_MESSAGE_LENGTH,
+        `Client error message must be ${MAX_UPSTREAM_ERROR_MESSAGE_LENGTH} characters or fewer`
+      ),
     advanced_custom: z.string().optional(),
     other: z.string().optional(),
     // Multi-key options (not sent to backend directly)
@@ -328,6 +346,9 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   param_override: '',
   header_override: '',
   settings: '{}',
+  upstream_error_show_details: false,
+  upstream_error_status_code: DEFAULT_UPSTREAM_ERROR_STATUS_CODE,
+  upstream_error_message: DEFAULT_UPSTREAM_ERROR_MESSAGE,
   other: '',
   multi_key_mode: 'single',
   multi_key_type: 'random',
@@ -413,6 +434,9 @@ export function transformChannelToFormDefaults(
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
+  let upstreamErrorShowDetails = false
+  let upstreamErrorStatusCode = DEFAULT_UPSTREAM_ERROR_STATUS_CODE
+  let upstreamErrorMessage = DEFAULT_UPSTREAM_ERROR_MESSAGE
   let advancedCustom = ''
 
   if (channel.settings) {
@@ -439,6 +463,30 @@ export function transformChannelToFormDefaults(
       )
         ? parsed.upstream_model_update_ignored_models.join(',')
         : ''
+      const upstreamErrorDisplay = parsed.upstream_error_display
+      if (
+        isJsonObjectValue(upstreamErrorDisplay) &&
+        typeof upstreamErrorDisplay.show_details === 'boolean'
+      ) {
+        upstreamErrorShowDetails = upstreamErrorDisplay.show_details
+      }
+      if (
+        isJsonObjectValue(upstreamErrorDisplay) &&
+        Number.isInteger(upstreamErrorDisplay.status_code) &&
+        Number(upstreamErrorDisplay.status_code) >= 400 &&
+        Number(upstreamErrorDisplay.status_code) <= 599
+      ) {
+        upstreamErrorStatusCode = Number(upstreamErrorDisplay.status_code)
+      }
+      if (
+        isJsonObjectValue(upstreamErrorDisplay) &&
+        typeof upstreamErrorDisplay.message === 'string' &&
+        upstreamErrorDisplay.message.trim() &&
+        [...upstreamErrorDisplay.message].length <=
+          MAX_UPSTREAM_ERROR_MESSAGE_LENGTH
+      ) {
+        upstreamErrorMessage = upstreamErrorDisplay.message
+      }
       if (parsed.advanced_custom) {
         advancedCustom = stringifyAdvancedCustomConfig(parsed.advanced_custom)
       }
@@ -493,6 +541,9 @@ export function transformChannelToFormDefaults(
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
+    upstream_error_show_details: upstreamErrorShowDetails,
+    upstream_error_status_code: upstreamErrorStatusCode,
+    upstream_error_message: upstreamErrorMessage,
     advanced_custom: advancedCustom,
   }
 }
@@ -599,6 +650,14 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
 
   settingsObj.disable_task_polling_sleep =
     formData.disable_task_polling_sleep === true
+
+  settingsObj.upstream_error_display = {
+    show_details: formData.upstream_error_show_details === true,
+    status_code:
+      formData.upstream_error_status_code || DEFAULT_UPSTREAM_ERROR_STATUS_CODE,
+    message:
+      formData.upstream_error_message?.trim() || DEFAULT_UPSTREAM_ERROR_MESSAGE,
+  }
 
   // Upstream model update settings (for model-fetchable channel types)
   if (MODEL_FETCHABLE_TYPES.has(formData.type)) {

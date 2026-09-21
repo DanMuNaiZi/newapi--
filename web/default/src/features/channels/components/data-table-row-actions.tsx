@@ -33,6 +33,7 @@ import {
   Trash2,
   RefreshCw,
   Loader2,
+  FileWarning,
 } from 'lucide-react'
 import { useContext, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -141,6 +142,11 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const handleManageKeys = () => {
     setCurrentRow(channel)
     setOpen('multi-key-manage')
+  }
+
+  const handleViewErrors = () => {
+    setCurrentRow(channel)
+    setOpen('channel-errors')
   }
 
   const handleToggleStatus = async (
@@ -286,6 +292,13 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
             {t('Query Balance')}
             <DropdownMenuShortcut>
               <DollarSign size={16} />
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+
+          <DropdownMenuItem onClick={handleViewErrors}>
+            {t('Error Records')}
+            <DropdownMenuShortcut>
+              <FileWarning size={16} />
             </DropdownMenuShortcut>
           </DropdownMenuItem>
 

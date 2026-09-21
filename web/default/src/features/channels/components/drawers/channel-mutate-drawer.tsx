@@ -149,6 +149,8 @@ import { useChannelMutateForm } from '../../hooks/use-channel-mutate-form'
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
   CHANNEL_TYPE_ADVANCED_CUSTOM,
+  DEFAULT_UPSTREAM_ERROR_MESSAGE,
+  DEFAULT_UPSTREAM_ERROR_STATUS_CODE,
   channelFormSchema,
   channelsQueryKeys,
   getAdvancedCustomStats,
@@ -255,6 +257,7 @@ const ADVANCED_SETTINGS_SECTION_IDS = {
   routingStrategy: 'channel-section-advanced-routing-strategy',
   internalNotes: 'channel-section-advanced-internal-notes',
   overrideRules: 'channel-section-advanced-override-rules',
+  upstreamErrorDisplay: 'channel-section-advanced-upstream-error-display',
   extraSettings: 'channel-section-advanced-extra-settings',
   fieldPassthrough: 'channel-section-advanced-field-passthrough',
   upstreamModelDetection: 'channel-section-advanced-upstream-model-detection',
@@ -339,6 +342,9 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.pass_through_body_enabled ||
     values.system_prompt_override ||
     values.claude_beta_query ||
+    values.upstream_error_show_details ||
+    values.upstream_error_status_code !== DEFAULT_UPSTREAM_ERROR_STATUS_CODE ||
+    values.upstream_error_message !== DEFAULT_UPSTREAM_ERROR_MESSAGE ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
     values.upstream_model_update_ignored_models?.trim()
@@ -615,6 +621,11 @@ export function ChannelMutateDrawer({
     ADMIN_PERMISSION_RESOURCES.CHANNEL,
     ADMIN_PERMISSION_ACTIONS.SENSITIVE_WRITE
   )
+  const canEditChannel = hasPermission(
+    currentUser,
+    ADMIN_PERMISSION_RESOURCES.CHANNEL,
+    ADMIN_PERMISSION_ACTIONS.WRITE
+  )
   const canRevealChannelKey = currentUser?.role === ROLE.SUPER_ADMIN
   const [fetchModelsDialogOpen, setFetchModelsDialogOpen] = useState(false)
   const [channelKey, setChannelKey] = useState<string | null>(null)
@@ -758,6 +769,13 @@ export function ChannelMutateDrawer({
   const currentAllowInferenceGeo = form.watch('allow_inference_geo')
   const currentAllowSpeed = form.watch('allow_speed')
   const currentClaudeBetaQuery = form.watch('claude_beta_query')
+  const currentUpstreamErrorShowDetails = form.watch(
+    'upstream_error_show_details'
+  )
+  const currentUpstreamErrorStatusCode = form.watch(
+    'upstream_error_status_code'
+  )
+  const currentUpstreamErrorMessage = form.watch('upstream_error_message')
   const currentUpstreamModelUpdateAutoSyncEnabled = form.watch(
     'upstream_model_update_auto_sync_enabled'
   )
@@ -1008,6 +1026,11 @@ export function ChannelMutateDrawer({
     hasConfiguredOverrideValue(currentParamOverride) ||
     hasConfiguredOverrideValue(currentHeaderOverride)
   )
+  const upstreamErrorDisplayConfigured = Boolean(
+    currentUpstreamErrorShowDetails ||
+    currentUpstreamErrorStatusCode !== DEFAULT_UPSTREAM_ERROR_STATUS_CODE ||
+    currentUpstreamErrorMessage !== DEFAULT_UPSTREAM_ERROR_MESSAGE
+  )
   const extraSettingsConfigured = Boolean(
     currentForceFormat ||
     currentThinkingToContent ||
@@ -1043,6 +1066,7 @@ export function ChannelMutateDrawer({
     routingStrategyConfigured ||
     internalNotesConfigured ||
     overrideRulesConfigured ||
+    upstreamErrorDisplayConfigured ||
     extraSettingsConfigured ||
     fieldPassthroughConfigured ||
     upstreamModelDetectionConfigured
@@ -1062,6 +1086,11 @@ export function ChannelMutateDrawer({
       id: ADVANCED_SETTINGS_SECTION_IDS.overrideRules,
       title: t('Override Rules'),
       configured: overrideRulesConfigured,
+    },
+    {
+      id: ADVANCED_SETTINGS_SECTION_IDS.upstreamErrorDisplay,
+      title: t('Upstream Error Display'),
+      configured: upstreamErrorDisplayConfigured,
     },
     {
       id: ADVANCED_SETTINGS_SECTION_IDS.extraSettings,
@@ -4061,6 +4090,112 @@ export function ChannelMutateDrawer({
                               />
                             </fieldset>
                           </div>
+                        </div>
+
+                        {/* ── Upstream Error Display ── */}
+                        <div
+                          id={
+                            ADVANCED_SETTINGS_SECTION_IDS.upstreamErrorDisplay
+                          }
+                          className={sideDrawerSectionClassName(
+                            configuredAdvancedSectionClassName(
+                              'scroll-mt-4',
+                              upstreamErrorDisplayConfigured
+                            )
+                          )}
+                        >
+                          <CardHeading
+                            title={t('Upstream Error Display')}
+                            icon={<AlertCircle className='h-4 w-4' />}
+                          />
+                          <Alert>
+                            <AlertDescription>
+                              {t(
+                                'Upstream error details are always sanitized before display. Channel keys, access tokens, and authorization headers are never shown.'
+                              )}
+                            </AlertDescription>
+                          </Alert>
+                          <fieldset
+                            disabled={isEditing && !canEditChannel}
+                            className='space-y-4 disabled:opacity-60'
+                          >
+                            <FormField
+                              control={form.control}
+                              name='upstream_error_show_details'
+                              render={({ field }) => (
+                                <FormItem className='flex items-center justify-between gap-4 border-y px-4 py-3'>
+                                  <div className='space-y-0.5'>
+                                    <FormLabel>
+                                      {t(
+                                        'Show sanitized upstream error details by default'
+                                      )}
+                                    </FormLabel>
+                                    <FormDescription>
+                                      {t(
+                                        'When disabled, clients receive the generic status code and message below.'
+                                      )}
+                                    </FormDescription>
+                                  </div>
+                                  <FormControl>
+                                    <Switch
+                                      checked={field.value}
+                                      onCheckedChange={field.onChange}
+                                    />
+                                  </FormControl>
+                                </FormItem>
+                              )}
+                            />
+
+                            <div className='grid gap-4 sm:grid-cols-[10rem_1fr]'>
+                              <FormField
+                                control={form.control}
+                                name='upstream_error_status_code'
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>
+                                      {t('Generic client status code')}
+                                    </FormLabel>
+                                    <FormControl>
+                                      <Input
+                                        type='number'
+                                        min={400}
+                                        max={599}
+                                        {...field}
+                                        onChange={(event) =>
+                                          field.onChange(
+                                            Number(event.target.value)
+                                          )
+                                        }
+                                      />
+                                    </FormControl>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+                              <FormField
+                                control={form.control}
+                                name='upstream_error_message'
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>
+                                      {t('Generic client error message')}
+                                    </FormLabel>
+                                    <FormControl>
+                                      <Textarea
+                                        rows={2}
+                                        maxLength={500}
+                                        {...field}
+                                      />
+                                    </FormControl>
+                                    <FormDescription>
+                                      {t('Maximum 500 characters.')}
+                                    </FormDescription>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+                            </div>
+                          </fieldset>
                         </div>
 
                         {/* ── Extra Settings ── */}
