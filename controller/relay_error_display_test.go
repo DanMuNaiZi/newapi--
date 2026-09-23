@@ -7,11 +7,11 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -197,7 +197,7 @@ func TestProcessChannelErrorAggregatesSanitizedFailures(t *testing.T) {
 	channelErr := types.NewChannelError(17, 48, "codex", true, "sk-channel-secret", false)
 	upstreamErr := newUnsupportedModelError()
 
-	firstPolicy := processChannelError(c, relayInfo, *channelErr, upstreamErr)
+	firstPolicy := processRelayChannelError(c, *channelErr, upstreamErr, relayInfo)
 	require.NotNil(t, firstPolicy)
 	require.NotNil(t, firstPolicy.Record)
 	assert.EqualValues(t, 1, firstPolicy.Record.OccurrenceCount)
@@ -207,7 +207,7 @@ func TestProcessChannelErrorAggregatesSanitizedFailures(t *testing.T) {
 	assert.NotContains(t, firstPolicy.Record.SampleMessage, "gpt-5.6-terra")
 
 	c.Set(common.RequestIdKey, "req-second")
-	secondPolicy := processChannelError(c, relayInfo, *channelErr, upstreamErr)
+	secondPolicy := processRelayChannelError(c, *channelErr, upstreamErr, relayInfo)
 	require.NotNil(t, secondPolicy.Record)
 	assert.Equal(t, firstPolicy.Record.ID, secondPolicy.Record.ID)
 	assert.EqualValues(t, 2, secondPolicy.Record.OccurrenceCount)

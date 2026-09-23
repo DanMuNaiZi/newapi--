@@ -6,7 +6,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -161,7 +161,8 @@ func TestBatchDeletingChannelsDeletesAggregatedErrors(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	require.NoError(t, BatchDeleteChannels([]int{channels[0].Id, channels[1].Id}))
+	_, err := BatchDeleteChannels([]int{channels[0].Id, channels[1].Id})
+	require.NoError(t, err)
 
 	var count int64
 	require.NoError(t, DB.Model(&ChannelErrorRecord{}).

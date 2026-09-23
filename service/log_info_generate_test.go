@@ -29,8 +29,11 @@ func TestGenerateTextOtherInfoRecordsClientAndUpstreamMappedModels(t *testing.T)
 	}
 
 	other := GenerateTextOtherInfo(ctx, relayInfo, 1, 1, 1, 0, 0, 0, 1)
+	snapshot := other.Snapshot()
+	adminInfo, ok := snapshot["admin_info"].(map[string]any)
+	require.True(t, ok)
 
-	require.Equal(t, "gpt-5.6-sol", other["request_model_name"])
-	require.Equal(t, "gpt-5.6-terra", other["upstream_model_name"])
-	require.Equal(t, true, other["is_model_mapped"])
+	require.Equal(t, "gpt-5.6-sol", snapshot["request_model_name"])
+	require.Equal(t, "gpt-5.6-terra", adminInfo["upstream_model_name"])
+	require.Equal(t, true, adminInfo["is_model_mapped"])
 }

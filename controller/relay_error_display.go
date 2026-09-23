@@ -2,17 +2,14 @@ package controller
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/types"
-	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 )
 
@@ -81,14 +78,15 @@ func setGenericClientRelayError(relayFormat types.RelayFormat, clientErr *types.
 	clientErr.SetOpenAIClientError(message, "upstream_error", types.ErrorCodeUpstreamServiceUnavailable, statusCode)
 }
 
-func processChannelError(c *gin.Context, relayInfo *relaycommon.RelayInfo, channelError types.ChannelError, err *types.NewAPIError) *channelErrorDisplayPolicy {
+func processRelayChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayInfo *relaycommon.RelayInfo) *channelErrorDisplayPolicy {
 	defaultSettings := dto.NormalizeUpstreamErrorDisplaySettings(nil)
 	if relayInfo != nil && relayInfo.ChannelMeta != nil {
 		defaultSettings = dto.NormalizeUpstreamErrorDisplaySettings(relayInfo.ChannelOtherSettings.UpstreamErrorDisplay)
 	}
 	policy := &channelErrorDisplayPolicy{Default: defaultSettings}
 
-	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
+	service.ProcessChannelError(c, channelError, err, relayInfo)
+
 	requestPath := ""
 	if c.Request != nil && c.Request.URL != nil {
 		requestPath = c.Request.URL.Path
@@ -123,48 +121,6 @@ func processChannelError(c *gin.Context, relayInfo *relaycommon.RelayInfo, chann
 		logger.LogWarn(c, fmt.Sprintf("failed to aggregate channel error for channel #%d: %v", channelError.ChannelId, recordErr))
 	} else {
 		policy.Record = record
-	}
-
-	// Do not use context to get channel information here. Retry may already have
-	// replaced the selected channel in the context.
-	if service.ShouldDisableChannel(err) && channelError.AutoBan {
-		gopool.Go(func() {
-			service.DisableChannel(channelError, err.ErrorWithStatusCode())
-		})
-	}
-
-	if constant.ErrorLogEnabled && types.IsRecordErrorLog(err) {
-		userID := c.GetInt("id")
-		tokenName := c.GetString("token_name")
-		modelName := requestModel
-		tokenID := c.GetInt("token_id")
-		userGroup := c.GetString("group")
-		other := make(map[string]interface{})
-		if requestPath != "" {
-			other["request_path"] = requestPath
-		}
-		other["error_type"] = err.GetErrorType()
-		other["error_code"] = err.GetErrorCode()
-		other["status_code"] = err.StatusCode
-		other["channel_id"] = channelError.ChannelId
-		other["channel_name"] = channelError.ChannelName
-		other["channel_type"] = channelError.ChannelType
-		adminInfo := make(map[string]interface{})
-		adminInfo["use_channel"] = c.GetStringSlice("use_channel")
-		if channelError.IsMultiKey {
-			adminInfo["is_multi_key"] = true
-			adminInfo["multi_key_index"] = multiKeyIndex
-		}
-		service.AppendChannelAffinityAdminInfo(c, adminInfo)
-		relaycommon.AppendMappedModelLogInfo(relayInfo, other)
-		other["admin_info"] = adminInfo
-		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
-		if startTime.IsZero() {
-			startTime = time.Now()
-		}
-		useTimeSeconds := int(time.Since(startTime).Seconds())
-		content := relaycommon.ClientVisibleErrorMessage(relayInfo, err.MaskSensitiveErrorWithStatusCode())
-		model.RecordErrorLog(c, userID, channelError.ChannelId, modelName, tokenName, content, tokenID, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
 	}
 
 	return policy

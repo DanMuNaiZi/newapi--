@@ -10,7 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/types"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -61,7 +61,7 @@ func TestProcessChannelErrorRecordsRequestedModelAndMasksMappedUpstream(t *testi
 		Code:    "auth_unavailable",
 	}, http.StatusServiceUnavailable)
 
-	processChannelError(ctx, relayInfo, types.ChannelError{ChannelId: 135}, apiErr)
+	processRelayChannelError(ctx, types.ChannelError{ChannelId: 135}, apiErr, relayInfo)
 
 	var errorLog model.Log
 	require.NoError(t, db.Where("type = ? AND user_id = ?", model.LogTypeError, user.Id).First(&errorLog).Error)
@@ -72,11 +72,12 @@ func TestProcessChannelErrorRecordsRequestedModelAndMasksMappedUpstream(t *testi
 	var other map[string]interface{}
 	require.NoError(t, common.Unmarshal([]byte(errorLog.Other), &other))
 	assert.Equal(t, "gpt-5.6-sol", other["request_model_name"])
-	assert.Equal(t, "gpt-5.6-terra", other["upstream_model_name"])
-	assert.Equal(t, true, other["is_model_mapped"])
+	assert.NotContains(t, other, "upstream_model_name")
+	assert.NotContains(t, other, "is_model_mapped")
 	adminInfo, ok := other["admin_info"].(map[string]interface{})
 	require.True(t, ok)
-	assert.NotContains(t, adminInfo, "upstream_model_name")
+	assert.Equal(t, "gpt-5.6-terra", adminInfo["upstream_model_name"])
+	assert.Equal(t, true, adminInfo["is_model_mapped"])
 
 	model.HideActualModelNames([]*model.Log{&errorLog})
 	var hiddenOther map[string]interface{}
@@ -98,7 +99,7 @@ func TestGetAllLogsHidesMappedUpstreamModelWithoutActualModelPermission(t *testi
 		UserId:    user.Id,
 		Username:  user.Username,
 		Type:      model.LogTypeError,
-		ModelName: "gpt-5.6-terra",
+		ModelName: "gpt-5.6-sol",
 		Content:   "mapped channel failed",
 		Other:     `{"request_model_name":"gpt-5.6-sol","upstream_model_name":"gpt-5.6-terra","is_model_mapped":true,"admin_info":{"upstream_model_name":"gpt-5.6-terra"}}`,
 		CreatedAt: common.GetTimestamp(),

@@ -33,6 +33,8 @@ func setupLotteryControllerTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.AutoMigrate(
 		&model.User{},
 		&model.Log{},
+		&model.AuditLog{},
+		&model.ChannelErrorRecord{},
 		&model.LotteryPlan{},
 		&model.LotteryPlanGroup{},
 		&model.LotteryPlanUser{},
