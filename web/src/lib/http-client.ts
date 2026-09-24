@@ -31,6 +31,7 @@ import {
   safeServerErrorMessage,
 } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
+import { useUserPreviewStore } from '@/stores/user-preview-store'
 
 declare module 'axios' {
   export interface AxiosRequestConfig {
@@ -95,6 +96,14 @@ api.interceptors.response.use(
     const config = error?.config as ApiRequestConfig | undefined
     const skipErrorHandler = config?.skipErrorHandler
     const status = error?.response?.status
+
+    if (
+      status === 401 &&
+      String(error?.response?.data?.code || '').startsWith('AUTH_USER_PREVIEW')
+    ) {
+      useUserPreviewStore.getState().clear()
+      throw error
+    }
 
     if (status === 401) {
       if (config && !config.skipAuthRefresh && !config.authRetry) {
@@ -161,6 +170,10 @@ api.interceptors.request.use(async (config) => {
   const accessToken = useAuthStore.getState().auth.accessToken
   if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`
+  }
+  const previewToken = useUserPreviewStore.getState().token
+  if (previewToken) {
+    config.headers['New-Api-User-Preview'] = previewToken
   }
   return config
 })

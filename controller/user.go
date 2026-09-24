@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
@@ -414,6 +415,55 @@ func GetUser(c *gin.Context) {
 	return
 }
 
+// StartUserPreview issues a short-lived, signed read-only token while keeping
+// the administrator's browser session unchanged.
+func StartUserPreview(c *gin.Context) {
+	targetID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || targetID <= 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	actorID := c.GetInt("id")
+	if c.GetInt("role") != common.RoleRootUser {
+		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
+		return
+	}
+	target, err := model.GetUserById(targetID, false)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
+		} else {
+			common.ApiError(c, err)
+		}
+		return
+	}
+	if target.Status != common.UserStatusEnabled || target.Role != common.RoleCommonUser {
+		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
+		return
+	}
+	token, claims, err := service.IssueUserPreviewToken(actorID, targetID, time.Now())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	model.RecordAuditLog(c, model.AuditLog{
+		UserId: target.Id, Username: target.Username, ActorRole: c.GetInt("role"),
+		Category: model.AuditCategorySecurity, Action: "user.preview_start",
+		AuthMethod: "session", Success: true,
+		Other: model.AuditOther{Op: &model.AuditOperation{Action: "user.preview_start", Params: model.AuditFields{"actor_id": actorID, "target_id": target.Id}}},
+	})
+	markAuditLogged(c)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data": gin.H{
+			"token":      token,
+			"expires_at": claims.ExpiresAt,
+			"target":     gin.H{"id": target.Id, "username": target.Username, "display_name": target.DisplayName},
+		},
+	})
+}
+
 type TransferAffQuotaRequest struct {
 	Quota int `json:"quota" binding:"required"`
 }
@@ -476,6 +526,9 @@ func GetSelf(c *gin.Context) {
 		return
 	}
 	responseData := buildSelfUserData(user)
+	if c.GetBool("user_preview") {
+		redactPreviewUserData(responseData)
+	}
 	// The authenticated role is loaded from GetUserCache. It should equal the
 	// row role, but use it for capabilities so GetSelf and login/refresh remain
 	// consistent with the authorization decision made for this request.
@@ -489,6 +542,13 @@ func GetSelf(c *gin.Context) {
 		"data":    responseData,
 	})
 	return
+}
+
+func redactPreviewUserData(data map[string]any) {
+	for _, key := range []string{"email", "github_id", "discord_id", "oidc_id", "wechat_id", "telegram_id", "linux_do_id", "aff_code", "aff_count", "aff_quota", "aff_history_quota", "inviter_id", "stripe_customer", "setting"} {
+		delete(data, key)
+	}
+	data["permissions"] = map[string]any{}
 }
 
 // buildSelfUserData is the single safe dashboard-user DTO used by GetSelf,

@@ -43,6 +43,10 @@ var auditContentTemplates = map[string]string{
 	"user.email_binding_resend": "Email confirmation code resend",
 	"user.passkey_delete":       "Deleted a passkey",
 	"user.reset_passkey":        "Reset the user passkey",
+	"user.preview_start":        "Started a read-only user preview",
+	"user.preview_access":       "Viewed the dashboard as another user",
+	"user.preview_rejected":     "Rejected a user preview request",
+	"user.preview_expired":      "Rejected an expired user preview request",
 	"option.update":             "Updated system setting ${key}",
 
 	"option.passkey_domains":           "Updated Passkey domains: removed ${domains}; affected ${known}; unknown ${unknown}",

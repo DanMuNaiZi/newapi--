@@ -32,6 +32,12 @@ import type {
   ApiResponse,
 } from './types'
 
+export interface UserPreviewResponse {
+  token: string
+  expires_at: number
+  target: { id: number; username: string; display_name?: string }
+}
+
 // ============================================================================
 // User Management APIs
 // ============================================================================
@@ -88,6 +94,13 @@ export async function searchUsers(
  */
 export async function getUser(id: number): Promise<ApiResponse<User>> {
   const res = await api.get(`/api/user/${id}`)
+  return res.data
+}
+
+export async function startUserPreview(
+  id: number
+): Promise<ApiResponse<UserPreviewResponse>> {
+  const res = await api.post(`/api/user/${id}/preview`)
   return res.data
 }
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -65,7 +66,12 @@ func authHelper(c *gin.Context, minRole int) {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"success": false, "code": "AUTH_USER_INVALID", "message": common.TranslateMessage(c, i18n.MsgAuthUserInfoInvalid)})
 		return
 	}
-	setDashboardAuthContext(c, user, identity, useAccessToken)
+	if !authorizeUserPreview(c, user, identity, useAccessToken) {
+		return
+	}
+	if !c.GetBool("user_preview") {
+		setDashboardAuthContext(c, user, identity, useAccessToken)
+	}
 
 	// 管理/root 写操作审计兜底：内聚在鉴权链路里，保证任何经过 AdminAuth/RootAuth
 	// 的写接口都会自动留痕（无需在路由上单独挂审计中间件，避免漏挂）。
@@ -78,6 +84,89 @@ func authHelper(c *gin.Context, minRole int) {
 	c.Next()
 
 	finishAdminAudit(c, auditWriter)
+}
+
+const userPreviewHeader = "New-Api-User-Preview"
+
+func authorizeUserPreview(c *gin.Context, actor *model.UserBase, identity service.AuthIdentity, useAccessToken bool) bool {
+	raw := strings.TrimSpace(c.GetHeader(userPreviewHeader))
+	if raw == "" {
+		return true
+	}
+	if useAccessToken || identity.SessionID == "" || actor.Role != common.RoleRootUser {
+		writeUserPreviewRejection(c, actor, 0, "user.preview_rejected", http.StatusUnauthorized)
+		return false
+	}
+	claims, err := service.VerifyUserPreviewToken(raw, time.Now())
+	if err != nil {
+		status := http.StatusUnauthorized
+		action := "user.preview_rejected"
+		if errors.Is(err, service.ErrUserPreviewExpired) {
+			action = "user.preview_expired"
+		}
+		writeUserPreviewRejection(c, actor, claims.TargetID, action, status)
+		return false
+	}
+	if claims.ActorID != actor.Id {
+		writeUserPreviewRejection(c, actor, claims.TargetID, "user.preview_rejected", http.StatusUnauthorized)
+		return false
+	}
+	if c.Request.Method != http.MethodGet {
+		writeUserPreviewRejection(c, actor, claims.TargetID, "user.preview_rejected", http.StatusForbidden)
+		return false
+	}
+	if !userPreviewPathAllowed(c.Request.URL.Path) {
+		writeUserPreviewRejection(c, actor, claims.TargetID, "user.preview_rejected", http.StatusForbidden)
+		return false
+	}
+	target, err := model.GetUserCache(claims.TargetID)
+	if err != nil || target.Status != common.UserStatusEnabled || target.Role != common.RoleCommonUser {
+		writeUserPreviewRejection(c, actor, claims.TargetID, "user.preview_rejected", http.StatusForbidden)
+		return false
+	}
+	c.Set("user_preview", true)
+	c.Set("user_preview_actor_id", actor.Id)
+	c.Set("user_preview_target_id", target.Id)
+	c.Set("user_preview_expires_at", claims.ExpiresAt)
+	// Keep the actor's session identity for refresh/logout checks while exposing
+	// the target user to read-only controllers through the normal context keys.
+	setDashboardAuthContext(c, target, identity, false)
+	model.RecordAuditLog(c, model.AuditLog{
+		UserId: target.Id, Username: target.Username, ActorRole: actor.Role,
+		Category: model.AuditCategorySecurity, Action: "user.preview_access",
+		AuthMethod: "session", Success: true,
+		Other: model.AuditOther{Op: &model.AuditOperation{Action: "user.preview_access", Params: model.AuditFields{"actor_id": actor.Id, "target_id": target.Id}}},
+	})
+	return true
+}
+
+func userPreviewPathAllowed(path string) bool {
+	for _, prefix := range []string{
+		"/api/user/self", "/api/user/models", "/api/user/topup/self", "/api/user/topup/info",
+		"/api/user/checkin", "/api/log/self", "/api/data/self", "/api/data/flow/self",
+		"/api/midjourney/self", "/api/task/self", "/api/subscription/plans", "/api/subscription/self",
+	} {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func writeUserPreviewRejection(c *gin.Context, actor *model.UserBase, targetID int, action string, status int) {
+	if actor != nil {
+		model.RecordAuditLog(c, model.AuditLog{
+			UserId: targetID, Username: actor.Username, ActorRole: actor.Role,
+			Category: model.AuditCategorySecurity, Action: action,
+			AuthMethod: "session", Status: status, Success: false,
+			Other: model.AuditOther{Op: &model.AuditOperation{Action: action, Params: model.AuditFields{"actor_id": actor.Id, "target_id": targetID}}},
+		})
+	}
+	code := "AUTH_USER_PREVIEW_INVALID"
+	if status == http.StatusForbidden {
+		code = "AUTH_USER_PREVIEW_READ_ONLY"
+	}
+	c.AbortWithStatusJSON(status, gin.H{"success": false, "code": code, "message": "User preview is read-only"})
 }
 
 func TryUserAuth() func(c *gin.Context) {

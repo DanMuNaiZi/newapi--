@@ -147,6 +147,7 @@ func SetApiRouter(router *gin.Engine) {
 			adminRoute := userRoute.Group("/")
 			adminRoute.Use(middleware.ManagedAdminAuth())
 			{
+				userRoute.POST("/:id/preview", middleware.RootAuth(), middleware.CriticalRateLimit(), middleware.DisableCache(), controller.StartUserPreview)
 				adminRoute.GET("/", middleware.RequirePermission(authz.UserRead), controller.GetAllUsers)
 				adminRoute.GET("/topup", middleware.RequirePermission(authz.UserRead), controller.GetAllTopUps)
 				adminRoute.POST("/topup/complete", middleware.RequirePermission(authz.UserQuota), controller.AdminCompleteTopUp)

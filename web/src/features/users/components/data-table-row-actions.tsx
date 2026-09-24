@@ -28,10 +28,13 @@ import {
   ShieldAlert,
   Link2,
   CreditCard,
+  Eye,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { DataTableRowActionMenu } from '@/components/data-table/core/row-action-menu'
@@ -48,8 +51,15 @@ import {
 } from '@/components/ui/tooltip'
 import { UserSubscriptionsDialog } from '@/features/subscriptions/components/dialogs/user-subscriptions-dialog'
 import { handleServerError } from '@/lib/handle-server-error'
+import { useAuthStore } from '@/stores/auth-store'
+import { useUserPreviewStore } from '@/stores/user-preview-store'
 
-import { manageUser, resetUserPasskey, resetUserTwoFA } from '../api'
+import {
+  manageUser,
+  resetUserPasskey,
+  resetUserTwoFA,
+  startUserPreview,
+} from '../api'
 import {
   USER_STATUS,
   USER_ROLE,
@@ -73,6 +83,9 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const [resetTwoFAOpen, setResetTwoFAOpen] = useState(false)
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
   const [subscriptionsDialogOpen, setSubscriptionsDialogOpen] = useState(false)
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const currentUser = useAuthStore((state) => state.auth.user)
 
   const handleEdit = () => {
     setCurrentRow(user)
@@ -130,9 +143,27 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
     }
   }
 
+  const handlePreview = async () => {
+    try {
+      const result = await startUserPreview(user.id)
+      if (!result.success || !result.data) {
+        handleServerError(result, t('Failed to start user preview'))
+        return
+      }
+      useUserPreviewStore
+        .getState()
+        .start(result.data.token, result.data.expires_at, result.data.target)
+      queryClient.clear()
+      await navigate({ to: '/profile', replace: true })
+    } catch (error) {
+      handleServerError(error, t('Failed to start user preview'))
+    }
+  }
+
   const isDisabled = user.status === USER_STATUS.DISABLED
   const isAdmin = user.role >= USER_ROLE.ADMIN
   const isRoot = user.role === USER_ROLE.ROOT
+  const canPreview = currentUser?.role === USER_ROLE.ROOT && !isAdmin
 
   if (isUserDeleted(user)) {
     return null
@@ -155,6 +186,24 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         </TooltipTrigger>
         <TooltipContent>{t('Edit')}</TooltipContent>
       </Tooltip>
+
+      {canPreview && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant='ghost'
+                size='icon-sm'
+                onClick={handlePreview}
+                aria-label={t('View as user')}
+              />
+            }
+          >
+            <Eye />
+          </TooltipTrigger>
+          <TooltipContent>{t('View as user')}</TooltipContent>
+        </Tooltip>
+      )}
 
       <DataTableRowActionMenu
         ariaLabel={t('Open menu')}
