@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useQuery } from '@tanstack/react-query'
 import { type FormEvent, useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -42,6 +43,14 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Sheet,
   SheetClose,
   SheetContent,
@@ -50,6 +59,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { getAdminPlans } from '@/features/subscriptions/api'
 import {
   formatQuotaWithCurrency,
   getCurrencyDisplay,
@@ -61,6 +71,7 @@ import {
   parseQuotaFromDollars,
 } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
+import { requireServerSuccess } from '@/lib/server-error-message'
 import { addTimeToDate } from '@/lib/time'
 
 import { createRedemption, updateRedemption, getRedemption } from '../api'
@@ -108,6 +119,15 @@ export function RedemptionsMutateDrawer({
   const form = useForm<RedemptionFormValues>({
     resolver: zodResolver(getRedemptionFormSchema(t)),
     defaultValues: REDEMPTION_FORM_DEFAULT_VALUES,
+  })
+  const rewardType = form.watch('reward_type')
+  const plansQuery = useQuery({
+    queryKey: ['admin-subscription-plans-for-redemption'],
+    queryFn: async () => {
+      const result = requireServerSuccess(await getAdminPlans())
+      return (result.data ?? []).filter((record) => record.plan.enabled)
+    },
+    enabled: open,
   })
 
   // Load existing data when updating
@@ -317,34 +337,113 @@ export function RedemptionsMutateDrawer({
 
                   <FormField
                     control={form.control}
-                    name='quota_dollars'
+                    name='reward_type'
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>{quotaLabel}</FormLabel>
-                        <FormControl>
-                          <Input
-                            {...field}
-                            type='number'
-                            step={quotaStep}
-                            placeholder={quotaPlaceholder}
-                            onChange={(e) =>
-                              field.onChange(
-                                Number.parseFloat(e.target.value) || 0
-                              )
-                            }
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          {tokensOnly
-                            ? t('Enter the quota amount in tokens')
-                            : t('Enter the quota amount in {{currency}}', {
-                                currency: currencyLabel,
-                              })}
-                        </FormDescription>
+                        <FormLabel>{t('Reward type')}</FormLabel>
+                        <Select
+                          value={field.value}
+                          onValueChange={field.onChange}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectGroup>
+                              <SelectItem value='quota'>
+                                {t('Quota')}
+                              </SelectItem>
+                              <SelectItem value='subscription'>
+                                {t('Subscription')}
+                              </SelectItem>
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
+
+                  {rewardType === 'quota' ? (
+                    <FormField
+                      control={form.control}
+                      name='quota_dollars'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{quotaLabel}</FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              type='number'
+                              step={quotaStep}
+                              placeholder={quotaPlaceholder}
+                              onChange={(e) =>
+                                field.onChange(
+                                  Number.parseFloat(e.target.value) || 0
+                                )
+                              }
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {tokensOnly
+                              ? t('Enter the quota amount in tokens')
+                              : t('Enter the quota amount in {{currency}}', {
+                                  currency: currencyLabel,
+                                })}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  ) : (
+                    <FormField
+                      control={form.control}
+                      name='subscription_plan_id'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Subscription plan')}</FormLabel>
+                          <Select
+                            value={field.value > 0 ? String(field.value) : ''}
+                            onValueChange={(value) =>
+                              field.onChange(Number(value))
+                            }
+                          >
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue
+                                  placeholder={
+                                    plansQuery.isLoading
+                                      ? t('Loading...')
+                                      : t('Select a subscription plan')
+                                  }
+                                />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectGroup>
+                                {(plansQuery.data ?? []).map((record) => (
+                                  <SelectItem
+                                    key={record.plan.id}
+                                    value={String(record.plan.id)}
+                                  >
+                                    {record.plan.title}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>
+                            {t(
+                              'Only enabled subscription plans are available.'
+                            )}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
 
                   <FormField
                     control={form.control}

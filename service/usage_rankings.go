@@ -42,15 +42,16 @@ type UsageRankingRow struct {
 }
 
 type UsageRankingsResponse struct {
-	Period        string            `json:"period"`
-	DisplayCount  int               `json:"display_count"`
-	TotalUsers    int               `json:"total_users"`
-	TotalQuota    int64             `json:"total_quota"`
-	TotalTokens   int64             `json:"total_tokens"`
-	TotalRequests int64             `json:"total_requests"`
-	TopUser       *UsageRankingRow  `json:"top_user,omitempty"`
-	MyRank        *UsageRankingRow  `json:"my_rank,omitempty"`
-	Users         []UsageRankingRow `json:"users"`
+	Period          string            `json:"period"`
+	IdentityVisible bool              `json:"identity_visible"`
+	DisplayCount    int               `json:"display_count"`
+	TotalUsers      int               `json:"total_users"`
+	TotalQuota      int64             `json:"total_quota"`
+	TotalTokens     int64             `json:"total_tokens"`
+	TotalRequests   int64             `json:"total_requests"`
+	TopUser         *UsageRankingRow  `json:"top_user,omitempty"`
+	MyRank          *UsageRankingRow  `json:"my_rank,omitempty"`
+	Users           []UsageRankingRow `json:"users"`
 }
 
 type usageRankingCacheItem struct {
@@ -63,7 +64,7 @@ var (
 	usageRankingCache   = map[string]usageRankingCacheItem{}
 )
 
-func GetUsageRankingsSnapshot(period string, userID int, limit int) (*UsageRankingsResponse, error) {
+func GetUsageRankingsSnapshot(period string, userID int, limit int, identityVisible bool) (*UsageRankingsResponse, error) {
 	config, err := rankingConfig(period)
 	if err != nil {
 		return nil, err
@@ -77,7 +78,7 @@ func GetUsageRankingsSnapshot(period string, userID int, limit int) (*UsageRanki
 	if cached && now.Before(item.expiresAt) {
 		rows := append([]model.UsageRankingTotal(nil), item.rows...)
 		usageRankingCacheMu.Unlock()
-		return buildUsageRankingsResponse(period, rows, userID, limit), nil
+		return buildUsageRankingsResponse(period, rows, userID, limit, identityVisible), nil
 	}
 	usageRankingCacheMu.Unlock()
 
@@ -95,7 +96,7 @@ func GetUsageRankingsSnapshot(period string, userID int, limit int) (*UsageRanki
 	}
 	usageRankingCacheMu.Unlock()
 
-	return buildUsageRankingsResponse(period, rows, userID, limit), nil
+	return buildUsageRankingsResponse(period, rows, userID, limit, identityVisible), nil
 }
 
 func normalizeUsageRankingLimit(limit int) int {
@@ -108,7 +109,7 @@ func normalizeUsageRankingLimit(limit int) int {
 	return limit
 }
 
-func buildUsageRankingsResponse(period string, totals []model.UsageRankingTotal, userID int, limit int) *UsageRankingsResponse {
+func buildUsageRankingsResponse(period string, totals []model.UsageRankingTotal, userID int, limit int, identityVisible bool) *UsageRankingsResponse {
 	// The database query already supplies the stable ordering. Keep this sort as
 	// a defensive guard for alternate stores and deterministic test fixtures.
 	sort.SliceStable(totals, func(i, j int) bool {
@@ -125,10 +126,11 @@ func buildUsageRankingsResponse(period string, totals []model.UsageRankingTotal,
 	})
 
 	response := &UsageRankingsResponse{
-		Period:       period,
-		DisplayCount: normalizeUsageRankingLimit(limit),
-		TotalUsers:   len(totals),
-		Users:        make([]UsageRankingRow, 0, minInt(len(totals), normalizeUsageRankingLimit(limit))),
+		Period:          period,
+		IdentityVisible: identityVisible,
+		DisplayCount:    normalizeUsageRankingLimit(limit),
+		TotalUsers:      len(totals),
+		Users:           make([]UsageRankingRow, 0, minInt(len(totals), normalizeUsageRankingLimit(limit))),
 	}
 	for _, total := range totals {
 		response.TotalQuota += total.TotalQuota
@@ -136,12 +138,12 @@ func buildUsageRankingsResponse(period string, totals []model.UsageRankingTotal,
 		response.TotalRequests += total.RequestCount
 	}
 	if len(totals) > 0 {
-		row := usageRankingRow(totals[0], 1, userID)
+		row := usageRankingRow(totals[0], 1, userID, identityVisible)
 		response.TopUser = &row
 	}
 	for index, total := range totals {
 		rank := index + 1
-		row := usageRankingRow(total, rank, userID)
+		row := usageRankingRow(total, rank, userID, identityVisible)
 		if rank <= response.DisplayCount {
 			response.Users = append(response.Users, row)
 		}
@@ -153,10 +155,14 @@ func buildUsageRankingsResponse(period string, totals []model.UsageRankingTotal,
 	return response
 }
 
-func usageRankingRow(total model.UsageRankingTotal, rank int, userID int) UsageRankingRow {
+func usageRankingRow(total model.UsageRankingTotal, rank int, userID int, identityVisible bool) UsageRankingRow {
+	username := total.Username
+	if !identityVisible {
+		username = maskUsageRankingUsername(total.Username)
+	}
 	return UsageRankingRow{
 		Rank:         rank,
-		Username:     maskUsageRankingUsername(total.Username),
+		Username:     username,
 		TotalQuota:   total.TotalQuota,
 		TotalTokens:  total.TotalTokens,
 		RequestCount: total.RequestCount,
