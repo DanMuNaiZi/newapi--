@@ -13,6 +13,9 @@ import (
 
 func GetUserUsableGroups(userGroup string) map[string]string {
 	groupsCopy := setting.GetUserUsableGroupsCopy()
+	// public_pool is reserved and must never be exposed through the generic
+	// usable-group configuration while the feature is disabled or invalid.
+	delete(groupsCopy, PublicPoolGroup)
 	if userGroup != "" {
 		specialSettings, b := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Get(userGroup)
 		if b {
@@ -36,6 +39,13 @@ func GetUserUsableGroups(userGroup string) map[string]string {
 		if _, ok := groupsCopy[userGroup]; !ok {
 			groupsCopy[userGroup] = "用户分组"
 		}
+	}
+	// The public pool is a reserved group shared by every authenticated user.
+	// Resolve it after user-specific overrides so neither the generic group list
+	// nor per-user additions/removals can bypass the feature's availability gate.
+	delete(groupsCopy, PublicPoolGroup)
+	if GetPublicPoolStatus().Available {
+		groupsCopy[PublicPoolGroup] = "公益池"
 	}
 	return groupsCopy
 }
@@ -125,6 +135,9 @@ func GetGroupsEnabledModels(groups []string) []string {
 // userGroup 用户分组
 // group 需要获取倍率的分组
 func GetUserGroupRatio(userGroup, group string) float64 {
+	if group == PublicPoolGroup {
+		return 0
+	}
 	ratio, ok := ratio_setting.GetGroupGroupRatio(userGroup, group)
 	if ok {
 		return ratio

@@ -123,6 +123,13 @@ func Distribute() func(c *gin.Context) {
 				return
 			}
 		}
+		if channel != nil {
+			usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+			if !service.IsChannelAllowedForPublicPool(usingGroup, modelRequest.Model, channel.Id) {
+				abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorGroupAccessDenied))
+				return
+			}
+		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
 		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
 		c.Next()

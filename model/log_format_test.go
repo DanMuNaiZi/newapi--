@@ -35,6 +35,16 @@ func TestFormatUserLogsStripsQuotaSaturation(t *testing.T) {
 	require.Contains(t, parsed, "model_price")
 }
 
+func TestFormatUserLogsRemovesResourceQuota(t *testing.T) {
+	resourceQuota := 500
+	logs := []*Log{{ModelName: "gpt-5.4", ResourceQuota: &resourceQuota}}
+	formatUserLogs(logs, 0)
+	assert.Nil(t, logs[0].ResourceQuota)
+	data, err := common.Marshal(logs[0])
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "resource_quota")
+}
+
 func TestTaskPluginLogVisibilityIsRoleSeparated(t *testing.T) {
 	other := common.MapToJsonStr(map[string]any{
 		"model_price": 1.25,

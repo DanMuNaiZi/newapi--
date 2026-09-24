@@ -345,6 +345,16 @@ func migrateDB() error {
 		&Option{},
 		&LoginEncryptionKey{},
 		&Redemption{},
+		&LotteryPlan{},
+		&LotteryPlanGroup{},
+		&LotteryPlanUser{},
+		&LotteryPrize{},
+		&LotteryParticipant{},
+		&LotteryDrawRun{},
+		&LotteryResult{},
+		&LotteryNotification{},
+		&PublicPoolSite{},
+		&PublicPoolContribution{},
 		&Ability{},
 		&Log{},
 		&Midjourney{},
@@ -371,11 +381,6 @@ func migrateDB() error {
 		&CasbinRule{},
 		&AuthzRole{},
 		&ChannelErrorRecord{},
-		&LotteryPlan{},
-		&LotteryPrize{},
-		&LotteryParticipant{},
-		&LotteryResult{},
-		&LotteryNotification{},
 	)
 	if err != nil {
 		return err

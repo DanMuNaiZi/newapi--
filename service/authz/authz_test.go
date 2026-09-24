@@ -127,6 +127,16 @@ func TestLegacyScopedPoliciesDoNotExpandPermissions(t *testing.T) {
 	}
 }
 
+func TestPublicPoolManagementPermissionsUseManagedAdminPolicy(t *testing.T) {
+	db := newAuthzTestDB(t)
+	require.NoError(t, Init(db))
+
+	assert.True(t, Can(2, common.RoleAdminUser, PublicPoolRead))
+	assert.True(t, Can(2, common.RoleAdminUser, PublicPoolWrite))
+	assert.True(t, Can(2, common.RoleAdminUser, PublicPoolOperate))
+	assert.False(t, Can(3, common.RoleCommonUser, PublicPoolRead))
+}
+
 func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 	db := newAuthzTestDB(t)
 	require.NoError(t, Init(db))
