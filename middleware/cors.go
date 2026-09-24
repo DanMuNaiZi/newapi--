@@ -9,7 +9,9 @@ import (
 func CORS() gin.HandlerFunc {
 	config := cors.DefaultConfig()
 	config.AllowAllOrigins = true
-	config.AllowCredentials = true
+	// Browsers reject the wildcard origin together with credentials. Keep the
+	// public gateway CORS policy explicit and do not emit a credentialed wildcard.
+	config.AllowCredentials = false
 	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
 	config.AllowHeaders = []string{"*"}
 	return cors.New(config)

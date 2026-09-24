@@ -79,11 +79,12 @@ type responsesWSControl struct {
 // Only the request worker reads or changes billing state. Socket readers pass
 // bounded messages to it; cancellation never performs an independent refund.
 type responsesWSCallState struct {
-	inbox      chan responsesWSMessage
-	controls   chan responsesWSControl
-	done       chan struct{}
-	terminal   *responsesWSMessage
-	closeAfter bool
+	inbox       chan responsesWSMessage
+	controls    chan responsesWSControl
+	done        chan struct{}
+	terminal    *responsesWSMessage
+	clientError *types.NewAPIError
+	closeAfter  bool
 }
 
 type responsesWSSession struct {
@@ -109,6 +110,7 @@ type responsesWSSession struct {
 	lastResponseID  string
 	lockedModel     string
 	lockedChannelID int
+	lockedChannel   *appmodel.Channel
 	lockedGroup     string
 	lockedKey       string
 	lockedKeyIndex  int
@@ -186,7 +188,13 @@ func (s *responsesWSSession) runRequest(state *responsesWSCallState, message []b
 		// the current request's release; socket close needs neither lock.
 		outgoing := state.terminal
 		if apiErr != nil {
-			if body, err := buildResponsesWSErrorPayload(envelope.EventID, streamID, apiErr); err == nil {
+			clientErr := apiErr
+			if state.clientError != nil {
+				clientErr = state.clientError
+			}
+			clientErr = clientErr.ClientCopy()
+			clientErr.SetMessage(common.MessageWithRequestId(clientErr.Error(), requestID))
+			if body, err := buildResponsesWSErrorPayload(envelope.EventID, streamID, clientErr); err == nil {
 				outgoing = &responsesWSMessage{kind: websocket.TextMessage, body: body}
 			}
 		}
@@ -282,6 +290,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 	} else {
 		retry := &service.RetryParam{Ctx: c, TokenGroup: common.GetContextKeyString(c, appconstant.ContextKeyUsingGroup), ModelName: modelName, RequestPath: c.Request.URL.Path, Retry: common.GetPointer(0)}
 		for ; retry.GetRetry() <= common.RetryTimes; retry.IncreaseRetry() {
+			state.clientError = nil
 			var channel *appmodel.Channel
 			channel, apiErr = selectResponsesWSChannel(c, modelName, retry)
 			if apiErr != nil {
@@ -318,10 +327,11 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				info.LastError = apiErr
 				decision := service.DecideRelayRetry(c, apiErr, common.RetryTimes-retry.GetRetry())
 				service.RecordPolicyFailure(c, channel.Id, apiErr, decision)
-				service.ProcessChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, info.ApiKey, channel.GetAutoBan()), apiErr, info)
+				clientErr := s.clientErrorForChannelFailure(c, channel, info, apiErr)
 				if decision.Action == "retry" {
 					continue
 				}
+				state.clientError = clientErr
 				return apiErr
 			}
 			if !s.setTarget(target) {
@@ -331,7 +341,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				state.closeAfter = true
 				return types.NewError(err, types.ErrorCodeBadResponse, types.ErrOptionWithSkipRetry())
 			}
-			s.lockedModel, s.lockedChannelID, s.lockedGroup = modelName, channel.Id, info.UsingGroup
+			s.lockedModel, s.lockedChannelID, s.lockedChannel, s.lockedGroup = modelName, channel.Id, channel, info.UsingGroup
 			s.lockedKey, s.lockedKeyIndex = info.ApiKey, info.ChannelMultiKeyIndex
 			s.lockedRoute, _ = channel.GetOtherSettings().AdvancedCustom.MatchPathForModel(c.Request.URL.Path, modelName)
 			s.lockedContext = make(map[appconstant.ContextKey]any)
@@ -427,7 +437,19 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 						accumulator.Observe(&event.ResponsesStreamResponse)
 						info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
 						s.lastResponseID = responseID
-						state.terminal, state.closeAfter = &incoming, ambiguous
+						terminal := &incoming
+						if rejection.Error != nil {
+							failure := types.WithOpenAIError(*rejection.Error, rejection.Status, types.ErrOptionWithSkipRetry())
+							if failure.StatusCode < 400 || failure.StatusCode > 599 {
+								failure.StatusCode = http.StatusBadRequest
+							}
+							clientErr := s.clientErrorForChannelFailure(c, s.lockedChannel, info, failure)
+							clientErr.SetMessage(common.MessageWithRequestId(clientErr.Error(), c.GetString(common.RequestIdKey)))
+							if body, err := buildResponsesWSErrorPayload(rejection.EventID, rejection.StreamID, clientErr); err == nil {
+								terminal = &responsesWSMessage{kind: websocket.TextMessage, body: body}
+							}
+						}
+						state.terminal, state.closeAfter = terminal, ambiguous
 						ConsumeResponsesQuota(c, info, accumulator.Finish())
 						return nil
 					}
@@ -440,6 +462,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 					if rejected.StatusCode < 400 || rejected.StatusCode > 599 {
 						rejected.StatusCode = http.StatusBadRequest
 					}
+					state.clientError = s.clientErrorForChannelFailure(c, s.lockedChannel, info, rejected)
 					return rejected
 				}
 				if strings.HasPrefix(event.Type, "response.") {
@@ -456,11 +479,26 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 			}
 			switch event.Type {
 			case "response.completed", "response.done", "response.incomplete", "response.failed", "response.cancelled", "response.canceled":
+				if (event.Type == "response.failed" || event.Type == "response.incomplete") && event.Response != nil {
+					if upstreamError := event.Response.GetOpenAIError(); upstreamError != nil && upstreamError.Message != "" {
+						failure := types.WithOpenAIError(*upstreamError, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+						clientErr := s.clientErrorForChannelFailure(c, s.lockedChannel, info, failure)
+						clientErr.SetMessage(common.MessageWithRequestId(clientErr.Error(), c.GetString(common.RequestIdKey)))
+						if payload, err := buildResponsesWSTerminalErrorPayload(incoming.body, event.Response.Model, info.ClientModelName(), clientErr.ToOpenAIError()); err == nil {
+							state.terminal = &responsesWSMessage{kind: incoming.kind, body: payload}
+						} else {
+							state.terminal = &incoming
+						}
+					} else {
+						state.terminal = &incoming
+					}
+				} else {
+					state.terminal = &incoming
+				}
 				if event.Response != nil {
 					s.lastResponseID = event.Response.ID
 				}
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
-				state.terminal = &incoming
 				ConsumeResponsesQuota(c, info, accumulator.Finish())
 				return nil
 			}
@@ -498,6 +536,34 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 			return nil
 		}
 	}
+}
+
+func buildResponsesWSTerminalErrorPayload(payload []byte, upstreamModel string, clientModel string, clientError types.OpenAIError) ([]byte, error) {
+	var envelope map[string]common.RawMessage
+	if err := common.Unmarshal(payload, &envelope); err != nil {
+		return nil, err
+	}
+	var response map[string]common.RawMessage
+	if err := common.Unmarshal(envelope["response"], &response); err != nil {
+		return nil, err
+	}
+	errorBody, err := common.Marshal(clientError)
+	if err != nil {
+		return nil, err
+	}
+	response["error"] = errorBody
+	if upstreamModel != "" && clientModel != "" && upstreamModel != clientModel {
+		modelValue, err := common.Marshal(clientModel)
+		if err != nil {
+			return nil, err
+		}
+		response["model"] = modelValue
+	}
+	envelope["response"], err = common.Marshal(response)
+	if err != nil {
+		return nil, err
+	}
+	return common.Marshal(envelope)
 }
 
 // A single generation is active, but a cancel can fail independently. Correlate
