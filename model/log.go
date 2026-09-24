@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/types"
 
@@ -378,25 +379,35 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 }
 
 type RecordConsumeLogParams struct {
-	ChannelId        int       `json:"channel_id"`
-	PromptTokens     int       `json:"prompt_tokens"`
-	CompletionTokens int       `json:"completion_tokens"`
-	ModelName        string    `json:"model_name"`
-	TokenName        string    `json:"token_name"`
-	Quota            int       `json:"quota"`
-	ResourceQuota    *int      `json:"resource_quota,omitempty"`
-	Content          string    `json:"content"`
-	TokenId          int       `json:"token_id"`
-	UseTimeSeconds   int       `json:"use_time_seconds"`
-	IsStream         bool      `json:"is_stream"`
-	Group            string    `json:"group"`
-	Other            *LogOther `json:"other"`
+	ChannelId         int       `json:"channel_id"`
+	PromptTokens      int       `json:"prompt_tokens"`
+	CompletionTokens  int       `json:"completion_tokens"`
+	ModelName         string    `json:"model_name"`
+	TokenName         string    `json:"token_name"`
+	Quota             int       `json:"quota"`
+	ResourceQuota     *int      `json:"resource_quota,omitempty"`
+	Content           string    `json:"content"`
+	TokenId           int       `json:"token_id"`
+	UseTimeSeconds    int       `json:"use_time_seconds"`
+	IsStream          bool      `json:"is_stream"`
+	Group             string    `json:"group"`
+	Other             *LogOther `json:"other"`
+	ActivateReferral  bool      `json:"-"`
+	BillingSettled    bool      `json:"-"`
+	IsChannelTest     bool      `json:"-"`
+	RealtimeCompleted bool      `json:"-"`
 }
 
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
 	if !common.LogConsumeEnabled {
+		activateReferralCampaignFromConsumeLog(c, userId, params)
 		return
 	}
+	if params.Other == nil {
+		params.Other = NewLogOther()
+	}
+	params.Other.SetAdmin("billing_settlement_succeeded", params.BillingSettled)
+	params.Other.SetAdmin("referral_activation_eligible", isReferralActivationEligible(params))
 	logger.LogInfo(c, fmt.Sprintf("record consume log: userId=%d, params=%s", userId, common.GetJsonString(params)))
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
@@ -441,6 +452,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	if err != nil {
 		logger.LogError(c, "failed to record log: "+err.Error())
 	}
+	activateReferralCampaignFromConsumeLog(c, userId, params)
 	if common.DataExportEnabled {
 		LogQuotaData(QuotaDataLogParams{
 			UserID:    userId,
@@ -454,6 +466,36 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			ChannelID: params.ChannelId,
 			NodeName:  common.NodeName,
 		})
+	}
+}
+
+func isReferralActivationEligible(params RecordConsumeLogParams) bool {
+	if !params.ActivateReferral || !params.BillingSettled || params.Quota <= 0 || params.Quota > common.MaxQuota || params.IsChannelTest || params.Group == constant.PublicPoolGroup {
+		return false
+	}
+	other := params.Other.Snapshot()
+	if other["violation_fee"] == true {
+		return false
+	}
+	streamStatus, ok := other["stream_status"].(map[string]any)
+	if !ok {
+		return !params.IsStream || params.RealtimeCompleted
+	}
+	status, _ := streamStatus["status"].(string)
+	reason, _ := streamStatus["end_reason"].(string)
+	return status == "ok" && reason != "client_gone" && reason != "timeout"
+}
+
+func activateReferralCampaignFromConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
+	if !isReferralActivationEligible(params) {
+		return
+	}
+	requestId := ""
+	if c != nil {
+		requestId = c.GetString(common.RequestIdKey)
+	}
+	if err := ActivateReferralCampaignForUser(userId, requestId, params.Group, params); err != nil {
+		logger.LogError(c, "failed to activate referral campaign: "+err.Error())
 	}
 }
 

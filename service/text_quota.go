@@ -566,19 +566,23 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	attachQuotaSaturation(ctx, relayInfo, other)
 
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
-		ChannelId:        relayInfo.ChannelId,
-		PromptTokens:     summary.PromptTokens,
-		CompletionTokens: summary.CompletionTokens,
-		ModelName:        logModel,
-		TokenName:        summary.TokenName,
-		Quota:            summary.Quota,
-		ResourceQuota:    &summary.ResourceQuota,
-		Content:          logContent,
-		TokenId:          relayInfo.TokenId,
-		UseTimeSeconds:   int(summary.UseTimeSeconds),
-		IsStream:         relayInfo.IsStream,
-		Group:            relayInfo.UsingGroup,
-		Other:            other,
+		ChannelId:         relayInfo.ChannelId,
+		PromptTokens:      summary.PromptTokens,
+		CompletionTokens:  summary.CompletionTokens,
+		ModelName:         logModel,
+		TokenName:         summary.TokenName,
+		Quota:             summary.Quota,
+		ResourceQuota:     &summary.ResourceQuota,
+		Content:           logContent,
+		TokenId:           relayInfo.TokenId,
+		UseTimeSeconds:    int(summary.UseTimeSeconds),
+		IsStream:          relayInfo.IsStream,
+		Group:             relayInfo.UsingGroup,
+		Other:             other,
+		ActivateReferral:  summary.Quota > 0 || summary.PromptTokens+summary.CompletionTokens > 0,
+		BillingSettled:    relayInfo.BillingSettlementSucceeded,
+		IsChannelTest:     relayInfo.IsChannelTest,
+		RealtimeCompleted: relayInfo.RealtimeCompleted,
 	})
 	relayInfo.PerformanceOutputTokens = int64(summary.CompletionTokens)
 }

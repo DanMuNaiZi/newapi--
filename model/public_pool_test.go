@@ -13,13 +13,13 @@ import (
 func setupPublicPoolFixture(t *testing.T) {
 	t.Helper()
 	setupLotteryFixture(t)
-	require.NoError(t, DB.AutoMigrate(&PublicPoolSite{}, &PublicPoolContribution{}, &Channel{}, &Ability{}))
-	for _, table := range []interface{}{&PublicPoolContribution{}, &PublicPoolSite{}, &Ability{}, &Channel{}} {
+	require.NoError(t, DB.AutoMigrate(&PublicPoolSite{}, &PublicPoolContribution{}, &RewardGrant{}, &Channel{}, &Ability{}))
+	for _, table := range []interface{}{&PublicPoolContribution{}, &PublicPoolSite{}, &RewardGrant{}, &Ability{}, &Channel{}} {
 		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(table).Error)
 	}
 	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Where("username LIKE ?", "pool-%").Delete(&User{}).Error)
 	t.Cleanup(func() {
-		for _, table := range []interface{}{&PublicPoolContribution{}, &PublicPoolSite{}, &Ability{}, &Channel{}} {
+		for _, table := range []interface{}{&PublicPoolContribution{}, &PublicPoolSite{}, &RewardGrant{}, &Ability{}, &Channel{}} {
 			require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(table).Error)
 		}
 		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Where("username LIKE ?", "pool-%").Delete(&User{}).Error)

@@ -76,7 +76,7 @@ func referralConsumptionEvidence(event ReferralCampaignEvent) (int, int64, strin
 		if err != nil {
 			continue
 		}
-		if log.Quota <= common.MaxQuota && isReferralActivationEligible(RecordConsumeLogParams{ActivateReferral: other["referral_activation_eligible"] == true, BillingSettled: other["billing_settlement_succeeded"] == true, Group: log.Group, Quota: log.Quota, IsStream: log.IsStream, Other: other}) {
+		if referralLogEligible(log, other) {
 			return log.Quota, log.CreatedAt, log.RequestId, nil
 		}
 	}
@@ -241,7 +241,7 @@ func GetReferralCampaignEventReview(eventId int) (*ReferralEventReview, error) {
 			view.Usage.Requests, view.Usage.ConsumedQuota = totals.Requests, totals.ConsumedQuota
 			for _, log := range logs {
 				other, _ := common.StrToMap(log.Other)
-				success := log.Type == LogTypeConsume && isReferralActivationEligible(RecordConsumeLogParams{ActivateReferral: other["referral_activation_eligible"] == true, BillingSettled: other["billing_settlement_succeeded"] == true, Group: log.Group, Quota: log.Quota, IsStream: log.IsStream, Other: other})
+				success := log.Type == LogTypeConsume && referralLogEligible(log, other)
 				// Historical model_name may itself be an upstream alias; if a mapping
 				// exists without a stored client model, display no model at all.
 				requested, _ := other["request_model_name"].(string)
@@ -261,4 +261,28 @@ func GetReferralCampaignEventReview(eventId int) (*ReferralEventReview, error) {
 		return nil, err
 	}
 	return view, nil
+}
+
+func referralLogEligible(log Log, values map[string]any) bool {
+	other := NewLogOther()
+	other.MergePublic(values)
+	if admin, ok := values["admin_info"].(map[string]any); ok {
+		other.MergeAdmin(admin)
+	}
+	admin := other.Snapshot()
+	adminInfo, _ := admin["admin_info"].(map[string]any)
+	boolValue := func(key string) bool {
+		value, _ := adminInfo[key].(bool)
+		return value
+	}
+	realtimeCompleted, _ := values["realtime_completed"].(bool)
+	return log.Quota <= common.MaxQuota && isReferralActivationEligible(RecordConsumeLogParams{
+		ActivateReferral:  boolValue("referral_activation_eligible"),
+		BillingSettled:    boolValue("billing_settlement_succeeded"),
+		Group:             log.Group,
+		Quota:             log.Quota,
+		IsStream:          log.IsStream,
+		RealtimeCompleted: realtimeCompleted,
+		Other:             other,
+	})
 }

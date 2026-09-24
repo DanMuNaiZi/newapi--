@@ -251,19 +251,23 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 	}
 	attachQuotaSaturation(ctx, relayInfo, other)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
-		ChannelId:        relayInfo.ChannelId,
-		PromptTokens:     usage.InputTokens,
-		CompletionTokens: usage.OutputTokens,
-		ModelName:        logModel,
-		TokenName:        tokenName,
-		Quota:            quota,
-		ResourceQuota:    &resourceQuota,
-		Content:          logContent,
-		TokenId:          relayInfo.TokenId,
-		UseTimeSeconds:   int(useTimeSeconds),
-		IsStream:         relayInfo.IsStream,
-		Group:            relayInfo.UsingGroup,
-		Other:            other,
+		ChannelId:         relayInfo.ChannelId,
+		PromptTokens:      usage.InputTokens,
+		CompletionTokens:  usage.OutputTokens,
+		ModelName:         logModel,
+		TokenName:         tokenName,
+		Quota:             quota,
+		ResourceQuota:     &resourceQuota,
+		Content:           logContent,
+		TokenId:           relayInfo.TokenId,
+		UseTimeSeconds:    int(useTimeSeconds),
+		IsStream:          relayInfo.IsStream,
+		Group:             relayInfo.UsingGroup,
+		Other:             other,
+		ActivateReferral:  usage.TotalTokens > 0,
+		BillingSettled:    relayInfo.BillingSettlementSucceeded,
+		IsChannelTest:     relayInfo.IsChannelTest,
+		RealtimeCompleted: relayInfo.RealtimeCompleted,
 	})
 }
 
@@ -391,19 +395,22 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	}
 	attachQuotaSaturation(ctx, relayInfo, other)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
-		ChannelId:        relayInfo.ChannelId,
-		PromptTokens:     usage.PromptTokens,
-		CompletionTokens: usage.CompletionTokens,
-		ModelName:        logModel,
-		TokenName:        tokenName,
-		Quota:            quota,
-		ResourceQuota:    &resourceQuota,
-		Content:          logContent,
-		TokenId:          relayInfo.TokenId,
-		UseTimeSeconds:   int(useTimeSeconds),
-		IsStream:         relayInfo.IsStream,
-		Group:            relayInfo.UsingGroup,
-		Other:            other,
+		ChannelId:         relayInfo.ChannelId,
+		PromptTokens:      usage.PromptTokens,
+		CompletionTokens:  usage.CompletionTokens,
+		ModelName:         logModel,
+		TokenName:         tokenName,
+		Quota:             quota,
+		ResourceQuota:     &resourceQuota,
+		Content:           logContent,
+		TokenId:           relayInfo.TokenId,
+		UseTimeSeconds:    int(useTimeSeconds),
+		IsStream:          relayInfo.IsStream,
+		Group:             relayInfo.UsingGroup,
+		Other:             other,
+		ActivateReferral:  usage.TotalTokens > 0,
+		BillingSettled:    relayInfo.BillingSettlementSucceeded,
+		RealtimeCompleted: relayInfo.RealtimeCompleted,
 	})
 	relayInfo.PerformanceOutputTokens = int64(usage.CompletionTokens)
 }

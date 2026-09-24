@@ -314,12 +314,31 @@ func ListReferralCampaignEventsForInviter(inviterUserId int) ([]ReferralSelfEven
 	items := make([]ReferralSelfEvent, 0, len(events))
 	for _, event := range events {
 		items = append(items, ReferralSelfEvent{
-			Id: event.Id, CampaignId: event.CampaignId, InviteeUsername: common.MaskUsername(event.InviteeUsername),
+			Id: event.Id, CampaignId: event.CampaignId, InviteeUsername: maskReferralUsername(event.InviteeUsername),
 			Status: event.Status, RegisteredAt: event.RegisteredAt, ActivationDeadline: event.ActivationDeadline, ActivatedAt: event.ActivatedAt,
 			ReviewDecision: event.ReviewDecision, RewardStatus: event.RewardStatus, Reward: hydrateReferralReward(event.RewardSnapshotJSON), InviteeReward: hydrateReferralReward(event.InviteeRewardSnapshotJSON),
 		})
 	}
 	return items, nil
+}
+
+func maskReferralUsername(username string) string {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return "***"
+	}
+	runes := []rune(username)
+	if len(runes) == 1 {
+		return "*"
+	}
+	if len(runes) == 2 {
+		return string(runes[0]) + "*"
+	}
+	stars := len(runes) - 2
+	if stars > 3 {
+		stars = 3
+	}
+	return string(runes[0]) + strings.Repeat("*", stars) + string(runes[len(runes)-1])
 }
 
 func HandleInvitationRegistration(inviterUserId int, inviteeUserId int) (bool, error) {

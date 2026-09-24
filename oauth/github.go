@@ -3,11 +3,12 @@ package oauth
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -24,6 +25,10 @@ func init() {
 // GitHubProvider implements OAuth for GitHub
 type GitHubProvider struct{}
 
+var githubHTTPClient = &http.Client{Timeout: 20 * time.Second}
+
+var githubUsernamePattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$`)
+
 type gitHubOAuthResponse struct {
 	AccessToken string `json:"access_token"`
 	Scope       string `json:"scope"`
@@ -31,10 +36,17 @@ type gitHubOAuthResponse struct {
 }
 
 type gitHubUser struct {
-	Id    int64  `json:"id"`    // GitHub numeric ID (permanent, never changes)
-	Login string `json:"login"` // GitHub username (can be changed by user)
-	Name  string `json:"name"`
-	Email string `json:"email"`
+	Id        int64  `json:"id"`    // GitHub numeric ID (permanent, never changes)
+	Login     string `json:"login"` // GitHub username (can be changed by user)
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	CreatedAt string `json:"created_at"`
+}
+
+type GitHubIdentity struct {
+	ID        int64  `json:"id"`
+	Login     string `json:"login"`
+	CreatedAt int64  `json:"created_at"`
 }
 
 type gitHubEmail struct {
@@ -60,7 +72,7 @@ func (p *GitHubProvider) ExchangeToken(ctx context.Context, code string, c *gin.
 		"client_secret": common.GitHubClientSecret,
 		"code":          code,
 	}
-	jsonData, err := json.Marshal(values)
+	jsonData, err := common.Marshal(values)
 	if err != nil {
 		return nil, err
 	}
@@ -72,10 +84,7 @@ func (p *GitHubProvider) ExchangeToken(ctx context.Context, code string, c *gin.
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
-	client := http.Client{
-		Timeout: 20 * time.Second,
-	}
-	res, err := client.Do(req)
+	res, err := githubHTTPClient.Do(req)
 	if err != nil {
 		logger.LogError(ctx, fmt.Sprintf("[OAuth-GitHub] ExchangeToken error: %s", err.Error()))
 		return nil, NewOAuthErrorWithRaw(i18n.MsgOAuthConnectFailed, map[string]any{"Provider": "GitHub"}, err.Error())
@@ -85,7 +94,7 @@ func (p *GitHubProvider) ExchangeToken(ctx context.Context, code string, c *gin.
 	logger.LogDebug(ctx, "[OAuth-GitHub] ExchangeToken response status: %d", res.StatusCode)
 
 	var oAuthResponse gitHubOAuthResponse
-	err = json.NewDecoder(res.Body).Decode(&oAuthResponse)
+	err = common.DecodeJson(res.Body, &oAuthResponse)
 	if err != nil {
 		logger.LogError(ctx, fmt.Sprintf("[OAuth-GitHub] ExchangeToken decode error: %s", err.Error()))
 		return nil, err
@@ -114,10 +123,7 @@ func (p *GitHubProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*O
 	}
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token.AccessToken))
 
-	client := http.Client{
-		Timeout: 20 * time.Second,
-	}
-	res, err := client.Do(req)
+	res, err := githubHTTPClient.Do(req)
 	if err != nil {
 		logger.LogError(ctx, fmt.Sprintf("[OAuth-GitHub] GetUserInfo error: %s", err.Error()))
 		return nil, NewOAuthErrorWithRaw(i18n.MsgOAuthConnectFailed, map[string]any{"Provider": "GitHub"}, err.Error())
@@ -138,7 +144,7 @@ func (p *GitHubProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*O
 	}
 
 	var githubUser gitHubUser
-	err = json.NewDecoder(res.Body).Decode(&githubUser)
+	err = common.DecodeJson(res.Body, &githubUser)
 	if err != nil {
 		logger.LogError(ctx, fmt.Sprintf("[OAuth-GitHub] GetUserInfo decode error: %s", err.Error()))
 		return nil, err
@@ -147,6 +153,10 @@ func (p *GitHubProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*O
 	if githubUser.Id == 0 || githubUser.Login == "" {
 		logger.LogError(ctx, "[OAuth-GitHub] GetUserInfo failed: empty id or login field")
 		return nil, NewOAuthError(i18n.MsgOAuthUserInfoEmpty, map[string]any{"Provider": "GitHub"})
+	}
+	createdAt := int64(0)
+	if parsed, parseErr := time.Parse(time.RFC3339, githubUser.CreatedAt); parseErr == nil {
+		createdAt = parsed.Unix()
 	}
 
 	logger.LogDebug(ctx, "[OAuth-GitHub] GetUserInfo success: id=%d, login=%s, name=%s, email=%s",
@@ -157,10 +167,47 @@ func (p *GitHubProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*O
 		Username:       githubUser.Login,
 		DisplayName:    githubUser.Name,
 		Email:          githubUser.Email,
+		CreatedAt:      createdAt,
 		Extra: map[string]any{
 			"legacy_id": githubUser.Login, // Store login for migration from old accounts
 		},
 	}, nil
+}
+
+// ResolveGitHubUser resolves a public GitHub account for the administrator
+// whitelist flow. The username is validated before being placed in the URL.
+func ResolveGitHubUser(ctx context.Context, username string) (*GitHubIdentity, error) {
+	username = strings.TrimSpace(username)
+	if !githubUsernamePattern.MatchString(username) {
+		return nil, fmt.Errorf("invalid GitHub username")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/users/"+username, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", "new-api")
+	res, err := githubHTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub API request failed")
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub API returned status %d", res.StatusCode)
+	}
+	var githubUser gitHubUser
+	if err := common.DecodeJson(res.Body, &githubUser); err != nil {
+		return nil, fmt.Errorf("invalid GitHub API response")
+	}
+	if githubUser.Id <= 0 || githubUser.Login == "" || githubUser.CreatedAt == "" {
+		return nil, fmt.Errorf("GitHub identity is incomplete")
+	}
+	createdAt, err := time.Parse(time.RFC3339, githubUser.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub identity has invalid created_at")
+	}
+	return &GitHubIdentity{ID: githubUser.Id, Login: githubUser.Login, CreatedAt: createdAt.Unix()}, nil
 }
 
 // GetVerifiedEmails lists the addresses GitHub has confirmed for the signed-in

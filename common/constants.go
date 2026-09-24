@@ -64,6 +64,10 @@ var PasswordLoginEncryptionEnabled = false
 var PasswordRegisterEnabled = true
 var EmailVerificationEnabled = false
 var GitHubOAuthEnabled = false
+
+// GitHub accounts newer than this threshold cannot create public accounts.
+// A whitelisted account is exempt from the age check.
+var GitHubRegistrationMinAgeDays = 180
 var LinuxDOOAuthEnabled = false
 var WeChatAuthEnabled = false
 var TelegramOAuthEnabled = false
