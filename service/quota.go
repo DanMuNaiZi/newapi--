@@ -200,8 +200,13 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 
 	quota, clamp := calculateAudioQuota(quotaInfo)
 	noteQuotaClamp(relayInfo, clamp)
+	resourceQuotaInfo := quotaInfo
+	resourceQuotaInfo.GroupRatio = 1
+	resourceQuota, resourceClamp := calculateAudioQuota(resourceQuotaInfo)
+	noteQuotaClamp(relayInfo, resourceClamp)
 	if tieredOk {
 		quota = tieredQuota
+		resourceQuota = calculateTieredResourceQuota(relayInfo, textQuotaSummary{}, tieredResult)
 	}
 
 	totalTokens := usage.TotalTokens
@@ -218,6 +223,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		// in this case, must be some error happened
 		// we cannot just return, because we may have to return the pre-consumed quota
 		quota = 0
+		resourceQuota = 0
 		logContent += "（可能是上游超时）"
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, "+
 			"tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, modelName, relayInfo.FinalPreConsumedQuota))
@@ -247,6 +253,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		ModelName:        logModel,
 		TokenName:        tokenName,
 		Quota:            quota,
+		ResourceQuota:    &resourceQuota,
 		Content:          logContent,
 		TokenId:          relayInfo.TokenId,
 		UseTimeSeconds:   int(useTimeSeconds),
@@ -333,8 +340,13 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 
 	quota, clamp := calculateAudioQuota(quotaInfo)
 	noteQuotaClamp(relayInfo, clamp)
+	resourceQuotaInfo := quotaInfo
+	resourceQuotaInfo.GroupRatio = 1
+	resourceQuota, resourceClamp := calculateAudioQuota(resourceQuotaInfo)
+	noteQuotaClamp(relayInfo, resourceClamp)
 	if tieredOk {
 		quota = tieredQuota
+		resourceQuota = calculateTieredResourceQuota(relayInfo, textQuotaSummary{}, tieredResult)
 	}
 
 	totalTokens := usage.TotalTokens
@@ -351,6 +363,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		// in this case, must be some error happened
 		// we cannot just return, because we may have to return the pre-consumed quota
 		quota = 0
+		resourceQuota = 0
 		logContent += "（可能是上游超时）"
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, "+
 			"tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, billingModelName, relayInfo.FinalPreConsumedQuota))
@@ -380,6 +393,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		ModelName:        logModel,
 		TokenName:        tokenName,
 		Quota:            quota,
+		ResourceQuota:    &resourceQuota,
 		Content:          logContent,
 		TokenId:          relayInfo.TokenId,
 		UseTimeSeconds:   int(useTimeSeconds),

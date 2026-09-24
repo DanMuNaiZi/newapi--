@@ -37,34 +37,36 @@ func appendToolSurchargeLogInfo(other *model.LogOther, items []ToolSurchargeItem
 }
 
 type textQuotaSummary struct {
-	PromptTokens           int
-	CompletionTokens       int
-	TotalTokens            int
-	CacheTokens            int
-	CacheCreationTokens    int
-	CacheCreationTokens5m  int
-	CacheCreationTokens1h  int
-	ImageTokens            int
-	AudioTokens            int
-	ModelName              string
-	TokenName              string
-	UseTimeSeconds         int64
-	CompletionRatio        float64
-	CacheRatio             float64
-	ImageRatio             float64
-	ModelRatio             float64
-	GroupRatio             float64
-	ModelPrice             float64
-	CacheCreationRatio     float64
-	CacheCreationRatio5m   float64
-	CacheCreationRatio1h   float64
-	Quota                  int
-	IsClaudeUsageSemantic  bool
-	UsageSemantic          string
-	AudioInputPrice        float64
-	ToolSurchargeItems     []ToolSurchargeItem
-	ToolCallSurchargeQuota decimal.Decimal
-	FixedPriceBilling      bool
+	PromptTokens                   int
+	CompletionTokens               int
+	TotalTokens                    int
+	CacheTokens                    int
+	CacheCreationTokens            int
+	CacheCreationTokens5m          int
+	CacheCreationTokens1h          int
+	ImageTokens                    int
+	AudioTokens                    int
+	ModelName                      string
+	TokenName                      string
+	UseTimeSeconds                 int64
+	CompletionRatio                float64
+	CacheRatio                     float64
+	ImageRatio                     float64
+	ModelRatio                     float64
+	GroupRatio                     float64
+	ModelPrice                     float64
+	CacheCreationRatio             float64
+	CacheCreationRatio5m           float64
+	CacheCreationRatio1h           float64
+	Quota                          int
+	IsClaudeUsageSemantic          bool
+	UsageSemantic                  string
+	AudioInputPrice                float64
+	ToolSurchargeItems             []ToolSurchargeItem
+	ToolCallSurchargeQuota         decimal.Decimal
+	ResourceToolCallSurchargeQuota decimal.Decimal
+	ResourceQuota                  int
+	FixedPriceBilling              bool
 }
 
 // hasBillableUsage reports whether this request should incur any charge.
@@ -224,6 +226,15 @@ func composeTieredTextQuota(relayInfo *relaycommon.RelayInfo, summary textQuotaS
 	return total
 }
 
+func calculateTieredResourceQuota(relayInfo *relaycommon.RelayInfo, summary textQuotaSummary, result *billingexpr.TieredResult) int {
+	if result == nil || relayInfo == nil || relayInfo.TieredBillingSnapshot == nil {
+		return summary.ResourceQuota
+	}
+	quota, clamp := common.QuotaFromDecimalChecked(decimal.NewFromFloat(result.ActualQuotaBeforeGroup).Add(summary.ResourceToolCallSurchargeQuota))
+	noteQuotaClamp(relayInfo, clamp)
+	return quota
+}
+
 // calculateTextQuotaSummary expects a usage already remapped by
 // effectiveBillingUsage; PostTextConsumeQuota performs that remap once and shares
 // the result with tiered billing, affinity observation and logging.
@@ -298,8 +309,12 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 
 	ratio := dModelRatio.Mul(dGroupRatio)
 	summary.ToolCallSurchargeQuota = calculateTextToolCallSurcharge(ctx, relayInfo, &summary)
+	resourceSummary := summary
+	resourceSummary.GroupRatio = 1
+	summary.ResourceToolCallSurchargeQuota = calculateTextToolCallSurcharge(ctx, relayInfo, &resourceSummary)
 
 	var audioInputQuota decimal.Decimal
+	var resourceAudioInputQuota decimal.Decimal
 	if !relayInfo.PriceData.UsePrice {
 		baseTokens := dPromptTokens
 
@@ -335,8 +350,9 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 			summary.AudioInputPrice = operation_setting.GetGeminiInputAudioPricePerMillionTokens(summary.ModelName)
 			if summary.AudioInputPrice > 0 {
 				baseTokens = baseTokens.Sub(dAudioTokens)
-				audioInputQuota = decimal.NewFromFloat(summary.AudioInputPrice).
-					Div(decimal.NewFromInt(1000000)).Mul(dAudioTokens).Mul(dGroupRatio).Mul(dQuotaPerUnit)
+				resourceAudioInputQuota = decimal.NewFromFloat(summary.AudioInputPrice).
+					Div(decimal.NewFromInt(1000000)).Mul(dAudioTokens).Mul(dQuotaPerUnit)
+				audioInputQuota = resourceAudioInputQuota.Mul(dGroupRatio)
 			}
 		}
 
@@ -350,7 +366,8 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 
 		promptQuota := baseTokens.Add(cachedTokensWithRatio).Add(imageTokensWithRatio).Add(cachedCreationTokensWithRatio)
 		completionQuota := dCompletionTokens.Mul(dCompletionRatio)
-		quotaCalculateDecimal := promptQuota.Add(completionQuota).Mul(ratio)
+		billableTokens := promptQuota.Add(completionQuota)
+		quotaCalculateDecimal := billableTokens.Mul(ratio)
 		quotaCalculateDecimal = quotaCalculateDecimal.Add(audioInputQuota)
 		quotaCalculateDecimal = relayInfo.PriceData.ApplyOtherRatiosToDecimal(quotaCalculateDecimal)
 		quotaCalculateDecimal = quotaCalculateDecimal.Add(summary.ToolCallSurchargeQuota)
@@ -361,6 +378,11 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		quota, clamp := common.QuotaFromDecimalChecked(quotaCalculateDecimal)
 		summary.Quota = quota
 		noteQuotaClamp(relayInfo, clamp)
+		resourceQuotaDecimal := billableTokens.Mul(dModelRatio).Add(resourceAudioInputQuota).Add(summary.ResourceToolCallSurchargeQuota)
+		resourceQuotaDecimal = relayInfo.PriceData.ApplyOtherRatiosToDecimal(resourceQuotaDecimal)
+		resourceQuota, resourceClamp := common.QuotaFromDecimalChecked(resourceQuotaDecimal)
+		summary.ResourceQuota = resourceQuota
+		noteQuotaClamp(relayInfo, resourceClamp)
 	} else {
 		quotaCalculateDecimal := dModelPrice.Mul(dQuotaPerUnit).Mul(dGroupRatio)
 		quotaCalculateDecimal = quotaCalculateDecimal.Add(audioInputQuota)
@@ -369,10 +391,16 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		quota, clamp := common.QuotaFromDecimalChecked(quotaCalculateDecimal)
 		summary.Quota = quota
 		noteQuotaClamp(relayInfo, clamp)
+		resourceQuotaDecimal := dModelPrice.Mul(dQuotaPerUnit).Add(resourceAudioInputQuota).Add(summary.ResourceToolCallSurchargeQuota)
+		resourceQuotaDecimal = relayInfo.PriceData.ApplyOtherRatiosToDecimal(resourceQuotaDecimal)
+		resourceQuota, resourceClamp := common.QuotaFromDecimalChecked(resourceQuotaDecimal)
+		summary.ResourceQuota = resourceQuota
+		noteQuotaClamp(relayInfo, resourceClamp)
 	}
 
 	if !summary.hasBillableUsage() {
 		summary.Quota = 0
+		summary.ResourceQuota = 0
 	} else if !ratio.IsZero() && summary.Quota == 0 {
 		summary.Quota = 1
 	}
@@ -424,6 +452,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			tieredBillingApplied = true
 			tieredResult = tieredRes
 			summary.Quota = composeTieredTextQuota(relayInfo, summary, tieredQuota, tieredRes)
+			summary.ResourceQuota = calculateTieredResourceQuota(relayInfo, summary, tieredRes)
 			summary.FixedPriceBilling = isFixedPriceSettlement(relayInfo, tieredRes)
 			if summary.FixedPriceBilling {
 				summary.AudioInputPrice = 0
@@ -543,6 +572,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		ModelName:        logModel,
 		TokenName:        summary.TokenName,
 		Quota:            summary.Quota,
+		ResourceQuota:    &summary.ResourceQuota,
 		Content:          logContent,
 		TokenId:          relayInfo.TokenId,
 		UseTimeSeconds:   int(summary.UseTimeSeconds),

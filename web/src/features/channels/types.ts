@@ -216,6 +216,45 @@ export interface GetChannelResponse {
   data?: Channel
 }
 
+export type ChannelUsagePeriod = 'day' | 'week' | 'month'
+
+export interface ChannelUsageTrendPoint {
+  start_time: number
+  end_time: number
+  resource_quota: number
+  charged_quota: number
+  prompt_tokens: number
+  completion_tokens: number
+  success_count: number
+  failure_count: number
+  request_count: number
+  resource_covered_requests: number
+}
+
+export interface ChannelUsageSummary {
+  period: ChannelUsagePeriod
+  start_time: number
+  end_time: number
+  earliest_available_time: number
+  resource_coverage_start_time: number
+  resource_coverage_complete: boolean
+  resource_quota: number
+  charged_quota: number
+  prompt_tokens: number
+  completion_tokens: number
+  success_count: number
+  failure_count: number
+  request_count: number
+  resource_covered_requests: number
+  trend: ChannelUsageTrendPoint[]
+}
+
+export interface ChannelUsageSummaryResponse {
+  success: boolean
+  message?: string
+  data?: ChannelUsageSummary
+}
+
 export interface GetChannelErrorsResponse {
   success: boolean
   message?: string

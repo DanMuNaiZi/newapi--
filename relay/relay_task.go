@@ -292,7 +292,9 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		groupRatioInfo := helper.HandleGroupRatio(c, info)
 		quota, clamp := common.QuotaRoundChecked(cost * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
 		noteTaskQuotaClamp(info, clamp)
-		priceData = types.PriceData{Quota: quota, QuotaToPreConsume: quota, GroupRatioInfo: groupRatioInfo}
+		resourceQuota, resourceClamp := common.QuotaRoundChecked(cost * common.QuotaPerUnit)
+		noteTaskQuotaClamp(info, resourceClamp)
+		priceData = types.PriceData{Quota: quota, ResourceQuota: resourceQuota, QuotaToPreConsume: quota, GroupRatioInfo: groupRatioInfo}
 		info.TieredBillingSnapshot = &billingexpr.BillingSnapshot{BillingMode: billing_setting.BillingModeTieredExpr, ModelName: modelName, ExprString: exprStr, ExprHash: billingexpr.ExprHashString(exprStr), GroupRatio: groupRatioInfo.GroupRatio, EstimatedQuotaBeforeGroup: cost * common.QuotaPerUnit, EstimatedQuotaAfterGroup: quota, EstimatedTier: trace.MatchedTier, QuotaPerUnit: common.QuotaPerUnit, ExprVersion: billingexpr.ExprVersion(exprStr), TaskUsageBilling: true, UsageFacts: facts}
 	} else {
 		priceData, err = helper.ModelPriceHelperPerCall(c, info)
@@ -328,6 +330,10 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		quota, clamp := common.QuotaFromFloatChecked(quotaWithRatios)
 		info.PriceData.Quota = quota
 		noteTaskQuotaClamp(info, clamp)
+		resourceWithRatios := info.PriceData.ApplyOtherRatiosToFloat(float64(info.PriceData.ResourceQuota))
+		resourceQuota, resourceClamp := common.QuotaFromFloatChecked(resourceWithRatios)
+		info.PriceData.ResourceQuota = resourceQuota
+		noteTaskQuotaClamp(info, resourceClamp)
 	}
 
 	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
@@ -413,6 +419,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 func recalcQuotaFromRatios(info *relaycommon.RelayInfo, ratios map[string]float64) (int, bool) {
 	// 从 PriceData 获取不含 OtherRatios 的基础价格
 	baseQuota := info.PriceData.RemoveOtherRatiosFromFloat(float64(info.PriceData.Quota))
+	baseResourceQuota := info.PriceData.RemoveOtherRatiosFromFloat(float64(info.PriceData.ResourceQuota))
 	priceData := info.PriceData
 	if !priceData.ReplaceOtherRatios(ratios) {
 		return 0, false
@@ -421,6 +428,10 @@ func recalcQuotaFromRatios(info *relaycommon.RelayInfo, ratios map[string]float6
 	result := priceData.ApplyOtherRatiosToFloat(baseQuota)
 	quota, clamp := common.QuotaFromFloatChecked(result)
 	noteTaskQuotaClamp(info, clamp)
+	resourceResult := priceData.ApplyOtherRatiosToFloat(baseResourceQuota)
+	resourceQuota, resourceClamp := common.QuotaFromFloatChecked(resourceResult)
+	info.PriceData.ResourceQuota = resourceQuota
+	noteTaskQuotaClamp(info, resourceClamp)
 	return quota, true
 }
 

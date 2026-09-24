@@ -623,6 +623,7 @@ func executeTaskSubmissionWith(
 	task := model.InitTask(result.Platform, relayInfo)
 	task.PrivateData.Execution = service.TaskExecutionSnapshotFromContext(c)
 	task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
+	task.PrivateData.RequestId = relayInfo.RequestId
 	task.PrivateData.BillingSource = relayInfo.BillingSource
 	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 	task.PrivateData.TokenId = relayInfo.TokenId

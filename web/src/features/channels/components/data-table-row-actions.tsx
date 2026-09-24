@@ -34,6 +34,7 @@ import {
   RefreshCw,
   Loader2,
   FileWarning,
+  BarChart3,
 } from 'lucide-react'
 import { useContext, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -146,6 +147,11 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const handleViewErrors = () => {
     setCurrentRow(channel)
     setOpen('channel-errors')
+  }
+
+  const handleViewUsage = () => {
+    setCurrentRow(channel)
+    setOpen('channel-usage-summary')
   }
 
   const handleToggleStatus = async (
@@ -298,6 +304,13 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
             {t('Error Records')}
             <DropdownMenuShortcut>
               <FileWarning size={16} />
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+
+          <DropdownMenuItem onClick={handleViewUsage}>
+            {t('Usage report')}
+            <DropdownMenuShortcut>
+              <BarChart3 size={16} />
             </DropdownMenuShortcut>
           </DropdownMenuItem>
 

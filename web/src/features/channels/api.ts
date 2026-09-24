@@ -30,6 +30,8 @@ import type {
   ChannelErrorDisplayRule,
   ChannelOpsResponse,
   ChannelTestResponse,
+  ChannelUsagePeriod,
+  ChannelUsageSummaryResponse,
   CopyChannelParams,
   CopyChannelResponse,
   FetchModelsResponse,
@@ -141,6 +143,16 @@ export async function searchChannels(
  */
 export async function getChannel(id: number): Promise<GetChannelResponse> {
   const res = await api.get(`/api/channel/${id}`)
+  return res.data
+}
+
+export async function getChannelUsageSummary(
+  id: number,
+  period: ChannelUsagePeriod = 'day'
+): Promise<ChannelUsageSummaryResponse> {
+  const res = await api.get(`/api/channel/${id}/usage-summary`, {
+    params: { period },
+  })
   return res.data
 }
 
