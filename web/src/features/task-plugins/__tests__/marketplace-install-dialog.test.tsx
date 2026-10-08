@@ -189,19 +189,26 @@ test('first install shows source on demand and disables repeat submission until 
       screen.getByRole('button', { name: 'Install and enable' })
     ).toBeEnabled()
   )
-  expect(await screen.findByText('const plugin = "demo";')).toBeVisible()
-  expect(screen.getByText('// comment')).toBeVisible()
-  expect(screen.getByText('function run() { return 42 }')).toBeVisible()
+  const sourcePanel = screen.getByRole('tabpanel', { name: 'Full source' })
+  expect(sourcePanel).toBeVisible()
+  // Syntax highlighting can split a source line across multiple token elements.
+  for (const line of source.split('\n')) {
+    expect(sourcePanel).toHaveTextContent(line)
+  }
   await user.click(screen.getByRole('button', { name: 'Install and enable' }))
-  expect(
-    await screen.findByRole('button', { name: 'Installing...' })
-  ).toBeDisabled()
+  const installingButton = await screen.findByRole('button', {
+    name: 'Installing...',
+  })
+  expect(installingButton).toBeDisabled()
+  await user.click(installingButton)
+  expect(api.installMarketplacePlugin).toHaveBeenCalledTimes(1)
   expect(api.installMarketplacePlugin).toHaveBeenCalledWith({
     source,
     sourceSha256: undefined,
     remark: 'Official v1.1',
     icon: undefined,
   })
+  expect(onOpenChange).not.toHaveBeenCalled()
   resolveInstall({ meta: { name: 'Demo', version: '1.1' } })
   await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
 })
