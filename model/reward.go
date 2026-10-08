@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -123,6 +122,8 @@ func GrantReward(sourceType string, sourceId int, recipientUserId int, snapshot 
 		return grant, nil
 	}
 
+	creditedQuota := 0
+	subscriptionGranted := false
 	attemptErr := DB.Transaction(func(tx *gorm.DB) error {
 		if err := lockForUpdate(tx).First(grant, grant.Id).Error; err != nil {
 			return err
@@ -166,17 +167,25 @@ func GrantReward(sourceType string, sourceId int, recipientUserId int, snapshot 
 			return errors.New("unsupported reward type")
 		}
 		completedAt := common.GetTimestamp()
-		return tx.Model(grant).Updates(map[string]interface{}{
+		if err := tx.Model(grant).Updates(map[string]any{
 			"status":         RewardGrantStatusSucceeded,
 			"failure_reason": "",
 			"completed_at":   completedAt,
 			"updated_at":     completedAt,
-		}).Error
+		}).Error; err != nil {
+			return err
+		}
+		if storedSnapshot.Type == RewardTypeQuota {
+			creditedQuota = storedSnapshot.Quota
+		} else {
+			subscriptionGranted = true
+		}
+		return nil
 	})
 	if attemptErr != nil {
 		_ = DB.Model(&RewardGrant{}).
 			Where("id = ? AND status <> ?", grant.Id, RewardGrantStatusSucceeded).
-			Updates(map[string]interface{}{
+			Updates(map[string]any{
 				"status":         RewardGrantStatusFailed,
 				"failure_reason": attemptErr.Error(),
 				"retry_count":    gorm.Expr("retry_count + 1"),
@@ -195,10 +204,13 @@ func GrantReward(sourceType string, sourceId int, recipientUserId int, snapshot 
 		return grant, attemptErr
 	}
 	_ = DB.First(grant, grant.Id).Error
-	if grant.Status == RewardGrantStatusSucceeded {
-		gopool.Go(func() {
-			_ = invalidateUserCache(recipientUserId)
-		})
+	// Only this transaction's committed award updates the cache. A worker that
+	// observes another worker's success must not apply its credit a second time.
+	// Keep any wallet reservations awaiting the batch update in the live hash.
+	if creditedQuota > 0 {
+		syncCreditUserQuotaCache(recipientUserId, creditedQuota, "reward")
+	} else if subscriptionGranted {
+		refreshSubscriptionUserGroupCache(recipientUserId, "subscription reward")
 	}
 	return grant, nil
 }

@@ -2,13 +2,47 @@ package controller
 
 import (
 	"errors"
+	"math"
+	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
+	"gorm.io/gorm"
 )
+
+type lotteryRewardUnit string
+
+const (
+	lotteryRewardUnitUSD   lotteryRewardUnit = "usd"
+	lotteryRewardUnitCNY   lotteryRewardUnit = "cny"
+	lotteryRewardUnitQuota lotteryRewardUnit = "quota"
+)
+
+type lotteryPrizeRequest struct {
+	Name               string                       `json:"name"`
+	Quantity           int                          `json:"quantity"`
+	RewardType         model.LotteryRewardType      `json:"reward_type"`
+	Quota              *int                         `json:"quota"`
+	RewardAmount       *decimal.Decimal             `json:"reward_amount"`
+	RewardUnit         lotteryRewardUnit            `json:"reward_unit"`
+	SubscriptionPlanId int                          `json:"subscription_plan_id"`
+	FulfillmentMode    model.LotteryFulfillmentMode `json:"fulfillment_mode"`
+	ClaimExpireSeconds int64                        `json:"claim_expire_seconds"`
+}
+
+type lotteryPrizeConversionAudit struct {
+	InputAmount     string `json:"input_amount"`
+	InputUnit       string `json:"input_unit"`
+	Quota           int    `json:"quota"`
+	QuotaPerUnit    string `json:"quota_per_unit"`
+	USDExchangeRate string `json:"usd_exchange_rate"`
+}
 
 type lotteryPlanRequest struct {
 	Title                 string                       `json:"title"`
@@ -21,7 +55,7 @@ type lotteryPlanRequest struct {
 	DrawTime              int64                        `json:"draw_time"`
 	UserIds               []int                        `json:"user_ids"`
 	Groups                []string                     `json:"groups"`
-	Prizes                []*model.LotteryPrize        `json:"prizes"`
+	Prizes                []lotteryPrizeRequest        `json:"prizes"`
 }
 
 type lotteryManualDrawRequest struct {
@@ -59,32 +93,102 @@ func GetLotteryPlansForSelf(c *gin.Context) {
 	common.ApiSuccess(c, plans)
 }
 
+func GetLotteryPlanForSelf(c *gin.Context) {
+	planId, err := lotteryPathID(c)
+	if err != nil {
+		lotteryUserAPIError(c, http.StatusBadRequest, err)
+		return
+	}
+	plan, err := model.GetLotteryPlanForUser(planId, c.GetInt("id"))
+	if err != nil {
+		lotteryUserAPIError(c, 0, err)
+		return
+	}
+	common.ApiSuccess(c, plan)
+}
+
 func GetLotteryParticipantsForSelf(c *gin.Context) {
 	planId, err := lotteryPathID(c)
 	if err != nil {
-		common.ApiError(c, err)
+		lotteryUserAPIError(c, http.StatusBadRequest, err)
 		return
 	}
 	participants, err := model.ListLotteryParticipantsForUser(planId, c.GetInt("id"))
 	if err != nil {
-		common.ApiError(c, err)
+		lotteryUserAPIError(c, 0, err)
 		return
 	}
 	common.ApiSuccess(c, participants)
 }
 
+func GetLotteryParticipantsPageForSelf(c *gin.Context) {
+	planId, err := lotteryPathID(c)
+	if err != nil {
+		lotteryUserAPIError(c, http.StatusBadRequest, err)
+		return
+	}
+	limit, err := lotterySelfHistoryLimit(c)
+	if err != nil {
+		lotteryUserAPIError(c, http.StatusBadRequest, err)
+		return
+	}
+	beforeCreatedAt, beforeId, err := lotteryHistoryCursor(c)
+	if err != nil {
+		lotteryUserAPIError(c, http.StatusBadRequest, err)
+		return
+	}
+	page, err := model.ListLotteryParticipantsForUserPage(planId, c.GetInt("id"), limit, beforeCreatedAt, beforeId)
+	if err != nil {
+		lotteryUserAPIError(c, 0, err)
+		return
+	}
+	if page.HasMore && len(page.Items) > 0 {
+		last := page.Items[len(page.Items)-1]
+		page.NextCursor = lotteryHistoryNextCursor(last.JoinedAt, last.Id)
+	}
+	common.ApiSuccess(c, page)
+}
+
 func GetLotteryPlanResultsForSelf(c *gin.Context) {
 	planId, err := lotteryPathID(c)
 	if err != nil {
-		common.ApiError(c, err)
+		lotteryUserAPIError(c, http.StatusBadRequest, err)
 		return
 	}
 	results, err := model.ListLotteryResultsForUserPlan(planId, c.GetInt("id"))
 	if err != nil {
-		common.ApiError(c, err)
+		lotteryUserAPIError(c, 0, err)
 		return
 	}
 	common.ApiSuccess(c, results)
+}
+
+func GetLotteryPlanResultsPageForSelf(c *gin.Context) {
+	planId, err := lotteryPathID(c)
+	if err != nil {
+		lotteryUserAPIError(c, http.StatusBadRequest, err)
+		return
+	}
+	limit, err := lotterySelfHistoryLimit(c)
+	if err != nil {
+		lotteryUserAPIError(c, http.StatusBadRequest, err)
+		return
+	}
+	beforeCreatedAt, beforeId, err := lotteryHistoryCursor(c)
+	if err != nil {
+		lotteryUserAPIError(c, http.StatusBadRequest, err)
+		return
+	}
+	page, err := model.ListLotteryResultsForUserPlanPage(planId, c.GetInt("id"), limit, beforeCreatedAt, beforeId)
+	if err != nil {
+		lotteryUserAPIError(c, 0, err)
+		return
+	}
+	if page.HasMore && len(page.Items) > 0 {
+		last := page.Items[len(page.Items)-1]
+		page.NextCursor = lotteryHistoryNextCursor(last.CreatedAt, last.Id)
+	}
+	common.ApiSuccess(c, page)
 }
 
 func JoinLotteryPlanForSelf(c *gin.Context) {
@@ -248,6 +352,19 @@ func AdminCreateLotteryPlan(c *gin.Context) {
 		common.ApiErrorMsg(c, "invalid lottery plan status")
 		return
 	}
+	prizes := make([]*model.LotteryPrize, 0, len(req.Prizes))
+	prizeAudits := make([]lotteryPrizeConversionAudit, 0, len(req.Prizes))
+	for _, prizeRequest := range req.Prizes {
+		prize, audit, err := normalizeLotteryPrizeRequest(prizeRequest)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		prizes = append(prizes, prize)
+		if prize.RewardType == model.LotteryRewardQuota {
+			prizeAudits = append(prizeAudits, audit)
+		}
+	}
 	plan := &model.LotteryPlan{
 		Title:                 req.Title,
 		Icon:                  req.Icon,
@@ -259,7 +376,7 @@ func AdminCreateLotteryPlan(c *gin.Context) {
 		DrawTime:              req.DrawTime,
 		CreatedBy:             c.GetInt("id"),
 	}
-	if err := model.CreateLotteryPlan(plan, req.UserIds, req.Groups, req.Prizes); err != nil {
+	if err := model.CreateLotteryPlan(plan, req.UserIds, req.Groups, prizes); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -267,8 +384,90 @@ func AdminCreateLotteryPlan(c *gin.Context) {
 		"plan_id":          plan.Id,
 		"eligibility_mode": plan.EligibilityMode,
 		"max_participants": plan.MaxParticipants,
+		"quota_prizes":     prizeAudits,
 	})
 	common.ApiSuccess(c, plan)
+}
+
+func normalizeLotteryPrizeRequest(request lotteryPrizeRequest) (*model.LotteryPrize, lotteryPrizeConversionAudit, error) {
+	prize := &model.LotteryPrize{
+		Name:               request.Name,
+		Quantity:           request.Quantity,
+		RewardType:         request.RewardType,
+		SubscriptionPlanId: request.SubscriptionPlanId,
+		FulfillmentMode:    request.FulfillmentMode,
+		ClaimExpireSeconds: request.ClaimExpireSeconds,
+	}
+	if request.RewardType != model.LotteryRewardQuota {
+		if request.RewardAmount != nil || request.RewardUnit != "" || request.Quota != nil && *request.Quota != 0 {
+			return nil, lotteryPrizeConversionAudit{}, errors.New("subscription prize cannot include quota reward fields")
+		}
+		return prize, lotteryPrizeConversionAudit{}, nil
+	}
+
+	hasAmount := request.RewardAmount != nil
+	hasUnit := request.RewardUnit != ""
+	if hasAmount != hasUnit {
+		return nil, lotteryPrizeConversionAudit{}, errors.New("lottery reward amount and unit must be provided together")
+	}
+	if hasAmount && request.Quota != nil {
+		return nil, lotteryPrizeConversionAudit{}, errors.New("lottery reward amount conflicts with legacy quota")
+	}
+
+	audit := lotteryPrizeConversionAudit{
+		QuotaPerUnit:    strconv.FormatFloat(common.QuotaPerUnit, 'f', -1, 64),
+		USDExchangeRate: strconv.FormatFloat(operation_setting.USDExchangeRate, 'f', -1, 64),
+	}
+	if !hasAmount {
+		if request.Quota == nil || *request.Quota <= 0 || *request.Quota > common.MaxQuota {
+			return nil, lotteryPrizeConversionAudit{}, errors.New("quota prize must be positive and within the database limit")
+		}
+		prize.Quota = *request.Quota
+		audit.InputAmount = strconv.Itoa(*request.Quota)
+		audit.InputUnit = string(lotteryRewardUnitQuota)
+		audit.Quota = *request.Quota
+		return prize, audit, nil
+	}
+
+	if request.RewardAmount.LessThanOrEqual(decimal.Zero) {
+		return nil, lotteryPrizeConversionAudit{}, errors.New("lottery reward amount must be positive")
+	}
+	if common.QuotaPerUnit <= 0 || math.IsNaN(common.QuotaPerUnit) || math.IsInf(common.QuotaPerUnit, 0) {
+		return nil, lotteryPrizeConversionAudit{}, errors.New("invalid quota per unit configuration")
+	}
+
+	amount := *request.RewardAmount
+	quotaDecimal := decimal.Zero
+	switch request.RewardUnit {
+	case lotteryRewardUnitUSD:
+		quotaDecimal = amount.Mul(decimal.NewFromFloat(common.QuotaPerUnit))
+	case lotteryRewardUnitCNY:
+		if operation_setting.USDExchangeRate <= 0 || math.IsNaN(operation_setting.USDExchangeRate) || math.IsInf(operation_setting.USDExchangeRate, 0) {
+			return nil, lotteryPrizeConversionAudit{}, errors.New("invalid USD exchange rate configuration")
+		}
+		quotaDecimal = amount.Div(decimal.NewFromFloat(operation_setting.USDExchangeRate)).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
+	case lotteryRewardUnitQuota:
+		if !amount.Equal(amount.Truncate(0)) {
+			return nil, lotteryPrizeConversionAudit{}, errors.New("raw lottery quota must be an integer")
+		}
+		quotaDecimal = amount
+	default:
+		return nil, lotteryPrizeConversionAudit{}, errors.New("invalid lottery reward unit")
+	}
+
+	roundedQuota := quotaDecimal.Round(0)
+	if roundedQuota.LessThan(decimal.NewFromInt(1)) || roundedQuota.GreaterThan(decimal.NewFromInt(common.MaxQuota)) {
+		return nil, lotteryPrizeConversionAudit{}, errors.New("lottery reward converts outside the supported quota range")
+	}
+	quota, clamp := common.QuotaFromDecimalChecked(roundedQuota)
+	if clamp != nil {
+		return nil, lotteryPrizeConversionAudit{}, errors.New("lottery reward converts outside the supported quota range")
+	}
+	prize.Quota = quota
+	audit.InputAmount = amount.String()
+	audit.InputUnit = string(request.RewardUnit)
+	audit.Quota = quota
+	return prize, audit, nil
 }
 
 func AdminListLotteryPlans(c *gin.Context) {
@@ -278,6 +477,29 @@ func AdminListLotteryPlans(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, plans)
+}
+
+// AdminGetLotteryPlan returns a plan without applying end-user eligibility filters.
+func AdminGetLotteryPlan(c *gin.Context) {
+	planId, err := lotteryPathID(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	plan, err := model.GetLotteryPlanForAdmin(planId)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"success":    false,
+				"message":    "lottery plan not found",
+				"request_id": c.GetString(common.RequestIdKey),
+			})
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, plan)
 }
 
 func AdminListLotteryPrizes(c *gin.Context) {
@@ -468,4 +690,34 @@ func lotteryHistoryCursor(c *gin.Context) (int64, int, error) {
 
 func lotteryHistoryNextCursor(createdAt int64, id int) string {
 	return strconv.FormatInt(createdAt, 10) + ":" + strconv.Itoa(id)
+}
+
+// lotteryUserAPIError keeps private lottery visibility and storage failures
+// from being rendered as a generic 500 by the shared admin-oriented helper.
+// The public endpoints expose only the status needed by the client while
+// logging unexpected failures server-side.
+func lotteryUserAPIError(c *gin.Context, status int, err error) {
+	if err == nil {
+		return
+	}
+	if status == 0 {
+		switch {
+		case errors.Is(err, model.ErrLotteryPlanForbidden):
+			status = http.StatusForbidden
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			status = http.StatusNotFound
+		default:
+			status = http.StatusInternalServerError
+		}
+	}
+	message := err.Error()
+	if status >= http.StatusInternalServerError {
+		logger.LogError(c, "lottery user API error: "+err.Error())
+		message = "internal server error"
+	}
+	c.JSON(status, gin.H{
+		"success":    false,
+		"message":    message,
+		"request_id": c.GetString(common.RequestIdKey),
+	})
 }

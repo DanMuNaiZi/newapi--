@@ -113,11 +113,15 @@ func runFixedPriceAccountingCases(t *testing.T, db, logDB *gorm.DB) {
 		wallet, outboundImages                    int
 		groupRatio                                float64
 		want                                      int
+		wantResource                              *int
 		unit                                      billingexpr.BillingUnit
 		requestedImages, actualImages             int
 	}{
 		{name: "missing usage charges once", expression: flat, want: 5000, unit: billingexpr.BillingUnitRequest},
 		{name: "zero usage charges once", expression: flat, usage: &dto.Usage{}, want: 5000, unit: billingexpr.BillingUnitRequest},
+		{name: "text expression rounds half quota", expression: `tier("request", fixed(0.000001))`, usage: &dto.Usage{}, want: 1, wantResource: common.GetPointer(1), unit: billingexpr.BillingUnitRequest},
+		{name: "audio expression rounds half quota", expression: `tier("request", fixed(0.000001))`, audio: true, usage: &dto.Usage{}, want: 1, wantResource: common.GetPointer(1), unit: billingexpr.BillingUnitRequest},
+		{name: "realtime token expression rounds half quota", expression: `tier("base", p * 1)`, realtime: true, usage: &dto.Usage{PromptTokens: 1, TotalTokens: 1}, want: 1, wantResource: common.GetPointer(1), unit: billingexpr.BillingUnitToken},
 		{name: "stream charges once", expression: flat, stream: true, usage: &dto.Usage{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120}, want: 5000, unit: billingexpr.BillingUnitRequest},
 		{name: "audio zero usage charges once", expression: flat, audio: true, usage: &dto.Usage{}, want: 5000, unit: billingexpr.BillingUnitRequest},
 		{name: "audio missing usage charges once", expression: flat, audio: true, want: 5000, unit: billingexpr.BillingUnitRequest},
@@ -240,6 +244,10 @@ func runFixedPriceAccountingCases(t *testing.T, db, logDB *gorm.DB) {
 					var log model.Log
 					require.NoError(t, logDB.Where("user_id = ?", user.Id).Take(&log).Error)
 					assert.Equal(t, tc.want, log.Quota)
+					if tc.wantResource != nil {
+						require.NotNil(t, log.ResourceQuota)
+						assert.Equal(t, *tc.wantResource, *log.ResourceQuota)
+					}
 					assert.Equal(t, tc.stream, log.IsStream)
 					assert.NotContains(t, log.Content, "无法扣费")
 					var other map[string]any
@@ -1362,27 +1370,48 @@ func TestCalculateTextQuotaSummaryZeroTokensStillBillsToolSurcharge(t *testing.T
 func TestCalculateTextQuotaSummaryDoesNotApplyRequestMultipliersToToolSurcharge(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-
-	relayInfo := &relaycommon.RelayInfo{
-		OriginModelName: "o1",
-		PriceData: hosttypes.PriceData{
-			ModelRatio:      1,
-			CompletionRatio: 1,
-			GroupRatioInfo:  hosttypes.GroupRatioInfo{GroupRatio: 1},
-		},
-		ResponsesUsageInfo: &relaycommon.ResponsesUsageInfo{
-			BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
-				dto.BuildInToolWebSearchPreview: {CallCount: 1},
-			},
-		},
+	oldQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 500_000
+	t.Cleanup(func() { common.QuotaPerUnit = oldQuotaPerUnit })
+	operation_setting.SetToolPriceForTest(dto.BuildInToolWebSearchPreview, 10)
+	t.Cleanup(func() { operation_setting.DeleteToolPriceForTest(dto.BuildInToolWebSearchPreview) })
+	for _, tc := range []struct {
+		name                       string
+		usePrice                   bool
+		promptTokens               int
+		modelPrice, groupRatio     float64
+		wantQuota, wantResource    int
+		wantTool, wantResourceTool int
+	}{
+		{name: "token pricing tool only", groupRatio: 1, wantQuota: 5000, wantResource: 5000, wantTool: 5000, wantResourceTool: 5000},
+		{name: "per call pricing tool only", usePrice: true, groupRatio: 1, wantQuota: 5000, wantResource: 5000, wantTool: 5000, wantResourceTool: 5000},
+		{name: "token pricing multiplies base before discounted tools", promptTokens: 10, groupRatio: 0.25, wantQuota: 1258, wantResource: 5030, wantTool: 1250, wantResourceTool: 5000},
+		{name: "per call pricing multiplies base before discounted tools", usePrice: true, modelPrice: 0.002, groupRatio: 0.25, wantQuota: 2000, wantResource: 8000, wantTool: 1250, wantResourceTool: 5000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			relayInfo := &relaycommon.RelayInfo{
+				OriginModelName: "o1",
+				PriceData: hosttypes.PriceData{
+					UsePrice:        tc.usePrice,
+					ModelPrice:      tc.modelPrice,
+					ModelRatio:      1,
+					CompletionRatio: 1,
+					GroupRatioInfo:  hosttypes.GroupRatioInfo{GroupRatio: tc.groupRatio},
+				},
+				ResponsesUsageInfo: &relaycommon.ResponsesUsageInfo{
+					BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
+						dto.BuildInToolWebSearchPreview: {CallCount: 1},
+					},
+				},
+			}
+			relayInfo.PriceData.AddOtherRatio("n", 3)
+			summary := calculateTextQuotaSummary(ctx, relayInfo, &dto.Usage{PromptTokens: tc.promptTokens, TotalTokens: tc.promptTokens})
+			assert.True(t, decimal.NewFromInt(int64(tc.wantTool)).Equal(summary.ToolCallSurchargeQuota))
+			assert.True(t, decimal.NewFromInt(int64(tc.wantResourceTool)).Equal(summary.ResourceToolCallSurchargeQuota))
+			assert.Equal(t, tc.wantQuota, summary.Quota)
+			assert.Equal(t, tc.wantResource, summary.ResourceQuota)
+		})
 	}
-	relayInfo.PriceData.AddOtherRatio("n", 3)
-
-	summary := calculateTextQuotaSummary(ctx, relayInfo, &dto.Usage{})
-
-	expected := decimal.NewFromFloat(10.0 / 1000).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
-	assert.True(t, expected.Equal(summary.ToolCallSurchargeQuota))
-	assert.Equal(t, common.QuotaFromDecimal(expected), summary.Quota)
 }
 
 func TestCalculateTextToolCallSurchargeGeminiGoogleSearch(t *testing.T) {

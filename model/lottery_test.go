@@ -221,12 +221,12 @@ func TestLotteryPublicDetailsExposeNamesOnlyToVisibleUsers(t *testing.T) {
 	participants, err := ListLotteryParticipantsForUser(plan.Id, userIDs[0])
 	require.NoError(t, err)
 	require.Len(t, participants, 1)
-	assert.Equal(t, "lottery-a", participants[0].Username)
+	assert.Equal(t, common.MaskUsername("lottery-a"), participants[0].Username)
 
 	results, err := ListLotteryResultsForUserPlan(plan.Id, userIDs[0])
 	require.NoError(t, err)
 	require.Len(t, results, 1)
-	assert.Equal(t, "lottery-a", results[0].Username)
+	assert.Equal(t, common.MaskUsername("lottery-a"), results[0].Username)
 	assert.Equal(t, "Visible prize", results[0].PrizeName)
 
 	_, err = ListLotteryParticipantsForUser(plan.Id, userIDs[1])
@@ -420,6 +420,14 @@ func TestLotterySelfClaimPrizeCreditsQuotaOnce(t *testing.T) {
 
 	var result LotteryResult
 	require.NoError(t, DB.Where("plan_id = ? AND user_id = ?", plan.Id, userIDs[0]).First(&result).Error)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", userIDs[0]).Update("quota", common.MaxWalletQuota-100).Error)
+	require.Error(t, ClaimLotteryResult(result.Id, userIDs[0]), "a reward must not overflow the wallet")
+	require.NoError(t, DB.First(&result, result.Id).Error)
+	assert.Equal(t, "pending", result.FulfillmentStatus)
+	var cappedUser User
+	require.NoError(t, DB.First(&cappedUser, userIDs[0]).Error)
+	assert.Equal(t, common.MaxWalletQuota-100, cappedUser.Quota)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", userIDs[0]).Update("quota", 0).Error)
 	require.NoError(t, ClaimLotteryResult(result.Id, userIDs[0]))
 	require.Error(t, ClaimLotteryResult(result.Id, userIDs[0]))
 
@@ -453,10 +461,17 @@ func TestLotteryRedemptionCodePrizeCreatesRedeemableCode(t *testing.T) {
 	require.NoError(t, DB.Where("plan_id = ? AND user_id = ?", plan.Id, userIDs[0]).First(&result).Error)
 	require.NotEmpty(t, result.RedemptionCode)
 	assert.Equal(t, "issued", result.FulfillmentStatus)
+	require.Error(t, ClaimLotteryResult(result.Id, userIDs[0]), "issued code rewards cannot also be claimed directly")
+	require.Error(t, FulfillLotteryResult(result.Id), "issued code rewards cannot also be fulfilled automatically")
 	outcome, err := Redeem(result.RedemptionCode, userIDs[0])
 	require.NoError(t, err)
 	assert.Equal(t, RedemptionRewardQuota, outcome.RewardType)
 	assert.Equal(t, 222, outcome.Quota)
+	_, err = Redeem(result.RedemptionCode, userIDs[0])
+	require.Error(t, err)
+	var winner User
+	require.NoError(t, DB.First(&winner, userIDs[0]).Error)
+	assert.Equal(t, 222, winner.Quota)
 }
 
 func TestLotterySubscriptionRewardUsesSnapshotAndIgnoresPurchaseLimit(t *testing.T) {

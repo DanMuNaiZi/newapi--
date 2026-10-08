@@ -31,6 +31,7 @@ import {
 import { useMediaQuery } from '@/hooks'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import { createServerError } from '@/lib/server-error-message'
+import { useUserPreviewStore } from '@/stores/user-preview-store'
 
 import { getUsers, searchUsers } from '../api'
 import {
@@ -63,6 +64,7 @@ export function UsersTable() {
   const { t } = useTranslation()
   const columns = useUsersColumns()
   const { refreshTrigger } = useUsers()
+  const readOnlyPreview = useUserPreviewStore((state) => Boolean(state.token))
   const isMobile = useMediaQuery('(max-width: 640px)')
   const [sorting, setSorting] = useState<SortingState>([])
 
@@ -121,6 +123,7 @@ export function UsersTable() {
 
   // Fetch data with React Query
   const { data, isLoading, isFetching } = useQuery({
+    enabled: !readOnlyPreview,
     queryKey: [
       'users',
       pagination.pageIndex + 1,

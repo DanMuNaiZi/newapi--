@@ -1,11 +1,18 @@
 package controller
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -134,4 +141,123 @@ func TestTaskLogDTOKeepsFailureReasonAndDoesNotMarkPluginTaskLegacy(t *testing.T
 	assert.False(t, pluginView.LegacyVideoAvailable)
 	assert.Empty(t, pluginView.ResultURL)
 	assert.Empty(t, pluginView.FailReason)
+}
+
+func TestTaskFailureProjectionsProtectModelAndSecretsWithoutMutatingTask(t *testing.T) {
+	task := &model.Task{
+		TaskID: "task_failed", Status: model.TaskStatusFailure,
+		Properties:  model.Properties{Input: "safe input", OriginModelName: "requested-model", UpstreamModelName: "private-model"},
+		FailReason:  `private-model failed for channel-key-secret, password="private-password", body: {"private":"private-body"}`,
+		Data:        []byte(`{"model":"private-model","error":{"message":"private-model failed for channel-key-secret"}}`),
+		PrivateData: model.TaskPrivateData{Key: "channel-key-secret"},
+	}
+	original, err := common.Marshal(task)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name              string
+		role              int
+		actualModelAccess bool
+	}{
+		{"ordinary user", common.RoleCommonUser, false},
+		{"ordinary user cannot elevate projection", common.RoleCommonUser, true},
+		{"restricted administrator", common.RoleAuthorizedAdmin, false},
+		{"restricted full administrator", common.RoleAdminUser, false},
+		{"permitted authorized administrator", common.RoleAuthorizedAdmin, true},
+		{"permitted administrator", common.RoleAdminUser, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			view := tasksToDto([]*model.Task{task}, false, tc.role, tc.actualModelAccess)[0]
+			properties, ok := view.Properties.(model.Properties)
+			require.True(t, ok)
+			assert.Equal(t, "requested-model", properties.OriginModelName)
+			assert.Equal(t, "safe input", properties.Input)
+			if tc.role >= common.RoleAuthorizedAdmin && tc.actualModelAccess {
+				assert.Equal(t, "private-model", properties.UpstreamModelName)
+			} else {
+				assert.Empty(t, properties.UpstreamModelName)
+			}
+			assert.Contains(t, view.FailReason, "requested-model")
+			assert.NotContains(t, view.FailReason, "private-model")
+			assert.NotContains(t, view.FailReason, "channel-key-secret")
+			assert.NotContains(t, view.FailReason, "private-password")
+			assert.NotContains(t, view.FailReason, "private-body")
+			assert.Empty(t, view.ResultURL, "a failure reason is not a task artifact URL")
+			assert.Empty(t, view.Data, "failed upstream bodies are private, even when an administrator may view the model field")
+		})
+	}
+	native := relay.TaskModel2Dto(task)
+	nativeJSON, err := common.Marshal(native)
+	require.NoError(t, err)
+	assert.NotContains(t, string(nativeJSON), "private-model")
+	assert.NotContains(t, string(nativeJSON), "channel-key-secret")
+	assert.NotContains(t, string(nativeJSON), "private-password")
+	assert.NotContains(t, string(nativeJSON), "private-body")
+	after, err := common.Marshal(task)
+	require.NoError(t, err)
+	assert.Equal(t, string(original), string(after))
+	assert.Equal(t, "channel-key-secret", task.PrivateData.Key)
+	t.Run("historical task without a requested model", func(t *testing.T) {
+		historical := &model.Task{Status: model.TaskStatusFailure, Properties: model.Properties{UpstreamModelName: "private-model"}, FailReason: "private-model failed"}
+		view := relay.TaskModel2Dto(historical)
+		assert.Equal(t, "requested model failed", view.FailReason)
+		assert.Empty(t, view.ResultURL)
+		assert.Equal(t, "private-model failed", historical.FailReason)
+	})
+}
+
+func TestTaskUserPreviewUsesSanitizedTargetProjection(t *testing.T) {
+	actor, _ := setupSecurityEnrollmentTest(t)
+	require.NoError(t, model.DB.Model(actor).Update("role", common.RoleRootUser).Error)
+	require.NoError(t, model.PublishUserAuthCache(actor.Id))
+	bundle, err := service.CreateLoginSession(actor.Id, "password", "127.0.0.1", "task-preview-test")
+	require.NoError(t, err)
+	target := &model.User{Username: "task-preview-target", Password: "placeholder", AffCode: "task-preview-target", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AuthVersion: 1, Group: "default"}
+	require.NoError(t, model.DB.Create(target).Error)
+	require.NoError(t, model.PublishUserAuthCache(target.Id))
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}))
+	task := &model.Task{
+		TaskID: "task_preview_failed", UserId: target.Id, Status: model.TaskStatusFailure,
+		Properties: model.Properties{OriginModelName: "requested-model", UpstreamModelName: "private-model"},
+		FailReason: `private-model failed, token="private-token", body: {"private":"private-body"}`,
+	}
+	require.NoError(t, model.DB.Create(task).Error)
+	preview, _, err := service.IssueUserPreviewToken(actor.Id, target.Id, time.Now())
+	require.NoError(t, err)
+	engine := gin.New()
+	engine.GET("/api/task/self", middleware.UserAuth(), GetUserTask)
+	mutations := 0
+	engine.POST("/api/task/self", middleware.UserAuth(), func(c *gin.Context) { mutations++; c.Status(http.StatusOK) })
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		request := httptest.NewRequest(method, "/api/task/self", nil)
+		request.Header.Set("Authorization", "Bearer "+bundle.AccessToken)
+		request.Header.Set("New-Api-User-Preview", preview)
+		response := httptest.NewRecorder()
+		engine.ServeHTTP(response, request)
+		if method == http.MethodPost {
+			assert.Equal(t, http.StatusForbidden, response.Code)
+			continue
+		}
+		assert.Equal(t, http.StatusOK, response.Code)
+		assert.Contains(t, response.Body.String(), task.TaskID)
+		assert.Contains(t, response.Body.String(), "requested-model")
+		assert.NotContains(t, response.Body.String(), "private-model")
+		assert.NotContains(t, response.Body.String(), "private-token")
+		assert.NotContains(t, response.Body.String(), "private-body")
+	}
+	assert.Zero(t, mutations)
+	var persisted model.Task
+	require.NoError(t, model.DB.First(&persisted, task.ID).Error)
+	assert.Equal(t, task.Properties, persisted.Properties)
+	assert.Equal(t, task.FailReason, persisted.FailReason)
+	response := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(response)
+	c.Set("id", target.Id)
+	c.Params = gin.Params{{Key: "key", Value: task.TaskID}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks/"+task.TaskID, nil)
+	GetTask(c)
+	assert.Equal(t, http.StatusOK, response.Code)
+	assert.Contains(t, response.Body.String(), "requested-model")
+	assert.NotContains(t, response.Body.String(), "private-model")
+	assert.NotContains(t, response.Body.String(), "private-token")
+	assert.NotContains(t, response.Body.String(), "private-body")
 }

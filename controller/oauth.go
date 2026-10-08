@@ -491,7 +491,7 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	if !common.RegisterEnabled {
 		return nil, nil, &OAuthRegistrationDisabledError{}
 	}
-	if _, ok := provider.(*oauth.GitHubProvider); !ok {
+	if !isGitHubRegistrationProvider(provider) {
 		return nil, nil, oauth.NewOAuthErrorWithRaw(
 			i18n.MsgOAuthGitHubRegistrationOnly,
 			nil,
@@ -603,6 +603,13 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	}
 
 	return user, nil, nil
+}
+
+// isGitHubRegistrationProvider uses the provider contract instead of a
+// concrete type assertion so provider wrappers remain compatible with the
+// GitHub registration policy.
+func isGitHubRegistrationProvider(provider oauth.Provider) bool {
+	return provider != nil && strings.EqualFold(provider.GetName(), "GitHub") && provider.ProviderUserIDColumn() == "github_id"
 }
 
 // recordLegacyGitHubBindingAudit records the outcome of a legacy GitHub binding

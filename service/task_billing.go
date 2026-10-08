@@ -49,6 +49,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 	}
 	other := model.NewLogOther()
 	other.SetPublic("is_task", true)
+	other.SetAdmin("task_billing_finalized", task != nil && task.Status == model.TaskStatusSuccess)
 	other.SetPublic("request_path", c.Request.URL.Path)
 	if taskDeliveredInline(c, task) {
 		other.SetPublic("task_sync", true)
@@ -62,8 +63,8 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 		other.SetPublic("user_group_ratio", info.PriceData.GroupRatioInfo.GroupSpecialRatio)
 	}
 	if info.IsModelMapped {
-		other.SetPublic("is_model_mapped", true)
-		other.SetPublic("upstream_model_name", info.UpstreamModelName)
+		other.SetAdmin("is_model_mapped", true)
+		other.SetAdmin("upstream_model_name", info.UpstreamModelName)
 	}
 	if snap := info.TieredBillingSnapshot; snap != nil {
 		other.SetPublic("billing_mode", "tiered_expr")
@@ -78,17 +79,18 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 	}
 	appendTaskLogInfo(task, other)
 	attachQuotaSaturation(c, info, other)
+	resourceQuota := info.PriceData.ResourceQuota
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
 		ChannelId:        info.ChannelId,
 		ModelName:        info.OriginModelName,
 		TokenName:        tokenName,
 		Quota:            info.PriceData.Quota,
-		ResourceQuota:    func() *int { value := info.PriceData.ResourceQuota; return &value }(),
+		ResourceQuota:    &resourceQuota,
 		Content:          logContent,
 		TokenId:          info.TokenId,
 		Group:            info.UsingGroup,
 		Other:            other,
-		ActivateReferral: true,
+		ActivateReferral: task != nil && task.Status == model.TaskStatusSuccess,
 		BillingSettled:   info.BillingSettlementSucceeded,
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
@@ -177,8 +179,8 @@ func taskBillingOther(task *model.Task) *model.LogOther {
 	}
 	props := task.Properties
 	if props.UpstreamModelName != "" && props.UpstreamModelName != props.OriginModelName {
-		other.SetPublic("is_model_mapped", true)
-		other.SetPublic("upstream_model_name", props.UpstreamModelName)
+		other.SetAdmin("is_model_mapped", true)
+		other.SetAdmin("upstream_model_name", props.UpstreamModelName)
 	}
 	appendTaskLogInfo(task, other)
 	return other
@@ -263,7 +265,12 @@ func taskModelName(task *model.Task) string {
 // 返回资金来源是否已成功退还；失败时保留 quota，供显式重试或人工对账。
 func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool {
 	quota := task.Quota
-	if quota == 0 {
+	var resourceQuota *int
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.ResourceQuota != nil {
+		value := *bc.ResourceQuota
+		resourceQuota = &value
+	}
+	if quota == 0 && (resourceQuota == nil || *resourceQuota == 0) {
 		return true
 	}
 
@@ -285,21 +292,26 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 	other.SetPublic("task_id", task.TaskID)
 	other.SetPublic("reason", reason)
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-		UserId:    task.UserId,
-		LogType:   model.LogTypeRefund,
-		Content:   "",
-		RequestId: task.PrivateData.RequestId,
-		ChannelId: task.ChannelId,
-		ModelName: taskModelName(task),
-		Quota:     quota,
-		TokenId:   task.PrivateData.TokenId,
-		Group:     task.Group,
-		Other:     other,
+		UserId:        task.UserId,
+		LogType:       model.LogTypeRefund,
+		Content:       "",
+		RequestId:     task.PrivateData.RequestId,
+		ChannelId:     task.ChannelId,
+		ModelName:     taskModelName(task),
+		Quota:         quota,
+		ResourceQuota: resourceQuota,
+		TokenId:       task.PrivateData.TokenId,
+		Group:         task.Group,
+		Other:         other,
 	})
 
 	// 5. 资金退款完成后再清除持久化标记。
 	// 回写失败必须显式告警，避免漏掉潜在的重复退款风险。
 	task.Quota = 0
+	if resourceQuota != nil {
+		zero := 0
+		task.PrivateData.BillingContext.ResourceQuota = &zero
+	}
 	if err := task.UpdateQuota(); err != nil {
 		logger.LogError(ctx, fmt.Sprintf("退款成功但清除 task quota 失败 task %s: %s", task.TaskID, err.Error()))
 	}
@@ -311,15 +323,27 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 // reason 用于日志记录（例如 "token重算" 或 "adaptor调整"）。
 // clamps 可选：若计算 actualQuota 时发生额度饱和，将其记入日志 admin_info（仅管理员可见）。
 func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string, clamps ...*common.QuotaClamp) {
-	if actualQuota < 0 {
+	RecalculateTaskQuotaWithResource(ctx, task, actualQuota, nil, reason, clamps...)
+}
+
+// RecalculateTaskQuotaWithResource settles independently measured resource cost
+// and user charges. In particular, a zero group ratio still records usage.
+func RecalculateTaskQuotaWithResource(ctx context.Context, task *model.Task, actualQuota int, actualResourceQuota *int, reason string, clamps ...*common.QuotaClamp) {
+	if actualQuota < 0 || (actualResourceQuota != nil && (*actualResourceQuota < 0 || *actualResourceQuota > common.MaxQuota)) {
 		return
 	}
 	preConsumedQuota := task.Quota
 	quotaDelta := actualQuota - preConsumedQuota
+	var resourceDelta *int
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.ResourceQuota != nil && actualResourceQuota != nil {
+		delta := *actualResourceQuota - *bc.ResourceQuota
+		resourceDelta = &delta
+	}
 
-	if quotaDelta == 0 {
+	if quotaDelta == 0 && (resourceDelta == nil || *resourceDelta == 0) {
 		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 预扣费准确（%s，%s）",
 			task.TaskID, logger.LogQuota(actualQuota), reason))
+		activateTaskReferral(ctx, task)
 		return
 	}
 
@@ -341,8 +365,14 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	taskAdjustTokenQuota(ctx, task, quotaDelta)
 
 	task.Quota = actualQuota
+	if resourceDelta != nil {
+		value := *actualResourceQuota
+		task.PrivateData.BillingContext.ResourceQuota = &value
+	}
+	quotaPersisted := true
 	if err := task.UpdateQuota(); err != nil {
 		logger.LogError(ctx, fmt.Sprintf("差额结算回写 quota 失败 task %s: %s", task.TaskID, err.Error()))
+		quotaPersisted = false
 	}
 
 	// 提交阶段已经累计过一次请求；结算阶段只调整最终用量。
@@ -351,12 +381,15 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 
 	var logType int
 	var logQuota int
-	if quotaDelta > 0 {
+	if quotaDelta > 0 || (quotaDelta == 0 && resourceDelta != nil && *resourceDelta > 0) {
 		logType = model.LogTypeConsume
 		logQuota = quotaDelta
 	} else {
 		logType = model.LogTypeRefund
 		logQuota = -quotaDelta
+		if resourceDelta != nil {
+			*resourceDelta = -*resourceDelta
+		}
 	}
 	other := taskBillingOther(task)
 	other.SetPublic("task_id", task.TaskID)
@@ -366,18 +399,41 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		attachQuotaSaturationToOther(other, clamp)
 	}
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-		UserId:    task.UserId,
-		LogType:   logType,
-		Content:   reason,
-		RequestId: task.PrivateData.RequestId,
-		ChannelId: task.ChannelId,
-		ModelName: taskModelName(task),
-		Quota:     logQuota,
-		TokenId:   task.PrivateData.TokenId,
-		Group:     task.Group,
-		Other:     other,
-		NodeName:  task.PrivateData.NodeName,
+		UserId:        task.UserId,
+		LogType:       logType,
+		Content:       reason,
+		RequestId:     task.PrivateData.RequestId,
+		ChannelId:     task.ChannelId,
+		ModelName:     taskModelName(task),
+		Quota:         logQuota,
+		ResourceQuota: resourceDelta,
+		TokenId:       task.PrivateData.TokenId,
+		Group:         task.Group,
+		Other:         other,
+		NodeName:      task.PrivateData.NodeName,
 	})
+	if quotaPersisted {
+		activateTaskReferral(ctx, task)
+	}
+}
+
+// A submitted asynchronous task is only a reservation. Qualify referrals once
+// the task succeeded and its positive final charge has been settled, regardless
+// of whether the optional consume log is enabled.
+func activateTaskReferral(ctx context.Context, task *model.Task) {
+	if task == nil || task.Status != model.TaskStatusSuccess || task.Quota <= 0 {
+		return
+	}
+	other := model.NewLogOther()
+	other.SetPublic("is_task", true)
+	other.SetAdmin("task_billing_finalized", true)
+	usage := model.RecordConsumeLogParams{
+		Quota: task.Quota, Group: task.Group, Other: other,
+		ActivateReferral: true, BillingSettled: true,
+	}
+	if err := model.ActivateReferralCampaignForUser(task.UserId, task.PrivateData.RequestId, task.Group, usage); err != nil {
+		logger.LogError(ctx, "failed to activate referral campaign for completed task: "+err.Error())
+	}
 }
 
 // RecalculateTaskQuotaByTokens 根据实际 token 消耗重新计费（异步差额结算）。
@@ -424,9 +480,10 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 
 	// 计算实际应扣费额度: totalTokens * modelRatio * groupRatio * otherMultiplier（饱和转换，防止溢出成负数）
 	actualQuota, clamp := common.QuotaFromFloatChecked(float64(totalTokens) * modelRatio * finalGroupRatio * otherMultiplier)
+	resourceQuota, resourceClamp := common.QuotaFromFloatChecked(float64(totalTokens) * modelRatio * otherMultiplier)
 
 	reason := fmt.Sprintf("token重算：tokens=%d, modelRatio=%.2f, groupRatio=%.2f, otherMultiplier=%.4f", totalTokens, modelRatio, finalGroupRatio, otherMultiplier)
-	RecalculateTaskQuota(ctx, task, actualQuota, reason, clamp)
+	RecalculateTaskQuotaWithResource(ctx, task, actualQuota, &resourceQuota, reason, clamp, resourceClamp)
 	return true
 }
 

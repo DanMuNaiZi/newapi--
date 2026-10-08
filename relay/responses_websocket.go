@@ -284,8 +284,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 			return apiErr
 		}
 		if err := s.writeTarget(websocket.TextMessage, payload); err != nil {
-			state.closeAfter = true
-			return types.NewError(err, types.ErrorCodeBadResponse, types.ErrOptionWithSkipRetry())
+			return s.transportFailure(c, state, s.lockedChannel, info, create.StreamID, err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 		}
 	} else {
 		retry := &service.RetryParam{Ctx: c, TokenGroup: common.GetContextKeyString(c, appconstant.ContextKeyUsingGroup), ModelName: modelName, RequestPath: c.Request.URL.Path, Retry: common.GetPointer(0)}
@@ -338,8 +337,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				return types.NewError(context.Canceled, types.ErrorCodeBadResponse, types.ErrOptionWithSkipRetry())
 			}
 			if err := s.writeTarget(websocket.TextMessage, payload); err != nil {
-				state.closeAfter = true
-				return types.NewError(err, types.ErrorCodeBadResponse, types.ErrOptionWithSkipRetry())
+				return s.transportFailure(c, state, channel, info, create.StreamID, err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 			}
 			s.lockedModel, s.lockedChannelID, s.lockedChannel, s.lockedGroup = modelName, channel.Id, channel, info.UsingGroup
 			s.lockedKey, s.lockedKeyIndex = info.ApiKey, info.ChannelMultiKeyIndex
@@ -357,7 +355,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				}
 			}
 			s.registerChannelClose(channel.Id)
-			s.startTargetReader(target)
+			s.startTargetReader(target, info)
 			apiErr = nil
 			break
 		}
@@ -386,7 +384,14 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 			idle.Reset(timeout)
 			if incoming.err != nil {
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, incoming.err)
-				state.closeAfter = true
+				if s.ctx.Err() == nil {
+					failure := s.transportFailure(c, state, s.lockedChannel, info, create.StreamID, incoming.err, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
+					if !accepted {
+						return failure
+					}
+				} else {
+					state.closeAfter = true
+				}
 				ConsumeResponsesQuota(c, info, accumulator.Finish())
 				return nil
 			}
@@ -397,27 +402,57 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 			}
 			if err := common.Unmarshal(incoming.body, &event); err != nil {
 				info.StreamStatus.RecordError("invalid upstream websocket event")
-			} else {
-				if event.Type != "error" && event.StreamID != "" && event.StreamID != create.StreamID {
-					if err := s.writeClient(incoming.kind, incoming.body); err != nil {
-						s.shutdown()
-					}
-					continue
+				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
+				failure := s.transportFailure(c, state, s.lockedChannel, info, create.StreamID, err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+				if !accepted {
+					return failure
 				}
+				ConsumeResponsesQuota(c, info, accumulator.Finish())
+				return nil
+			} else {
 				// A repeated terminal from the previous response must never finish
 				// a subsequent request on this persistent connection.
 				if event.Response != nil && event.Response.ID != "" && event.Response.ID == s.lastResponseID {
 					continue
 				}
+				if event.Type != "error" && (event.StreamID != "" && event.StreamID != create.StreamID || responseID != "" && event.Response != nil && event.Response.ID != "" && event.Response.ID != responseID) {
+					if err := s.forwardUnattributedUpstreamMessage(incoming, info, s.lastResponseID); err != nil {
+						s.shutdown()
+					}
+					continue
+				}
 				if event.Type == "error" {
 					var rejection responsesWSErrorEvent
 					_ = common.Unmarshal(incoming.body, &rejection)
+					if rejection.Error == nil {
+						// A number of Responses providers emit a bare error envelope
+						// after accepting a request. Treat it as an upstream failure too,
+						// so the generic/original/custom policy cannot be bypassed by a
+						// missing nested error object.
+						rejection.Error = &types.OpenAIError{
+							Type:    "server_error",
+							Message: event.Message,
+							Code:    event.Code,
+						}
+					}
 					if rejection.ResponseID != "" && rejection.ResponseID == s.lastResponseID {
 						continue
 					}
 					terminal, ambiguous, controlError := responsesWSErrorEndsRequest(rejection, create.StreamID, responseID, sentControl)
+					status := rejection.Status
+					if status < 400 || status > 599 {
+						status = http.StatusBadRequest
+					}
+					failure := types.WithOpenAIError(*rejection.Error, status, types.ErrOptionWithSkipRetry())
+					service.ResetStatusCode(failure, c.GetString("status_code_mapping"))
+					clientErr := s.clientErrorForChannelFailure(c, s.lockedChannel, info, failure)
 					if !terminal {
-						if err := s.writeClient(incoming.kind, incoming.body); err != nil {
+						clientErr.SetMessage(common.MessageWithRequestId(clientErr.Error(), c.GetString(common.RequestIdKey)))
+						wireError := clientErr.ToOpenAIError()
+						clientEvent := rejection
+						clientEvent.Status, clientEvent.Error = clientErr.StatusCode, &wireError
+						body, err := common.Marshal(clientEvent)
+						if err != nil || s.writeClient(incoming.kind, body) != nil {
 							s.shutdown()
 						}
 						// Only a control error in this stream resolves its pending control.
@@ -438,32 +473,29 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 						info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
 						s.lastResponseID = responseID
 						terminal := &incoming
-						if rejection.Error != nil {
-							failure := types.WithOpenAIError(*rejection.Error, rejection.Status, types.ErrOptionWithSkipRetry())
-							if failure.StatusCode < 400 || failure.StatusCode > 599 {
-								failure.StatusCode = http.StatusBadRequest
-							}
-							clientErr := s.clientErrorForChannelFailure(c, s.lockedChannel, info, failure)
-							clientErr.SetMessage(common.MessageWithRequestId(clientErr.Error(), c.GetString(common.RequestIdKey)))
-							if body, err := buildResponsesWSErrorPayload(rejection.EventID, rejection.StreamID, clientErr); err == nil {
-								terminal = &responsesWSMessage{kind: websocket.TextMessage, body: body}
-							}
+						clientErr.SetMessage(common.MessageWithRequestId(clientErr.Error(), c.GetString(common.RequestIdKey)))
+						wireError := clientErr.ToOpenAIError()
+						clientEvent := rejection
+						clientEvent.Status, clientEvent.Error = clientErr.StatusCode, &wireError
+						if body, err := common.Marshal(clientEvent); err == nil {
+							terminal = &responsesWSMessage{kind: websocket.TextMessage, body: body}
 						}
 						state.terminal, state.closeAfter = terminal, ambiguous
 						ConsumeResponsesQuota(c, info, accumulator.Finish())
 						return nil
 					}
-					if rejection.Error == nil {
-						// An error frame without an error object still describes the
-						// rejected request; keep the client-facing type stable.
-						rejection.Error = &types.OpenAIError{Type: "invalid_request_error", Message: event.Message, Code: event.Code}
+					state.clientError = clientErr
+					return failure
+				}
+				if !accepted && (event.Type == "response.failed" || event.Type == "response.error") {
+					upstreamError := responsesWSResponseFailure(&event.ResponsesStreamResponse)
+					failure := types.WithOpenAIError(*upstreamError, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+					service.ResetStatusCode(failure, c.GetString("status_code_mapping"))
+					state.clientError = s.clientErrorForChannelFailure(c, s.lockedChannel, info, failure)
+					if event.Response != nil {
+						s.lastResponseID = event.Response.ID
 					}
-					rejected := types.WithOpenAIError(*rejection.Error, rejection.Status, types.ErrOptionWithSkipRetry())
-					if rejected.StatusCode < 400 || rejected.StatusCode > 599 {
-						rejected.StatusCode = http.StatusBadRequest
-					}
-					state.clientError = s.clientErrorForChannelFailure(c, s.lockedChannel, info, rejected)
-					return rejected
+					return failure
 				}
 				if strings.HasPrefix(event.Type, "response.") {
 					if !accepted {
@@ -478,19 +510,20 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				accumulator.Observe(&event.ResponsesStreamResponse)
 			}
 			switch event.Type {
-			case "response.completed", "response.done", "response.incomplete", "response.failed", "response.cancelled", "response.canceled":
-				if (event.Type == "response.failed" || event.Type == "response.incomplete") && event.Response != nil {
-					if upstreamError := event.Response.GetOpenAIError(); upstreamError != nil && upstreamError.Message != "" {
-						failure := types.WithOpenAIError(*upstreamError, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
-						clientErr := s.clientErrorForChannelFailure(c, s.lockedChannel, info, failure)
-						clientErr.SetMessage(common.MessageWithRequestId(clientErr.Error(), c.GetString(common.RequestIdKey)))
-						if payload, err := buildResponsesWSTerminalErrorPayload(incoming.body, event.Response.Model, info.ClientModelName(), clientErr.ToOpenAIError()); err == nil {
-							state.terminal = &responsesWSMessage{kind: incoming.kind, body: payload}
-						} else {
-							state.terminal = &incoming
-						}
+			case "response.completed", "response.done", "response.incomplete", "response.failed", "response.error", "response.cancelled", "response.canceled":
+				if upstreamError := responsesWSResponseFailure(&event.ResponsesStreamResponse); upstreamError != nil {
+					upstreamModel := ""
+					if event.Response != nil {
+						upstreamModel = event.Response.Model
+					}
+					failure := types.WithOpenAIError(*upstreamError, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+					service.ResetStatusCode(failure, c.GetString("status_code_mapping"))
+					clientErr := s.clientErrorForChannelFailure(c, s.lockedChannel, info, failure)
+					clientErr.SetMessage(common.MessageWithRequestId(clientErr.Error(), c.GetString(common.RequestIdKey)))
+					if payload, err := buildResponsesWSTerminalErrorPayload(incoming.body, upstreamModel, info.ClientModelName(), clientErr.ToOpenAIError()); err == nil {
+						state.terminal = &responsesWSMessage{kind: incoming.kind, body: payload}
 					} else {
-						state.terminal = &incoming
+						state.closeAfter = true
 					}
 				} else {
 					state.terminal = &incoming
@@ -507,7 +540,9 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 			}
 			if accepted && pendingControl != nil {
 				if err := s.writeTarget(websocket.TextMessage, pendingControl); err != nil {
-					s.shutdown()
+					s.transportFailure(c, state, s.lockedChannel, info, create.StreamID, err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+					ConsumeResponsesQuota(c, info, accumulator.Finish())
+					return nil
 				}
 				sentControl = pendingControl
 				pendingControl = nil
@@ -522,12 +557,17 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				continue
 			}
 			if err := s.writeTarget(websocket.TextMessage, control.body); err != nil {
-				s.shutdown()
+				s.transportFailure(c, state, s.lockedChannel, info, create.StreamID, err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+				ConsumeResponsesQuota(c, info, accumulator.Finish())
+				return nil
 			}
 			sentControl = control.body
 		case <-idle.C:
 			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, context.DeadlineExceeded)
-			state.closeAfter = true
+			failure := s.transportFailure(c, state, s.lockedChannel, info, create.StreamID, context.DeadlineExceeded, types.ErrorCodeChannelResponseTimeExceeded, http.StatusGatewayTimeout)
+			if !accepted {
+				return failure
+			}
 			ConsumeResponsesQuota(c, info, accumulator.Finish())
 			return nil
 		case <-s.ctx.Done():
@@ -538,14 +578,37 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 	}
 }
 
+// Transport failures use the same channel policy as explicit provider errors.
+// The caller retains this original error for refunds and stream settlement.
+func (s *responsesWSSession) transportFailure(c *gin.Context, state *responsesWSCallState, channel *appmodel.Channel, info *relaycommon.RelayInfo, streamID string, err error, code types.ErrorCode, status int) *types.NewAPIError {
+	failure := types.NewErrorWithStatusCode(err, code, status, types.ErrOptionWithSkipRetry())
+	state.closeAfter = true
+	if s.ctx.Err() != nil {
+		return failure
+	}
+	service.ResetStatusCode(failure, c.GetString("status_code_mapping"))
+	state.clientError = s.clientErrorForChannelFailure(c, channel, info, failure)
+	clientErr := state.clientError.ClientCopy()
+	clientErr.SetMessage(common.MessageWithRequestId(clientErr.Error(), c.GetString(common.RequestIdKey)))
+	if payload, marshalErr := buildResponsesWSErrorPayload("", streamID, clientErr); marshalErr == nil {
+		state.terminal = &responsesWSMessage{kind: websocket.TextMessage, body: payload}
+	}
+	return failure
+}
+
 func buildResponsesWSTerminalErrorPayload(payload []byte, upstreamModel string, clientModel string, clientError types.OpenAIError) ([]byte, error) {
 	var envelope map[string]common.RawMessage
 	if err := common.Unmarshal(payload, &envelope); err != nil {
 		return nil, err
 	}
 	var response map[string]common.RawMessage
-	if err := common.Unmarshal(envelope["response"], &response); err != nil {
-		return nil, err
+	if len(envelope["response"]) != 0 {
+		if err := common.Unmarshal(envelope["response"], &response); err != nil {
+			return nil, err
+		}
+	}
+	if response == nil {
+		response = make(map[string]common.RawMessage)
 	}
 	errorBody, err := common.Marshal(clientError)
 	if err != nil {
@@ -631,12 +694,12 @@ func (s *responsesWSSession) restoreConnectionContext(c *gin.Context, model stri
 		!reflect.DeepEqual(route.Auth, s.lockedRoute.Auth) {
 		return types.NewErrorWithStatusCode(errors.New("upstream route changed; reconnect required"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 	}
+	group := common.GetContextKeyString(c, appconstant.ContextKeyUsingGroup)
 	if pin, found, _ := service.GetChannelConstraints(c).ResolvedPin(); found {
 		if pin.ChannelId != s.lockedChannelID {
 			return types.NewErrorWithStatusCode(errors.New("channel pin changed; reconnect required"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 		}
 	} else {
-		group := common.GetContextKeyString(c, appconstant.ContextKeyUsingGroup)
 		if group == "auto" {
 			if !slices.Contains(service.GetRequestAutoGroups(c, common.GetContextKeyString(c, appconstant.ContextKeyUserGroup)), s.lockedGroup) {
 				return types.NewErrorWithStatusCode(errors.New("the connection group is no longer allowed"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
@@ -647,6 +710,9 @@ func (s *responsesWSSession) restoreConnectionContext(c *gin.Context, model stri
 		if !appmodel.IsChannelEnabledForGroupModel(group, model, s.lockedChannelID) {
 			return types.NewErrorWithStatusCode(errors.New("the connection channel is no longer allowed for this group and model"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 		}
+	}
+	if !service.IsChannelAllowedForPublicPool(group, model, channel.Id) {
+		return types.NewErrorWithStatusCode(errors.New(i18n.T(c, i18n.MsgDistributorGroupAccessDenied)), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 	}
 	for key, value := range s.lockedContext {
 		c.Set(string(key), value)
@@ -679,38 +745,45 @@ func buildResponsesWSCreatePayload(c *gin.Context, info *relaycommon.RelayInfo, 
 	return event, nil
 }
 
-func (s *responsesWSSession) startTargetReader(target *websocket.Conn) {
+func (s *responsesWSSession) startTargetReader(target *websocket.Conn, info *relaycommon.RelayInfo) {
 	limit := int64(helper.DefaultMaxScannerBufferSize)
 	if appconstant.StreamScannerMaxBufferMB > 0 {
 		limit = int64(appconstant.StreamScannerMaxBufferMB) << 20
 	}
 	target.SetReadLimit(limit)
+	// Retain only the connection's channel/model data for idle errors. User,
+	// token, pricing and settlement state belong to the request worker.
+	meta := *info.ChannelMeta
+	idleInfo := &relaycommon.RelayInfo{RequestModelName: info.ClientModelName(), OriginModelName: info.ClientModelName(), ChannelMeta: &meta}
 	s.workers.Go(func() {
 		for {
 			kind, body, err := target.ReadMessage()
 			incoming := responsesWSMessage{kind: kind, body: body, err: err}
-			if state := s.getCurrent(); state != nil {
+			for {
+				s.stateMu.Lock()
+				state := s.current
+				lastResponseID := ""
+				if state == nil {
+					lastResponseID = s.lastResponseID
+				}
+				s.stateMu.Unlock()
+				if state == nil {
+					if idleErr := s.forwardUnattributedUpstreamMessage(incoming, idleInfo, lastResponseID); idleErr != nil {
+						s.shutdown()
+						return
+					}
+					break
+				}
 				select {
 				case state.inbox <- incoming:
 				case <-state.done:
-					if err == nil {
-						if writeErr := s.writeClient(kind, body); writeErr != nil {
-							s.shutdown()
-							return
-						}
-					} else {
-						s.shutdown()
-					}
+					// Recheck admission: a following request may now own the
+					// stream, or an idle frame may need the channel error policy.
+					continue
 				case <-s.ctx.Done():
 					return
 				}
-			} else if err == nil {
-				if writeErr := s.writeClient(kind, body); writeErr != nil {
-					s.shutdown()
-					return
-				}
-			} else {
-				s.shutdown()
+				break
 			}
 			if err != nil {
 				return
@@ -997,6 +1070,10 @@ func selectResponsesWSChannel(c *gin.Context, modelName string, retryParam *serv
 			code = types.ErrorCodeGetChannelFailed
 		}
 		return nil, types.NewErrorWithStatusCode(errors.New(message), code, selectErr.StatusCode, types.ErrOptionWithSkipRetry())
+	}
+	group := common.GetContextKeyString(c, appconstant.ContextKeyUsingGroup)
+	if !service.IsChannelAllowedForPublicPool(group, modelName, channel.Id) {
+		return nil, types.NewErrorWithStatusCode(errors.New(i18n.T(c, i18n.MsgDistributorGroupAccessDenied)), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 	}
 	if err := middleware.SetupContextForSelectedChannel(c, channel, modelName); err != nil {
 		return nil, err

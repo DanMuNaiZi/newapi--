@@ -3,7 +3,9 @@ package controller
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -117,6 +119,63 @@ func TestBuildClientRelayErrorOriginalUsesMappedStatusAndSanitizedMessage(t *tes
 	assert.Contains(t, upstreamErr.Error(), "sk-channel-secret")
 }
 
+func TestBuildClientRelayErrorOriginalSanitizesStructuredDetailsWithoutMutatingUpstream(t *testing.T) {
+	upstreamErr := types.WithOpenAIError(types.OpenAIError{
+		Message: "gpt-5.6-terra rejected sk-channel-secret",
+		Type:    "gpt-5.6-terra Authorization: Bearer type-secret",
+		Param:   "gpt-5.6-terra api_key=param-secret",
+		Code: map[string]any{
+			"reason": "gpt-5.6-terra unavailable",
+			"detail": []any{map[string]any{
+				"api_key":  "code-secret",
+				"body":     map[string]any{"input": "raw-private-input"},
+				"metadata": map[string]any{"private": "raw-private-metadata"},
+				"headers":  map[string]any{"X-Custom": "raw-private-header"},
+				"count":    7,
+			}},
+		},
+		Metadata: []byte(`{"private":"raw-envelope-metadata"}`),
+	}, http.StatusBadRequest)
+	before, err := common.Marshal(upstreamErr.ToOpenAIError())
+	require.NoError(t, err)
+	upstreamMessage := upstreamErr.Error()
+
+	clientErr := buildClientRelayError(types.RelayFormatOpenAI, newErrorDisplayTestRelayInfo(nil), upstreamErr, &channelErrorDisplayPolicy{
+		Default: dto.NormalizeUpstreamErrorDisplaySettings(nil),
+		Record:  &model.ChannelErrorRecord{DisplayMode: dto.ChannelErrorDisplayModeOriginal},
+	})
+	clientWire, err := common.Marshal(clientErr.ToOpenAIError())
+	require.NoError(t, err)
+	for _, private := range []string{"gpt-5.6-terra", "sk-channel-secret", "type-secret", "param-secret", "code-secret", "raw-private-", "raw-envelope-metadata"} {
+		assert.NotContains(t, string(clientWire), private)
+	}
+	assert.Contains(t, string(clientWire), "gpt-5.6-sol")
+	assert.Contains(t, string(clientWire), `"count":7`)
+	assert.Equal(t, http.StatusBadRequest, clientErr.StatusCode)
+	after, err := common.Marshal(upstreamErr.ToOpenAIError())
+	require.NoError(t, err)
+	assert.JSONEq(t, string(before), string(after))
+	assert.Equal(t, upstreamMessage, upstreamErr.Error())
+}
+
+func TestBuildClientRelayErrorOriginalSanitizesClaudeFallbackCode(t *testing.T) {
+	originalType := "gpt-5.6-terra token=type-private-secret"
+	upstreamErr := types.WithClaudeError(types.ClaudeError{Type: originalType, Message: "upstream rejected"}, http.StatusBadRequest)
+	clientErr := buildClientRelayError(types.RelayFormatClaude, newErrorDisplayTestRelayInfo(nil), upstreamErr, &channelErrorDisplayPolicy{
+		Default: dto.NormalizeUpstreamErrorDisplaySettings(nil),
+		Record:  &model.ChannelErrorRecord{DisplayMode: dto.ChannelErrorDisplayModeOriginal},
+	})
+	for _, wire := range []any{clientErr.ToClaudeError(), clientErr.ToOpenAIError()} {
+		body, err := common.Marshal(wire)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), "gpt-5.6-sol")
+		assert.NotContains(t, string(body), "gpt-5.6-terra")
+		assert.NotContains(t, string(body), "type-private-secret")
+	}
+	assert.Equal(t, types.ErrorCode(originalType), upstreamErr.GetErrorCode())
+	assert.Equal(t, originalType, upstreamErr.ToClaudeError().Type)
+}
+
 func TestBuildClientRelayErrorHonorsInheritedDetailsAndPerErrorCustomRule(t *testing.T) {
 	showDetails := &dto.UpstreamErrorDisplaySettings{
 		ShowDetails: true,
@@ -166,6 +225,38 @@ func TestBuildClientRelayErrorLeavesLocalErrorsUnchangedWithoutChannelPolicy(t *
 	assert.Equal(t, localErr.GetErrorCode(), clientErr.GetErrorCode())
 }
 
+func TestShouldProcessRelayChannelErrorKeepsLocalFailuresOutOfChannelPolicy(t *testing.T) {
+	localCodes := []types.ErrorCode{
+		types.ErrorCodeInvalidRequest,
+		types.ErrorCodeCountTokenFailed,
+		types.ErrorCodeModelPriceError,
+		types.ErrorCodeConvertRequestFailed,
+		types.ErrorCodeAccessDenied,
+		types.ErrorCodeChannelParamOverrideInvalid,
+		types.ErrorCodeChannelModelMappedError,
+		types.ErrorCodeInsufficientUserQuota,
+	}
+	for _, code := range localCodes {
+		assert.False(t, shouldProcessRelayChannelError(types.NewError(assert.AnError, code)), "code %s", code)
+	}
+
+	upstreamCodes := []types.ErrorCode{
+		types.ErrorCodeDoRequestFailed,
+		types.ErrorCodeBadResponseStatusCode,
+		types.ErrorCodeBadResponseBody,
+		types.ErrorCodeChannelInvalidKey,
+		types.ErrorCodeChannelResponseTimeExceeded,
+	}
+	for _, code := range upstreamCodes {
+		assert.True(t, shouldProcessRelayChannelError(types.NewError(assert.AnError, code)), "code %s", code)
+	}
+	assert.True(t, shouldProcessRelayChannelError(types.WithOpenAIError(types.OpenAIError{
+		Type:    "invalid_request_error",
+		Code:    string(types.ErrorCodeInvalidRequest),
+		Message: "provider rejected the request",
+	}, http.StatusBadRequest)))
+}
+
 func TestBuildClientRelayErrorUsesClaudeWireShapeForGenericPolicy(t *testing.T) {
 	upstreamErr := types.WithClaudeError(types.ClaudeError{
 		Type:    "invalid_request_error",
@@ -195,7 +286,18 @@ func TestProcessChannelErrorAggregatesSanitizedFailures(t *testing.T) {
 	c.Set(common.RequestIdKey, "req-first")
 	relayInfo := newErrorDisplayTestRelayInfo(nil)
 	channelErr := types.NewChannelError(17, 48, "codex", true, "sk-channel-secret", false)
-	upstreamErr := newUnsupportedModelError()
+	upstreamErr := types.WithOpenAIError(types.OpenAIError{
+		Message: "gpt-5.6-terra rejected sk-channel-secret",
+		Type:    "invalid_request_error",
+		Code: map[string]any{
+			"model":    "gpt-5.6-terra",
+			"api_key":  "code-private-secret",
+			"body":     map[string]any{"input": "code-private-input"},
+			"metadata": map[string]any{"secret": "code-private-metadata"},
+			"detail":   strings.Repeat("界", 280),
+		},
+	}, http.StatusBadRequest)
+	upstreamCode := upstreamErr.GetErrorCode()
 
 	firstPolicy := processRelayChannelError(c, *channelErr, upstreamErr, relayInfo)
 	require.NotNil(t, firstPolicy)
@@ -205,6 +307,11 @@ func TestProcessChannelErrorAggregatesSanitizedFailures(t *testing.T) {
 	assert.Equal(t, "gpt-5.6-sol", firstPolicy.Record.RequestModel)
 	assert.NotContains(t, firstPolicy.Record.SampleMessage, "sk-channel-secret")
 	assert.NotContains(t, firstPolicy.Record.SampleMessage, "gpt-5.6-terra")
+	assert.NotContains(t, firstPolicy.Record.ErrorCode, "gpt-5.6-terra")
+	assert.NotContains(t, firstPolicy.Record.ErrorCode, "code-private-")
+	assert.LessOrEqual(t, utf8.RuneCountInString(firstPolicy.Record.ErrorCode), 256)
+	assert.True(t, utf8.ValidString(firstPolicy.Record.ErrorCode))
+	assert.Equal(t, upstreamCode, upstreamErr.GetErrorCode())
 
 	c.Set(common.RequestIdKey, "req-second")
 	secondPolicy := processRelayChannelError(c, *channelErr, upstreamErr, relayInfo)

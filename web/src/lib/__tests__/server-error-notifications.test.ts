@@ -39,6 +39,7 @@ import {
   getServerErrorMessage,
 } from '@/lib/server-error-message'
 import { useAuthStore, type AuthBundle } from '@/stores/auth-store'
+import { useUserPreviewStore } from '@/stores/user-preview-store'
 
 const originalAdapter = api.defaults.adapter
 
@@ -46,7 +47,77 @@ afterEach(() => {
   api.defaults.adapter = originalAdapter
   vi.restoreAllMocks()
   useAuthStore.getState().auth.reset()
+  useUserPreviewStore.getState().clear()
   window.history.replaceState({}, '', '/')
+})
+
+it('keeps preview restrictions on requests carrying a single-use security proof', async () => {
+  useAuthStore.getState().auth.setBundle({
+    access_token: 'preview-actor-access',
+    token_type: 'Bearer',
+    access_expires_at: 2_000_000_000,
+    user: { id: 1, username: 'root', role: 100 },
+    session: {
+      sid: 'preview-actor-session',
+      current: true,
+      login_method: 'password',
+      ip: '',
+      user_agent: '',
+      created_at: 1,
+      last_active_at: 1,
+      expires_at: 2_000_000_000,
+    },
+  })
+  useUserPreviewStore
+    .getState()
+    .start('preview-signed-token', 2_000_000_000, { id: 2, username: 'target' })
+  api.defaults.adapter = async (config) => ({
+    data: { preview: config.headers.get('New-Api-User-Preview') },
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    config,
+  })
+  const result = await api.post(
+    '/api/user/self',
+    {},
+    { singleUseAuthorization: true, headers: { 'X-Security-Proof': 'one-use' } }
+  )
+  expect(result.data.preview).toBe('preview-signed-token')
+})
+
+it('does not reuse an actor GET while the same session starts a target preview', async () => {
+  let releaseActor!: () => void
+  const actorReady = new Promise<void>((resolve) => {
+    releaseActor = resolve
+  })
+  let markActorStarted!: () => void
+  const actorStarted = new Promise<void>((resolve) => {
+    markActorStarted = resolve
+  })
+  api.defaults.adapter = async (config) => {
+    const preview = config.headers.get('New-Api-User-Preview')
+    if (!preview) {
+      markActorStarted()
+      await actorReady
+    }
+    return {
+      data: { id: preview ? 2 : 1 },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config,
+    }
+  }
+  const actor = api.get('/api/user/self')
+  await actorStarted
+  useUserPreviewStore
+    .getState()
+    .start('preview-target', 2_000_000_000, { id: 2, username: 'target' })
+  const target = api.get('/api/user/self')
+  releaseActor()
+  expect((await target).data.id).toBe(2)
+  expect((await actor).data.id).toBe(1)
 })
 
 it('reports the pricing rejection once when the request error reaches multiple handlers', async () => {

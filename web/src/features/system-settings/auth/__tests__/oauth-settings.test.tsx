@@ -43,6 +43,7 @@ const defaults: ComponentProps<typeof OAuthSection>['defaultValues'] = {
   GitHubOAuthEnabled: false,
   GitHubClientId: '',
   GitHubClientSecret: '',
+  GitHubRegistrationMinAgeDays: 180,
   'discord.enabled': false,
   'discord.client_id': '',
   'discord.client_secret': '',

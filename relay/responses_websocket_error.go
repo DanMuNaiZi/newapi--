@@ -2,7 +2,7 @@ package relay
 
 import (
 	"fmt"
-	"strings"
+	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 )
 
 // clientErrorForChannelFailure records one selected-channel failure and builds
@@ -47,6 +48,7 @@ func (s *responsesWSSession) clientErrorForChannelFailure(c *gin.Context, channe
 	}
 	sample := relaycommon.ClientVisibleErrorMessage(info, upstreamErr.MaskSensitiveError())
 	sample = service.SanitizeUpstreamErrorMessage(sample, secrets...)
+	errorType, errorCode := service.ChannelErrorAuditLabels(info, upstreamErr, secrets...)
 	var record *appmodel.ChannelErrorRecord
 	var err error
 	if channelID > 0 {
@@ -56,8 +58,8 @@ func (s *responsesWSSession) clientErrorForChannelFailure(c *gin.Context, channe
 			RequestModel:       requestModel,
 			UpstreamStatusCode: upstreamErr.GetOriginalStatusCode(),
 			FinalStatusCode:    upstreamErr.StatusCode,
-			ErrorType:          string(upstreamErr.GetErrorType()),
-			ErrorCode:          string(upstreamErr.GetErrorCode()),
+			ErrorType:          errorType,
+			ErrorCode:          errorCode,
 			SampleMessage:      sample,
 			RequestID:          c.GetString(common.RequestIdKey),
 			MultiKeyIndex:      multiKeyIndex,
@@ -109,8 +111,122 @@ func responsesWSClientError(info *relaycommon.RelayInfo, upstreamErr *types.NewA
 		clientErr.SetOpenAIClientError(settings.Message, "upstream_error", types.ErrorCodeUpstreamServiceUnavailable, settings.StatusCode)
 		return clientErr
 	}
-	message := relaycommon.ClientVisibleErrorMessage(info, clientErr.Error())
-	clientErr.SetMessage(service.SanitizeUpstreamErrorMessage(strings.TrimSpace(message), secrets...))
-	clientErr.ClearMetadata()
-	return clientErr
+	return service.SanitizeClientUpstreamError(info, upstreamErr, secrets...)
+}
+
+// A Responses failure can be an explicit error terminal or a terminal whose
+// response status is failed. A regular incomplete result carries no error.
+func responsesWSResponseFailure(event *dto.ResponsesStreamResponse) *types.OpenAIError {
+	if event == nil {
+		return nil
+	}
+	explicitFailure := event.Type == "response.failed" || event.Type == "response.error"
+	switch event.Type {
+	case "response.failed", "response.error", "response.incomplete", "response.completed", "response.done":
+	default:
+		return nil
+	}
+	if event.Response != nil {
+		if upstreamError := event.Response.GetOpenAIError(); upstreamError != nil {
+			return upstreamError
+		}
+		var status string
+		_ = common.Unmarshal(event.Response.Status, &status)
+		explicitFailure = explicitFailure || status == "failed"
+	}
+	if !explicitFailure {
+		return nil
+	}
+	message, code := event.Message, event.Code
+	if message == "" {
+		message = "upstream response failed"
+	}
+	if code == "" {
+		code = "server_error"
+	}
+	return &types.OpenAIError{Type: "server_error", Code: code, Message: message}
+}
+
+// Idle or unrelated frames have no owning billing request. They still belong
+// to the selected channel and must pass its display policy.
+func (s *responsesWSSession) forwardUnattributedUpstreamMessage(incoming responsesWSMessage, info *relaycommon.RelayInfo, lastResponseID string) error {
+	if s.ctx.Err() != nil {
+		return s.ctx.Err()
+	}
+	if websocket.IsCloseError(incoming.err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+		return incoming.err
+	}
+	var event dto.ResponsesStreamResponse
+	parseErr := common.Unmarshal(incoming.body, &event)
+	var failure *types.NewAPIError
+	var rejection responsesWSErrorEvent
+	upstreamModel := ""
+	if incoming.err != nil {
+		failure = types.NewErrorWithStatusCode(incoming.err, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+	} else if parseErr != nil {
+		failure = types.NewErrorWithStatusCode(parseErr, types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+	} else if event.Type == "error" {
+		_ = common.Unmarshal(incoming.body, &rejection)
+		if rejection.ResponseID != "" && rejection.ResponseID == lastResponseID {
+			return nil
+		}
+		if rejection.Error == nil {
+			rejection.Error = &types.OpenAIError{Type: "server_error", Code: event.Code, Message: event.Message}
+		}
+		status := rejection.Status
+		if status < 400 || status > 599 {
+			status = http.StatusBadRequest
+		}
+		failure = types.WithOpenAIError(*rejection.Error, status, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+	} else if upstreamError := responsesWSResponseFailure(&event); upstreamError != nil {
+		if event.Response != nil {
+			if event.Response.ID != "" && event.Response.ID == lastResponseID {
+				return nil
+			}
+			upstreamModel = event.Response.Model
+		}
+		failure = types.WithOpenAIError(*upstreamError, http.StatusBadGateway, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+	}
+	if failure == nil {
+		return s.writeClient(incoming.kind, incoming.body)
+	}
+	// Request-specific billing, quota and stream state must never be changed by
+	// a frame that belongs to another response on this connection.
+	meta := *info.ChannelMeta
+	info = &relaycommon.RelayInfo{RequestModelName: info.ClientModelName(), OriginModelName: info.ClientModelName(), ChannelMeta: &meta}
+	c := &gin.Context{Request: s.request.Clone(s.ctx)}
+	c.Request.Header = make(http.Header)
+	c.Set(common.RequestIdKey, s.requestID+"-idle")
+	channel := s.lockedChannel
+	if current, err := appmodel.CacheGetChannel(s.lockedChannelID); err == nil && current != nil {
+		channel = current
+	}
+	if channel != nil {
+		info.ChannelOtherSettings = channel.GetOtherSettings()
+		service.ResetStatusCode(failure, channel.GetStatusCodeMapping())
+	}
+	clientErr := s.clientErrorForChannelFailure(c, channel, info, failure)
+	clientErr.SetMessage(common.MessageWithRequestId(clientErr.Error(), c.GetString(common.RequestIdKey)))
+	var payload []byte
+	var err error
+	switch event.Type {
+	case "error":
+		wireError := clientErr.ToOpenAIError()
+		rejection.Status, rejection.Error = clientErr.StatusCode, &wireError
+		payload, err = common.Marshal(rejection)
+	case "response.failed", "response.error", "response.incomplete", "response.completed", "response.done":
+		payload, err = buildResponsesWSTerminalErrorPayload(incoming.body, upstreamModel, info.ClientModelName(), clientErr.ToOpenAIError())
+	default:
+		payload, err = buildResponsesWSErrorPayload("", "", clientErr)
+	}
+	if err != nil {
+		return err
+	}
+	if err = s.writeClient(websocket.TextMessage, payload); err != nil {
+		return err
+	}
+	if incoming.err != nil {
+		return incoming.err
+	}
+	return parseErr
 }

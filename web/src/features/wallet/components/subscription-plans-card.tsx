@@ -84,6 +84,7 @@ import { cn } from '@/lib/utils'
 import type { PaymentMethod, TopupInfo } from '../types'
 
 interface SubscriptionPlansCardProps {
+  readOnly?: boolean
   topupInfo: TopupInfo | null
   onAvailabilityChange?: (available: boolean) => void
   userQuota?: number
@@ -115,6 +116,7 @@ function getBillingPreferenceLabel(
 }
 
 export function SubscriptionPlansCard({
+  readOnly = false,
   topupInfo,
   onAvailabilityChange,
   userQuota,
@@ -210,6 +212,7 @@ export function SubscriptionPlansCard({
   }
 
   const handlePreferenceChange = async (pref: string) => {
+    if (readOnly) return
     const previous = billingPreference
     setBillingPreference(pref)
     try {
@@ -305,6 +308,7 @@ export function SubscriptionPlansCard({
   )
 
   const saveConsumePriority = async () => {
+    if (readOnly) return
     setConsumePrioritySaving(true)
     try {
       const result = await updateSubscriptionConsumePriority(consumePriorityIds)
@@ -322,6 +326,7 @@ export function SubscriptionPlansCard({
   }
 
   const resetConsumePriority = async () => {
+    if (readOnly) return
     setConsumePrioritySaving(true)
     try {
       const result = await resetSubscriptionConsumePriority()
@@ -407,6 +412,7 @@ export function SubscriptionPlansCard({
             </div>
             <div className='flex w-full items-center gap-2 sm:w-auto'>
               <Select
+                disabled={readOnly}
                 items={[
                   {
                     value: 'subscription_first',
@@ -499,7 +505,7 @@ export function SubscriptionPlansCard({
           {hasAny && (
             <>
               <Separator className='my-3' />
-              {hasActive && (
+              {hasActive && !readOnly && (
                 <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
                   <p className='text-muted-foreground text-xs'>
                     {t(
@@ -588,9 +594,15 @@ export function SubscriptionPlansCard({
                   return (
                     <div
                       key={subscriptionId}
-                      draggable={isActive}
+                      draggable={isActive && !readOnly}
                       onDragStart={(event: DragEvent<HTMLDivElement>) => {
-                        if (!isActive || subscriptionId === undefined) return
+                        if (
+                          readOnly ||
+                          !isActive ||
+                          subscriptionId === undefined
+                        ) {
+                          return
+                        }
                         event.dataTransfer.effectAllowed = 'move'
                         event.dataTransfer.setData(
                           'text/plain',
@@ -606,6 +618,7 @@ export function SubscriptionPlansCard({
                       }}
                       onDragOver={(event: DragEvent<HTMLDivElement>) => {
                         if (
+                          readOnly ||
                           !isActive ||
                           subscriptionId === undefined ||
                           subscriptionId === draggedSubscriptionId
@@ -630,6 +643,7 @@ export function SubscriptionPlansCard({
                       onDrop={(event: DragEvent<HTMLDivElement>) => {
                         event.preventDefault()
                         if (
+                          readOnly ||
                           !isActive ||
                           subscriptionId === undefined ||
                           draggedSubscriptionId === null
@@ -662,6 +676,7 @@ export function SubscriptionPlansCard({
                       className={cn(
                         'bg-background relative rounded-md border p-3 text-xs transition-[opacity,border-color,background-color] duration-150',
                         isActive &&
+                          !readOnly &&
                           'cursor-grab active:cursor-grabbing hover:border-primary/50',
                         isDragged && 'opacity-40',
                         isDropTarget && 'border-primary bg-primary/5',
@@ -675,7 +690,7 @@ export function SubscriptionPlansCard({
                     >
                       <div className='flex items-center justify-between'>
                         <div className='flex items-center gap-2'>
-                          {isActive && (
+                          {isActive && !readOnly && (
                             <GripVertical
                               className='text-muted-foreground size-3.5'
                               aria-hidden='true'
@@ -842,12 +857,16 @@ export function SubscriptionPlansCard({
                       <Button
                         variant='outline'
                         className='w-full'
+                        disabled={readOnly}
                         onClick={() => {
+                          if (readOnly) return
                           setSelectedPlan(p)
                           setPurchaseOpen(true)
                         }}
                       >
-                        {t('Subscribe Now')}
+                        {readOnly
+                          ? t('User preview is read-only')
+                          : t('Subscribe Now')}
                       </Button>
                     )}
                   </CardContent>
@@ -862,34 +881,36 @@ export function SubscriptionPlansCard({
         )}
       </TitledCard>
 
-      <SubscriptionPurchaseDialog
-        open={purchaseOpen}
-        onOpenChange={(open) => {
-          setPurchaseOpen(open)
-          if (!open) {
-            fetchSelfSubscription()
+      {!readOnly && (
+        <SubscriptionPurchaseDialog
+          open={purchaseOpen}
+          onOpenChange={(open) => {
+            setPurchaseOpen(open)
+            if (!open) {
+              fetchSelfSubscription()
+            }
+          }}
+          plan={selectedPlan}
+          enableStripe={enableStripe}
+          enableCreem={enableCreem}
+          enableWaffoPancake={enableWaffoPancake}
+          enableOnlineTopUp={enableOnlineTopUp}
+          enableManualWechat={topupInfo?.enable_manual_wechat_topup}
+          epayMethods={epayMethods}
+          userQuota={userQuota}
+          onPurchaseSuccess={onPurchaseSuccess}
+          purchaseLimit={
+            selectedPlan?.plan?.max_purchase_per_user
+              ? Number(selectedPlan.plan.max_purchase_per_user)
+              : undefined
           }
-        }}
-        plan={selectedPlan}
-        enableStripe={enableStripe}
-        enableCreem={enableCreem}
-        enableWaffoPancake={enableWaffoPancake}
-        enableOnlineTopUp={enableOnlineTopUp}
-        enableManualWechat={topupInfo?.enable_manual_wechat_topup}
-        epayMethods={epayMethods}
-        userQuota={userQuota}
-        onPurchaseSuccess={onPurchaseSuccess}
-        purchaseLimit={
-          selectedPlan?.plan?.max_purchase_per_user
-            ? Number(selectedPlan.plan.max_purchase_per_user)
-            : undefined
-        }
-        purchaseCount={
-          selectedPlan?.plan?.id
-            ? planPurchaseCountMap.get(selectedPlan.plan.id)
-            : undefined
-        }
-      />
+          purchaseCount={
+            selectedPlan?.plan?.id
+              ? planPurchaseCountMap.get(selectedPlan.plan.id)
+              : undefined
+          }
+        />
+      )}
     </>
   )
 }

@@ -383,6 +383,49 @@ func TestLogTaskConsumptionWithoutSnapshotKeepsRatioMode(t *testing.T) {
 	assert.Contains(t, log.Content, "size: 2.00")
 }
 
+func TestMappedTaskModelsRemainAdministratorOnlyInBillingLogs(t *testing.T) {
+	truncate(t)
+	const userID, channelID = 60, 60
+	seedUser(t, userID, 10_000)
+	seedChannel(t, channelID)
+	task := makeTask(userID, channelID, 100, 0, BillingSourceWallet, 0)
+	task.Properties.OriginModelName = "requested-video"
+	task.Properties.UpstreamModelName = "private-video"
+	info := &relaycommon.RelayInfo{
+		UserId: userID, OriginModelName: "requested-video", UsingGroup: "default",
+		ChannelMeta:   &relaycommon.ChannelMeta{ChannelId: channelID, IsModelMapped: true, UpstreamModelName: "private-video"},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{Action: "GENERATE"},
+		PriceData:     types.PriceData{Quota: 100, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}},
+	}
+	for _, phase := range []string{"submission", "settlement"} {
+		t.Run(phase, func(t *testing.T) {
+			if phase == "submission" {
+				callLogTaskConsumption(t, info, task)
+			} else {
+				model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
+					UserId: userID, ChannelId: channelID, ModelName: "requested-video", LogType: model.LogTypeConsume,
+					Quota: 20, Other: taskBillingOther(task),
+				})
+			}
+			stored := getLastLog(t)
+			require.Equal(t, "requested-video", stored.ModelName)
+			var metadata map[string]any
+			require.NoError(t, common.UnmarshalJsonStr(stored.Other, &metadata))
+			admin, ok := metadata["admin_info"].(map[string]any)
+			require.True(t, ok, stored.Other)
+			assert.Equal(t, "private-video", admin["upstream_model_name"])
+			assert.NotContains(t, metadata, "upstream_model_name")
+			logs, _, err := model.GetUserLogs(userID, 0, 0, 0, "", "", 0, 10, "", "", "")
+			require.NoError(t, err)
+			require.NotEmpty(t, logs)
+			for _, entry := range logs {
+				assert.NotContains(t, entry.Other, "private-video")
+				assert.Empty(t, entry.ActualModelName)
+			}
+		})
+	}
+}
+
 // Task logs distinguish jobs the client polls from requests whose HTTP call
 // returned the deliverable itself, and flag results the gateway did not keep.
 func TestLogTaskConsumptionMarksInlineResultsAndDiscardedArtifacts(t *testing.T) {
@@ -1408,6 +1451,164 @@ func (m *mockAdaptor) ParseTaskResult(*model.Task, *http.Response, []byte) (*rel
 }
 func (m *mockAdaptor) AdjustBillingOnComplete(_ *model.Task, _ *relaycommon.TaskInfo) int {
 	return m.adjustReturn
+}
+
+func TestTaskUsageSummaryTracksFinalResourcesAndRefunds(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		groupRatio float64
+		units      float64
+		failure    bool
+	}{
+		{"paid increase", 0.5, 3, false},
+		{"paid decrease", 2, 0.5, false},
+		{"paid zero usage", 0.5, 0, false},
+		{"free increase", 0, 3, false},
+		{"paid failure", 0.5, 0, true},
+		{"free failure", 0, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			truncate(t)
+			const userID, channelID, initialResource = 171, 171, 5000
+			initialCharge := common.QuotaRound(float64(initialResource) * tc.groupRatio)
+			seedUser(t, userID, 100000-initialCharge)
+			seedChannel(t, channelID)
+			task := makeTask(userID, channelID, initialCharge, 0, BillingSourceWallet, 0)
+			task.TaskID = "resource-usage-task"
+			task.PrivateData.RequestId = "resource-usage-request"
+			snapshot := &billingexpr.BillingSnapshot{
+				ExprString: `tier("base", u("units") * 0.01)`,
+				ExprHash:   billingexpr.ExprHashString(`tier("base", u("units") * 0.01)`),
+				GroupRatio: tc.groupRatio, QuotaPerUnit: 500000,
+				TaskUsageBilling: true, UsageFacts: map[string]any{"units": float64(1)},
+			}
+			task.PrivateData.BillingContext.TieredSnapshot = snapshot
+			resourceQuota := initialResource
+			task.PrivateData.BillingContext.ResourceQuota = &resourceQuota
+			info := &relaycommon.RelayInfo{
+				ChannelMeta:   &relaycommon.ChannelMeta{ChannelId: channelID},
+				TaskRelayInfo: &relaycommon.TaskRelayInfo{Action: "generate"},
+				UserId:        userID, OriginModelName: "test-model", RequestId: task.PrivateData.RequestId,
+				PriceData:             types.PriceData{Quota: initialCharge, ResourceQuota: initialResource, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: tc.groupRatio}},
+				TieredBillingSnapshot: snapshot,
+			}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+			c.Set(common.RequestIdKey, task.PrivateData.RequestId)
+			LogTaskConsumption(c, info, task)
+			require.NoError(t, model.DB.Create(task).Error)
+			if tc.failure {
+				task.Status = model.TaskStatusFailure
+				task.FailReason = "upstream failed"
+				require.NoError(t, model.DB.Model(task).Update("status", task.Status).Error)
+				finalizeTerminalTask(c, &mockAdaptor{}, task, &relaycommon.TaskInfo{Status: string(task.Status)})
+				finalizeTerminalTask(c, &mockAdaptor{}, task, &relaycommon.TaskInfo{Status: string(task.Status)})
+			} else {
+				task.Status = model.TaskStatusSuccess
+				facts := &relaycommon.TaskInfo{UsageFacts: map[string]any{"units": tc.units}}
+				require.True(t, settleTaskBillingOnComplete(c, &mockAdaptor{}, task, facts))
+				require.True(t, settleTaskBillingOnComplete(c, &mockAdaptor{}, task, facts))
+			}
+			now := time.Now().Unix()
+			summary, err := model.GetChannelUsageSummary(channelID, "day", now-10, now+10, 20)
+			require.NoError(t, err)
+			finalResource := common.QuotaRound(tc.units * float64(initialResource))
+			finalCharge := common.QuotaRound(float64(finalResource) * tc.groupRatio)
+			assert.EqualValues(t, finalResource, summary.ResourceQuota)
+			assert.EqualValues(t, finalCharge, summary.ChargedQuota)
+			assert.EqualValues(t, 1, summary.SuccessCount, "settlement must not duplicate the request")
+			assert.True(t, summary.ResourceCoverageComplete)
+			assert.Equal(t, 100000-finalCharge, getUserQuota(t, userID))
+		})
+	}
+}
+
+func TestTaskReferralQualificationRequiresFinalSuccessfulCharge(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		status    model.TaskStatus
+		final     int
+		perCall   bool
+		public    bool
+		logs      bool
+		qualifies bool
+	}{
+		{"failed refunded task", model.TaskStatusFailure, 0, true, false, true, false},
+		{"zero final charge", model.TaskStatusSuccess, 0, false, false, true, false},
+		{"successful lower final charge", model.TaskStatusSuccess, 20, false, false, true, true},
+		{"successful exact precharge without logs", model.TaskStatusSuccess, 50, true, false, false, true},
+		{"public pool excluded", model.TaskStatusSuccess, 50, true, true, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			truncate(t)
+			require.NoError(t, model.DB.AutoMigrate(&model.ReferralCampaign{}, &model.ReferralCampaignEvent{}, &model.ReferralCampaignScheduleLock{}, &model.RewardGrant{}))
+			const inviteeID, inviterID = 230, 231
+			seedUser(t, inviteeID, 950)
+			require.NoError(t, model.DB.Create(&model.User{Id: inviterID, Username: "referral_inviter", AffCode: "task-inviter", Status: common.UserStatusEnabled, Quota: 10}).Error)
+			raw, err := model.EncodeRewardSnapshot(model.RewardSnapshot{Type: model.RewardTypeQuota, Quota: 25})
+			require.NoError(t, err)
+			now := common.GetTimestamp()
+			campaign := &model.ReferralCampaign{Title: "Task referral", Enabled: true, StartTime: now - 60, EndTime: now + 3600, RewardSnapshotJSON: raw}
+			require.NoError(t, model.CreateReferralCampaign(campaign))
+			t.Cleanup(func() {
+				require.NoError(t, model.DB.Where("campaign_id = ?", campaign.Id).Delete(&model.ReferralCampaignEvent{}).Error)
+				require.NoError(t, model.DB.Delete(campaign).Error)
+			})
+			used, err := model.HandleInvitationRegistration(inviterID, inviteeID)
+			require.NoError(t, err)
+			require.True(t, used)
+			var event model.ReferralCampaignEvent
+			require.NoError(t, model.DB.Where("invitee_user_id = ?", inviteeID).First(&event).Error)
+			previousLogs := common.LogConsumeEnabled
+			common.LogConsumeEnabled = tc.logs
+			t.Cleanup(func() { common.LogConsumeEnabled = previousLogs })
+			task := makeTask(inviteeID, 0, 50, 0, BillingSourceWallet, 0)
+			task.TaskID = "task-referral-final"
+			task.PrivateData.RequestId = "task-referral-request"
+			task.PrivateData.BillingContext.PerCallBilling = tc.perCall
+			if tc.public {
+				task.Group = "public_pool"
+			}
+			if !tc.perCall {
+				task.PrivateData.BillingContext.TieredSnapshot = &billingexpr.BillingSnapshot{
+					ExprString: `tier("base", u("units") * 0.0001)`, GroupRatio: 1, QuotaPerUnit: 500000,
+					ExprHash:         billingexpr.ExprHashString(`tier("base", u("units") * 0.0001)`),
+					TaskUsageBilling: true, UsageFacts: map[string]any{"units": float64(1)},
+				}
+			}
+			require.NoError(t, model.DB.Create(task).Error)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+			c.Set(common.RequestIdKey, task.PrivateData.RequestId)
+			info := &relaycommon.RelayInfo{
+				UserId: inviteeID, OriginModelName: "test-model", UsingGroup: task.Group,
+				ChannelMeta: &relaycommon.ChannelMeta{}, TaskRelayInfo: &relaycommon.TaskRelayInfo{Action: "generate"},
+				PriceData: types.PriceData{Quota: 50, ResourceQuota: 50}, BillingSettlementSucceeded: true,
+			}
+			LogTaskConsumption(c, info, task)
+			require.NoError(t, model.DB.First(&event, event.Id).Error)
+			assert.Equal(t, model.ReferralEventPending, event.Status, "submission is not successful task consumption")
+			assert.Zero(t, event.QualifiedQuota)
+			task.Status = tc.status
+			require.NoError(t, model.DB.Model(task).Update("status", tc.status).Error)
+			finalizeTerminalTask(c, &mockAdaptor{}, task, &relaycommon.TaskInfo{Status: string(tc.status), UsageFacts: map[string]any{"units": float64(tc.final) / 50}})
+			require.NoError(t, model.DB.First(&event, event.Id).Error)
+			if tc.qualifies {
+				assert.Equal(t, model.ReferralEventPendingReview, event.Status)
+				assert.Equal(t, tc.final, event.QualifiedQuota, "qualifying quota must be final rather than the submitted estimate")
+				assert.Equal(t, task.PrivateData.RequestId, event.QualifiedRequestId)
+				finalizeTerminalTask(c, &mockAdaptor{}, task, &relaycommon.TaskInfo{Status: string(tc.status), UsageFacts: map[string]any{"units": float64(tc.final) / 50}})
+				require.NoError(t, model.DB.First(&event, event.Id).Error)
+				assert.Equal(t, tc.final, event.QualifiedQuota)
+			} else {
+				assert.Zero(t, event.QualifiedQuota)
+				_, err := model.ReviewReferralCampaignEvent(event.Id, inviterID, "approve", "should not authorize unpaid task")
+				require.ErrorContains(t, err, "actual quota consumption")
+			}
+			assert.Equal(t, 1000-task.Quota, getUserQuota(t, inviteeID))
+			assert.Equal(t, 10, getUserQuota(t, inviterID), "qualification alone must never issue a reward")
+		})
+	}
 }
 
 // ===========================================================================

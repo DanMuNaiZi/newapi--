@@ -24,13 +24,19 @@ func TestSanitizeUpstreamErrorMessageRemovesCredentialsAndRawBody(t *testing.T) 
 }
 
 func TestSanitizeUpstreamErrorMessageRemovesRawBodyWithEqualsDelimiter(t *testing.T) {
-	message := `upstream failed, response_body={"token":"raw-secret","detail":"private"}`
-
-	sanitized := SanitizeUpstreamErrorMessage(message)
-
-	assert.Contains(t, sanitized, "body: [omitted]")
-	assert.NotContains(t, sanitized, "raw-secret")
-	assert.NotContains(t, sanitized, "private")
+	for _, message := range []string{
+		`upstream failed, response_body={"token":"raw-secret","detail":"private"}`,
+		`upstream failed, {"body":{"detail":"private"}}`,
+		`upstream failed, {"raw_body":"private"}`,
+		`upstream failed, request_body='private'`,
+	} {
+		t.Run(message, func(t *testing.T) {
+			sanitized := SanitizeUpstreamErrorMessage(message)
+			assert.Contains(t, sanitized, "body: [omitted]")
+			assert.NotContains(t, sanitized, "raw-secret")
+			assert.NotContains(t, sanitized, "private")
+		})
+	}
 }
 
 func TestSanitizeUpstreamErrorMessageKeepsDiagnosticMessage(t *testing.T) {
@@ -48,12 +54,16 @@ func TestSanitizeUpstreamErrorMessageOmitsTrailingRawMetadata(t *testing.T) {
 }
 
 func TestSanitizeUpstreamErrorMessageMasksQuotedCredentialFields(t *testing.T) {
-	message := `upstream said {"token":"unknown-secret","authorization":"Bearer unknown-bearer"} then failed`
+	message := `upstream said {"token":"unknown-secret","authorization":"Bearer unknown-bearer","password":"unknown-password","private_key":"unknown-private-key","session_token":"unknown-session-token","proxy_authorization":"unknown-proxy-auth"} then failed`
 
 	sanitized := SanitizeUpstreamErrorMessage(message)
 
 	assert.NotContains(t, sanitized, "unknown-secret")
 	assert.NotContains(t, sanitized, "unknown-bearer")
+	assert.NotContains(t, sanitized, "unknown-password")
+	assert.NotContains(t, sanitized, "unknown-private-key")
+	assert.NotContains(t, sanitized, "unknown-session-token")
+	assert.NotContains(t, sanitized, "unknown-proxy-auth")
 	assert.Contains(t, sanitized, `"token":***`)
 }
 

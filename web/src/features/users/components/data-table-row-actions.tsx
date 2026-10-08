@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import type { Row } from '@tanstack/react-table'
 import {
   Pencil,
@@ -33,8 +35,6 @@ import {
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from '@tanstack/react-router'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { DataTableRowActionMenu } from '@/components/data-table/core/row-action-menu'
@@ -150,6 +150,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         handleServerError(result, t('Failed to start user preview'))
         return
       }
+      await queryClient.cancelQueries()
       useUserPreviewStore
         .getState()
         .start(result.data.token, result.data.expires_at, result.data.target)
@@ -163,7 +164,10 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const isDisabled = user.status === USER_STATUS.DISABLED
   const isAdmin = user.role >= USER_ROLE.ADMIN
   const isRoot = user.role === USER_ROLE.ROOT
-  const canPreview = currentUser?.role === USER_ROLE.ROOT && !isAdmin
+  const canPreview =
+    currentUser?.role === USER_ROLE.ROOT &&
+    user.role === USER_ROLE.USER &&
+    !isDisabled
 
   if (isUserDeleted(user)) {
     return null

@@ -27,6 +27,7 @@ import {
   serializeSidebarModulesAdmin,
 } from '@/features/system-settings/maintenance/config'
 import { useAuthStore } from '@/stores/auth-store'
+import { useUserPreviewStore } from '@/stores/user-preview-store'
 
 import { useSidebarConfig } from '../use-sidebar-config'
 import { useSidebarData } from '../use-sidebar-data'
@@ -43,6 +44,7 @@ afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
   useAuthStore.getState().auth.reset()
+  useUserPreviewStore.getState().clear()
 })
 
 function sidebarFor(admin?: object, user?: object, canConfigure = true) {
@@ -74,6 +76,23 @@ function sidebarFor(admin?: object, user?: object, canConfigure = true) {
 }
 
 describe('security sidebar visibility', () => {
+  it('preview shows only account, wallet, dashboard and usage reads while preserving the actor', () => {
+    useAuthStore.getState().auth.setUser({ id: 1, username: 'root', role: 100 })
+    useUserPreviewStore
+      .getState()
+      .start('preview', 2_000_000_000, { id: 2, username: 'target' })
+    const { result } = renderHook(useSidebarData)
+    const urls = result.current.navGroups.flatMap((group) =>
+      group.items.map((item) => ('url' in item ? item.url : undefined))
+    )
+    expect(urls).toContain('/profile')
+    expect(urls).toContain('/wallet')
+    expect(urls).not.toContain('/users')
+    expect(urls).not.toContain('/channels')
+    expect(urls).not.toContain('/security')
+    expect(urls).not.toContain('/keys')
+    expect(useAuthStore.getState().auth.user?.id).toBe(1)
+  })
   it('old configurations show Security & Access immediately after Profile and keep API Keys', () => {
     const { result } = sidebarFor(
       { personal: { enabled: true, personal: true, topup: true } },
@@ -83,7 +102,13 @@ describe('security sidebar visibility', () => {
       result.current
         .find((group) => group.id === 'personal')
         ?.items.map((item) => item.title)
-    ).toEqual(['Wallet', 'Profile', 'Security & Access'])
+    ).toEqual([
+      'Wallet',
+      'Profile',
+      'Security & Access',
+      'Public Pool',
+      'Referral Program',
+    ])
     expect(
       result.current
         .flatMap((group) => group.items)

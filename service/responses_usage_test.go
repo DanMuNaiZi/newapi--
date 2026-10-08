@@ -22,6 +22,7 @@ func TestResponsesUsageAccumulatorTerminalAccounting(t *testing.T) {
 		{eventType: "response.done", wantImages: 1},
 		{eventType: "response.incomplete"},
 		{eventType: "response.failed"},
+		{eventType: "response.error"},
 		{eventType: "response.cancelled"},
 		{eventType: "response.canceled"},
 	} {
@@ -49,7 +50,7 @@ func TestResponsesUsageAccumulatorTerminalAccounting(t *testing.T) {
 			accumulator.Observe(terminal)
 			accumulator.Observe(terminal)
 			usage := accumulator.Finish()
-			assert.Equal(t, tc.eventType == "response.failed", info.StreamStatus.ResponseFailed())
+			assert.Equal(t, tc.eventType == "response.failed" || tc.eventType == "response.error", info.StreamStatus.ResponseFailed())
 			assert.NotEmpty(t, info.StreamStatus.ResponseOutcome())
 
 			assert.Equal(t, 20, usage.PromptTokens)
@@ -319,6 +320,13 @@ func TestResponsesUsageAccumulatorMissingUsageEstimation(t *testing.T) {
 			},
 		},
 		{
+			name: "response error without usage bills nothing",
+			events: []dto.ResponsesStreamResponse{
+				{Type: "response.created", Response: inProgress},
+				{Type: "response.error", Response: &dto.OpenAIResponsesResponse{Status: []byte(`"failed"`)}},
+			},
+		},
+		{
 			name: "no upstream events bills nothing",
 		},
 	} {
@@ -336,6 +344,7 @@ func TestResponsesUsageAccumulatorMissingUsageEstimation(t *testing.T) {
 			assert.Equal(t, tc.wantPrompt, usage.PromptTokens)
 			assert.Equal(t, tc.wantCompletion, usage.CompletionTokens)
 			assert.Equal(t, tc.wantPrompt+tc.wantCompletion, usage.TotalTokens)
+			assert.Nil(t, usage.BillingUsage, "absent upstream usage must not become native usage")
 		})
 	}
 }

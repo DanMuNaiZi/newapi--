@@ -230,6 +230,11 @@ func calculateTieredResourceQuota(relayInfo *relaycommon.RelayInfo, summary text
 	if result == nil || relayInfo == nil || relayInfo.TieredBillingSnapshot == nil {
 		return summary.ResourceQuota
 	}
+	if summary.ResourceToolCallSurchargeQuota.IsZero() {
+		quota, clamp := common.QuotaRoundChecked(result.ActualQuotaBeforeGroup)
+		noteQuotaClamp(relayInfo, clamp)
+		return quota
+	}
 	quota, clamp := common.QuotaFromDecimalChecked(decimal.NewFromFloat(result.ActualQuotaBeforeGroup).Add(summary.ResourceToolCallSurchargeQuota))
 	noteQuotaClamp(relayInfo, clamp)
 	return quota
@@ -378,8 +383,9 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		quota, clamp := common.QuotaFromDecimalChecked(quotaCalculateDecimal)
 		summary.Quota = quota
 		noteQuotaClamp(relayInfo, clamp)
-		resourceQuotaDecimal := billableTokens.Mul(dModelRatio).Add(resourceAudioInputQuota).Add(summary.ResourceToolCallSurchargeQuota)
+		resourceQuotaDecimal := billableTokens.Mul(dModelRatio).Add(resourceAudioInputQuota)
 		resourceQuotaDecimal = relayInfo.PriceData.ApplyOtherRatiosToDecimal(resourceQuotaDecimal)
+		resourceQuotaDecimal = resourceQuotaDecimal.Add(summary.ResourceToolCallSurchargeQuota)
 		resourceQuota, resourceClamp := common.QuotaFromDecimalChecked(resourceQuotaDecimal)
 		summary.ResourceQuota = resourceQuota
 		noteQuotaClamp(relayInfo, resourceClamp)
@@ -391,8 +397,9 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		quota, clamp := common.QuotaFromDecimalChecked(quotaCalculateDecimal)
 		summary.Quota = quota
 		noteQuotaClamp(relayInfo, clamp)
-		resourceQuotaDecimal := dModelPrice.Mul(dQuotaPerUnit).Add(resourceAudioInputQuota).Add(summary.ResourceToolCallSurchargeQuota)
+		resourceQuotaDecimal := dModelPrice.Mul(dQuotaPerUnit).Add(resourceAudioInputQuota)
 		resourceQuotaDecimal = relayInfo.PriceData.ApplyOtherRatiosToDecimal(resourceQuotaDecimal)
+		resourceQuotaDecimal = resourceQuotaDecimal.Add(summary.ResourceToolCallSurchargeQuota)
 		resourceQuota, resourceClamp := common.QuotaFromDecimalChecked(resourceQuotaDecimal)
 		summary.ResourceQuota = resourceQuota
 		noteQuotaClamp(relayInfo, resourceClamp)

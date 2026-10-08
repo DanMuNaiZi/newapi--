@@ -344,6 +344,17 @@ func awaitH2ServerResult(t *testing.T, resultCh <-chan h2ServerResult) h2ServerR
 	}
 }
 
+// Deliver the final protocol frame before closing the socket. A full close
+// with unread SETTINGS acknowledgements can send a TCP reset on Windows,
+// hiding the RST_STREAM or GOAWAY that the test is meant to exercise.
+func finishH2TestConnection(conn net.Conn) {
+	if tcp, ok := conn.(*net.TCPConn); ok {
+		_ = tcp.CloseWrite()
+		_, _ = io.Copy(io.Discard, tcp)
+	}
+	_ = conn.Close()
+}
+
 // runResetOnFirstStreamServer speaks just enough raw HTTP/2 to emulate an
 // upstream that accepts the first request, waits until the request body has
 // been fully written, and then resets the stream with REFUSED_STREAM (the
@@ -361,7 +372,7 @@ func runResetOnFirstStreamServer(ln net.Listener, expectRetry bool) <-chan h2Ser
 			res.err = err
 			return
 		}
-		defer conn.Close()
+		defer finishH2TestConnection(conn)
 
 	attempts:
 		for attempt := 0; ; attempt++ {
@@ -416,7 +427,7 @@ func runGoAwayAfterFirstRequestServer(ln net.Listener) <-chan h2ServerResult {
 
 			if attempt == 0 {
 				err = framer.WriteGoAway(0, http2.ErrCodeNo, nil)
-				conn.Close()
+				finishH2TestConnection(conn)
 				if err != nil {
 					res.err = err
 					return
@@ -425,7 +436,7 @@ func runGoAwayAfterFirstRequestServer(ln net.Listener) <-chan h2ServerResult {
 			}
 
 			err = writeH2TestResponse(framer, streamID)
-			conn.Close()
+			finishH2TestConnection(conn)
 			if err != nil {
 				res.err = err
 			}

@@ -29,6 +29,7 @@ export type RedemptionExportData = {
   keys: string[]
   name: string
   quota: string
+  rewardType?: 'quota' | 'subscription'
 }
 
 type RedemptionsExportDialogProps = {
@@ -52,7 +53,13 @@ export function RedemptionsExportDialog(props: RedemptionsExportDialogProps) {
     const headers: string[] = []
     if (includeName) headers.push(t('Name'))
     headers.push(t('Code'))
-    if (includeQuota) headers.push(t('Quota'))
+    if (includeQuota) {
+      headers.push(
+        props.data.rewardType === 'subscription'
+          ? t('Subscription plan')
+          : t('Quota')
+      )
+    }
 
     const rows = props.data.keys.map((key) => {
       const row: string[] = []
@@ -158,7 +165,11 @@ export function RedemptionsExportDialog(props: RedemptionsExportDialogProps) {
                 checked={includeQuota}
                 onCheckedChange={setIncludeQuota}
               />
-              <Label htmlFor={`${id}-quota`}>{t('Include quota')}</Label>
+              <Label htmlFor={`${id}-quota`}>
+                {props.data.rewardType === 'subscription'
+                  ? t('Include subscription plan')
+                  : t('Include quota')}
+              </Label>
             </div>
           </div>
         </div>

@@ -411,6 +411,10 @@ func GetUser(c *gin.Context) {
 // StartUserPreview issues a short-lived, signed read-only token while keeping
 // the administrator's browser session unchanged.
 func StartUserPreview(c *gin.Context) {
+	if _, ok := middleware.GetSessionAuthIdentity(c); !ok || c.GetBool("use_access_token") {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "code": "AUTH_USER_PREVIEW_INVALID", "message": "User preview requires a browser session"})
+		return
+	}
 	targetID, err := strconv.Atoi(c.Param("id"))
 	if err != nil || targetID <= 0 {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
@@ -492,7 +496,7 @@ func GetAffCode(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	if user.AffCode == "" {
+	if user.AffCode == "" && !c.GetBool("user_preview") {
 		user.AffCode = common.GetRandomString(4)
 		if err := user.Update(false); err != nil {
 			c.JSON(http.StatusOK, gin.H{

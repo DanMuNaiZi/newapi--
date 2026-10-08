@@ -74,6 +74,8 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
     topup: true,
     personal: true,
     security: true,
+    publicPool: true,
+    referral: true,
   },
   admin: {
     enabled: true,
@@ -83,6 +85,8 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
     user: true,
     setting: true,
     subscription: true,
+    publicPool: true,
+    referral: true,
   },
 }
 

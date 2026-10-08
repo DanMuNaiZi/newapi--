@@ -626,7 +626,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 func finalizeTerminalTask(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) {
 	perfmetrics.RecordTaskResult(task, taskResult)
 	billingSettled := settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
-	if task.Status == model.TaskStatusFailure && !billingSettled && task.Quota != 0 {
+	if task.Status == model.TaskStatusFailure && !billingSettled {
 		RefundTaskQuota(ctx, task, task.FailReason)
 	}
 }
@@ -679,6 +679,7 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 		result, usageFacts, err := EvaluateTaskCompletionUsage(bc.TieredSnapshot, taskResult.UsageFacts)
 		if err != nil {
 			logger.LogWarn(ctx, fmt.Sprintf("任务 %s 表达式结算失败，保留预扣额度: %v", task.TaskID, err))
+			activateTaskReferral(ctx, task)
 			return true
 		}
 		if result.Clamp != nil {
@@ -686,12 +687,14 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 		}
 		bc.TieredSnapshot.UsageFacts = usageFacts
 		bc.TieredSnapshot.EstimatedTier = result.MatchedTier
-		RecalculateTaskQuota(ctx, task, result.ActualQuotaAfterGroup, "任务用量表达式结算", result.Clamp)
+		resourceQuota, resourceClamp := common.QuotaRoundChecked(result.ActualQuotaBeforeGroup)
+		RecalculateTaskQuotaWithResource(ctx, task, result.ActualQuotaAfterGroup, &resourceQuota, "任务用量表达式结算", result.Clamp, resourceClamp)
 		return true
 	}
 	// 按次计费的成功任务保持预扣；失败任务由调用方全额退款。
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.PerCallBilling {
 		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 按次计费，跳过差额结算", task.TaskID))
+		activateTaskReferral(ctx, task)
 		return false
 	}
 	// 优先让 adaptor 决定最终额度。
@@ -707,6 +710,7 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 	if tokens > 0 {
 		return RecalculateTaskQuotaByTokens(ctx, task, tokens)
 	}
+	activateTaskReferral(ctx, task)
 	return false
 }
 

@@ -31,6 +31,10 @@ type publicPoolSiteRequest struct {
 	Status      model.PublicPoolSiteStatus `json:"status"`
 	SortOrder   int                        `json:"sort_order"`
 	Reward      *dto.RewardSpec            `json:"reward"`
+	// PreserveReward is optional for compatibility with older clients that
+	// omitted reward when they meant to keep the existing snapshot. New
+	// clients should send false explicitly when clearing a reward.
+	PreserveReward *bool `json:"preserve_reward"`
 }
 
 type publicPoolContributionRequest struct {
@@ -239,7 +243,7 @@ func publicPoolSiteFromRequest(id int, request publicPoolSiteRequest) (*model.Pu
 		Description:    request.Description,
 		Status:         request.Status,
 		SortOrder:      request.SortOrder,
-		PreserveReward: id > 0 && request.Reward == nil,
+		PreserveReward: id > 0 && request.Reward == nil && (request.PreserveReward == nil || *request.PreserveReward),
 	}
 	if request.Reward == nil {
 		return site, nil

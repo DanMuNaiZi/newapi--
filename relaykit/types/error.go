@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 
 	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
@@ -216,9 +217,51 @@ func (e *NewAPIError) ClientCopy() *NewAPIError {
 	copyError.Metadata = append(json.RawMessage(nil), e.Metadata...)
 	if relayErr, ok := e.RelayError.(OpenAIError); ok {
 		relayErr.Metadata = append(json.RawMessage(nil), relayErr.Metadata...)
+		if relayErr.Code != nil {
+			relayErr.Code = cloneClientErrorDetail(reflect.ValueOf(relayErr.Code)).Interface()
+		}
 		copyError.RelayError = relayErr
 	}
 	return &copyError
+}
+
+// Error codes may contain structured provider details. Copy every mutable
+// container so sanitizing a client response cannot change the retry/log input.
+func cloneClientErrorDetail(value reflect.Value) reflect.Value {
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return value
+		}
+		copyValue := reflect.New(value.Type()).Elem()
+		copyValue.Set(cloneClientErrorDetail(value.Elem()))
+		return copyValue
+	case reflect.Map:
+		if value.IsNil() {
+			return value
+		}
+		copyValue := reflect.MakeMapWithSize(value.Type(), value.Len())
+		for entries := value.MapRange(); entries.Next(); {
+			copyValue.SetMapIndex(entries.Key(), cloneClientErrorDetail(entries.Value()))
+		}
+		return copyValue
+	case reflect.Slice, reflect.Array:
+		if value.Kind() == reflect.Slice && value.IsNil() {
+			return value
+		}
+		var copyValue reflect.Value
+		if value.Kind() == reflect.Slice {
+			copyValue = reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		} else {
+			copyValue = reflect.New(value.Type()).Elem()
+		}
+		for i := range value.Len() {
+			copyValue.Index(i).Set(cloneClientErrorDetail(value.Index(i)))
+		}
+		return copyValue
+	default:
+		return value
+	}
 }
 
 func (e *NewAPIError) SetOpenAIClientError(message string, wireType string, code ErrorCode, statusCode int) {

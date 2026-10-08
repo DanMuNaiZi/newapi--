@@ -16,6 +16,25 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
 import {
   fireEvent,
   render,
@@ -38,6 +57,28 @@ import { RedemptionsMutateDrawer } from '../redemptions-mutate-drawer'
 import { RedemptionsProvider } from '../redemptions-provider'
 
 type Download = { filename: string; blob: Blob }
+
+test('exports a subscription reward using its plan name and reward heading', async () => {
+  const downloads = captureDownloads()
+  const user = userEvent.setup()
+  render(
+    <RedemptionsExportDialog
+      data={{
+        keys: ['sub-code'],
+        name: 'Pro batch',
+        quota: 'Pro month',
+        rewardType: 'subscription',
+      }}
+      onClose={() => undefined}
+    />
+  )
+  await user.click(screen.getByRole('checkbox', { name: 'Save as a file' }))
+  await user.click(screen.getByRole('radio', { name: 'Save as Markdown' }))
+  await user.click(screen.getByRole('button', { name: 'Done' }))
+  expect(await readDownload(downloads[0])).toBe(
+    '| Name | Code | Subscription plan |\n| --- | --- | --- |\n| Pro batch | sub-code | Pro month |\n'
+  )
+})
 
 function captureDownloads() {
   const downloads: Download[] = []
@@ -73,10 +114,18 @@ function readDownload(download: Download): Promise<string> {
 
 function CreateDrawer() {
   const [open, setOpen] = useState(true)
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+  )
   return (
-    <RedemptionsProvider>
-      <RedemptionsMutateDrawer open={open} onOpenChange={setOpen} />
-    </RedemptionsProvider>
+    <QueryClientProvider client={queryClient}>
+      <RedemptionsProvider>
+        <RedemptionsMutateDrawer open={open} onOpenChange={setOpen} />
+      </RedemptionsProvider>
+    </QueryClientProvider>
   )
 }
 

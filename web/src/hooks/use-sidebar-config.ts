@@ -57,6 +57,8 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     topup: true,
     personal: true,
     security: true,
+    publicPool: true,
+    referral: true,
   },
   admin: {
     enabled: true,
@@ -66,6 +68,8 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     user: true,
     setting: true,
     subscription: true,
+    publicPool: true,
+    referral: true,
   },
 }
 
@@ -113,6 +117,8 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/wallet': { section: 'personal', module: 'topup' },
   '/profile': { section: 'personal', module: 'personal' },
   '/security': { section: 'personal', module: 'security' },
+  '/public-pool': { section: 'personal', module: 'publicPool' },
+  '/referral-campaigns': { section: 'personal', module: 'referral' },
   '/channels': { section: 'admin', module: 'channel' },
   '/models': { section: 'admin', module: 'models' },
   '/models/metadata': { section: 'admin', module: 'models' },
@@ -120,6 +126,8 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/users': { section: 'admin', module: 'user' },
   '/redemption-codes': { section: 'admin', module: 'redemption' },
   '/subscriptions': { section: 'admin', module: 'subscription' },
+  '/public-pool/admin': { section: 'admin', module: 'publicPool' },
+  '/referral-campaigns/admin': { section: 'admin', module: 'referral' },
   '/system-settings': { section: 'admin', module: 'setting' },
   '/system-settings/site': { section: 'admin', module: 'setting' },
 }

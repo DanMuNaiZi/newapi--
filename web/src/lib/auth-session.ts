@@ -29,6 +29,7 @@ import {
   type AuthUser,
   type LoginSession,
 } from '@/stores/auth-store'
+import { useUserPreviewStore } from '@/stores/user-preview-store'
 
 export type RefreshOutcome =
   | { kind: 'authenticated'; bundle: AuthBundle }
@@ -152,6 +153,9 @@ export function applyAuthBundle(
   synchronizeTabs = true
 ): void {
   const previousSID = useAuthStore.getState().auth.session?.sid
+  if (previousSID && previousSID !== bundle.session.sid) {
+    useUserPreviewStore.getState().clear()
+  }
   authEpoch += 1
   useAuthStore.getState().auth.setBundle(bundle)
   if (synchronizeTabs && previousSID !== bundle.session.sid) {
@@ -191,6 +195,7 @@ export function clearAuthentication(
   const sid = useAuthStore.getState().auth.session?.sid
   authEpoch += 1
   useAuthStore.getState().auth.reset(bootstrapState)
+  useUserPreviewStore.getState().clear()
   if (synchronizeTabs && sid) {
     publishAuthSessionEvent('signed_out', sid)
   }

@@ -97,11 +97,14 @@ func TestTaskPluginLogVisibilityIsRoleSeparated(t *testing.T) {
 
 func TestLegacyLogOtherVisibilityIsRoleSeparated(t *testing.T) {
 	other := common.MapToJsonStr(map[string]any{
-		"request_path":  "/v1/chat/completions",
-		"channel_id":    202,
-		"channel_name":  "legacy-secret-channel",
-		"channel_type":  1,
-		"reject_reason": "legacy-policy-rejection",
+		"request_path":        "/v1/chat/completions",
+		"channel_id":          202,
+		"channel_name":        "legacy-secret-channel",
+		"channel_type":        1,
+		"reject_reason":       "legacy-policy-rejection",
+		"upstream_model_name": "legacy-private-model",
+		"is_model_mapped":     true,
+		"response_model":      map[string]any{"upstream_model": "legacy-private-model", "returned_model": "legacy-provider-model"},
 		"admin_info": map[string]any{
 			"existing_admin_field": "preserved",
 		},
@@ -134,6 +137,9 @@ func TestLegacyLogOtherVisibilityIsRoleSeparated(t *testing.T) {
 			"channel_name",
 			"channel_type",
 			"reject_reason",
+			"upstream_model_name",
+			"is_model_mapped",
+			"response_model",
 			"admin_info",
 			"root_info",
 			"audit_info",
@@ -157,6 +163,12 @@ func TestLegacyLogOtherVisibilityIsRoleSeparated(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "preserved", adminInfo["existing_admin_field"])
 		assert.Equal(t, "legacy-policy-rejection", adminInfo["reject_reason"])
+		assert.NotContains(t, parsed, "upstream_model_name")
+		assert.NotContains(t, parsed, "is_model_mapped")
+		assert.NotContains(t, parsed, "response_model")
+		assert.Equal(t, "legacy-private-model", adminInfo["upstream_model_name"])
+		assert.Equal(t, true, adminInfo["is_model_mapped"])
+		assert.Equal(t, map[string]any{"upstream_model": "legacy-private-model", "returned_model": "legacy-provider-model"}, adminInfo["response_model"])
 	})
 
 	t.Run("root", func(t *testing.T) {
@@ -174,14 +186,26 @@ func TestLegacyLogOtherVisibilityIsRoleSeparated(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "preserved", adminInfo["existing_admin_field"])
 		assert.Equal(t, "legacy-policy-rejection", adminInfo["reject_reason"])
+		assert.NotContains(t, parsed, "upstream_model_name")
+		assert.NotContains(t, parsed, "is_model_mapped")
+		assert.NotContains(t, parsed, "response_model")
+		assert.Equal(t, "legacy-private-model", adminInfo["upstream_model_name"])
+		assert.Equal(t, true, adminInfo["is_model_mapped"])
+		assert.Equal(t, map[string]any{"upstream_model": "legacy-private-model", "returned_model": "legacy-provider-model"}, adminInfo["response_model"])
 	})
 }
 
 func TestLegacyRejectReasonDoesNotOverrideScopedValue(t *testing.T) {
 	other := common.MapToJsonStr(map[string]any{
-		"reject_reason": "legacy-value",
+		"reject_reason":       "legacy-value",
+		"upstream_model_name": "legacy-private-model",
+		"is_model_mapped":     true,
+		"response_model":      map[string]any{"upstream_model": "legacy-private-model"},
 		"admin_info": map[string]any{
-			"reject_reason": "scoped-value",
+			"reject_reason":       "scoped-value",
+			"upstream_model_name": "scoped-private-model",
+			"is_model_mapped":     false,
+			"response_model":      map[string]any{"upstream_model": "scoped-private-model"},
 		},
 	})
 	logs := []*Log{{Other: other}}
@@ -194,10 +218,16 @@ func TestLegacyRejectReasonDoesNotOverrideScopedValue(t *testing.T) {
 	adminInfo, ok := parsed["admin_info"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "scoped-value", adminInfo["reject_reason"])
+	assert.NotContains(t, parsed, "upstream_model_name")
+	assert.NotContains(t, parsed, "is_model_mapped")
+	assert.NotContains(t, parsed, "response_model")
+	assert.Equal(t, "scoped-private-model", adminInfo["upstream_model_name"])
+	assert.Equal(t, false, adminInfo["is_model_mapped"])
+	assert.Equal(t, map[string]any{"upstream_model": "scoped-private-model"}, adminInfo["response_model"])
 }
 
 func TestLegacyRejectReasonHandlesNullAdminInfo(t *testing.T) {
-	logs := []*Log{{Other: `{"reject_reason":"legacy-value","admin_info":null}`}}
+	logs := []*Log{{Other: `{"reject_reason":"legacy-value","upstream_model_name":"legacy-private-model","is_model_mapped":true,"response_model":{"upstream_model":"legacy-private-model"},"admin_info":null}`}}
 
 	FormatAdminLogs(logs)
 
@@ -207,6 +237,12 @@ func TestLegacyRejectReasonHandlesNullAdminInfo(t *testing.T) {
 	adminInfo, ok := parsed["admin_info"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "legacy-value", adminInfo["reject_reason"])
+	assert.NotContains(t, parsed, "upstream_model_name")
+	assert.NotContains(t, parsed, "is_model_mapped")
+	assert.NotContains(t, parsed, "response_model")
+	assert.Equal(t, "legacy-private-model", adminInfo["upstream_model_name"])
+	assert.Equal(t, true, adminInfo["is_model_mapped"])
+	assert.Equal(t, map[string]any{"upstream_model": "legacy-private-model"}, adminInfo["response_model"])
 }
 
 func TestLogFormattingPreservesLargeIntegerLexemes(t *testing.T) {
@@ -255,7 +291,7 @@ func TestLogFormattingPreservesLargeIntegerLexemes(t *testing.T) {
 
 func TestFormatUserLogsRemovesActualModelFields(t *testing.T) {
 	logs := []*Log{{
-		ModelName: "gpt-5.5",
+		ModelName: "gpt-5.4",
 		Other:     `{"request_model_name":"gpt-5.5","admin_info":{"upstream_model_name":"gpt-5.4","is_model_mapped":true,"channel":11},"model_ratio":2}`,
 	}}
 
@@ -273,24 +309,86 @@ func TestFormatUserLogsRemovesActualModelFields(t *testing.T) {
 	assert.Contains(t, other, "model_ratio")
 }
 
+func TestResponseModelLogVisibilityPreservesSafePublicObservation(t *testing.T) {
+	for _, tc := range []struct {
+		name, observation string
+		public            bool
+	}{
+		{"safe mapped observation", `{"requested_model":"requested","upstream_model":"requested","returned_model":"requested"}`, true},
+		{"unmapped returned difference", `{"requested_model":"requested","upstream_model":"requested","returned_model":"requested-2026"}`, true},
+		{"empty upstream declaration", `{"requested_model":"requested","upstream_model":"","returned_model":"returned"}`, true},
+		{"legacy mapped observation", `{"requested_model":"requested","upstream_model":"private-model","returned_model":"private-model"}`, false},
+		{"incomplete historical object", `{"upstream_model":"private-model"}`, false},
+		{"unknown upstream name", `{"requested_model":"requested","upstream_model":null,"returned_model":"private-model"}`, false},
+		{"unknown returned name", `{"requested_model":"requested","upstream_model":"requested","returned_model":null}`, false},
+		{"unexpected historical detail", `{"requested_model":"requested","upstream_model":"requested","returned_model":"requested","private_detail":"private"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			other := `{"public_id":9007199254740993,"response_model":` + tc.observation + `}`
+			user := []*Log{{Other: other}}
+			formatUserLogs(user, 0)
+			var userFields map[string]common.RawMessage
+			require.NoError(t, common.UnmarshalJsonStr(user[0].Other, &userFields))
+			assert.Equal(t, tc.public, len(userFields["response_model"]) > 0)
+			assert.Contains(t, user[0].Other, `"public_id":9007199254740993`)
+			if tc.public {
+				assert.JSONEq(t, tc.observation, string(userFields["response_model"]))
+			} else {
+				assert.NotContains(t, user[0].Other, "private")
+			}
+			admin := []*Log{{Other: other}}
+			FormatAdminLogs(admin)
+			var adminFields map[string]common.RawMessage
+			require.NoError(t, common.UnmarshalJsonStr(admin[0].Other, &adminFields))
+			if tc.public {
+				assert.JSONEq(t, tc.observation, string(adminFields["response_model"]))
+			} else {
+				assert.NotContains(t, adminFields, "response_model")
+				var scoped map[string]common.RawMessage
+				require.NoError(t, common.Unmarshal(adminFields["admin_info"], &scoped))
+				assert.JSONEq(t, tc.observation, string(scoped["response_model"]))
+			}
+		})
+	}
+}
+
 func TestPopulateActualModelNamesReadsAdminScope(t *testing.T) {
 	logs := []*Log{{
-		ModelName: "gpt-5.5",
+		ModelName: "gpt-5.4",
+		Content:   "The 'gpt-5.4' model is unavailable",
 		Other:     `{"request_model_name":"gpt-5.5","admin_info":{"upstream_model_name":"gpt-5.4","is_model_mapped":true}}`,
+	}, {
+		ModelName: "gpt-5.4",
+		Content:   "The 'gpt-5.4' model is unavailable",
+		Other:     `{"request_model_name":"gpt-5.5","upstream_model_name":"gpt-5.4","is_model_mapped":true}`,
+	}, {
+		ModelName: "gpt-5.4",
+		Content:   "The 'gpt-5.4' model is unavailable",
+		Other:     `{"request_model_name":"gpt-5.5"}`,
 	}}
 
 	populateActualModelNames(logs)
 	FormatAdminLogs(logs)
 
-	assert.Equal(t, "gpt-5.5", logs[0].ModelName)
-	assert.Equal(t, "gpt-5.4", logs[0].ActualModelName)
+	for _, log := range logs {
+		assert.Equal(t, "gpt-5.5", log.ModelName)
+		assert.Equal(t, "gpt-5.4", log.ActualModelName)
+		assert.Equal(t, "The 'gpt-5.4' model is unavailable", log.Content)
+	}
+	HideActualModelNames(logs)
+	for _, log := range logs {
+		assert.Equal(t, "gpt-5.5", log.ModelName)
+		assert.Empty(t, log.ActualModelName)
+		assert.NotContains(t, log.Other, "gpt-5.4")
+		assert.Equal(t, "The 'gpt-5.5' model is unavailable", log.Content)
+	}
 }
 
 func TestHideActualModelNamesRemovesUpstreamModelFields(t *testing.T) {
 	logs := []*Log{{
 		ModelName:       "gpt-5.5",
 		ActualModelName: "gpt-5.4",
-		Other:           `{"request_model_name":"gpt-5.5","admin_info":{"use_channel":[11],"upstream_model_name":"gpt-5.4","is_model_mapped":true,"response_model":{"upstream_model":"gpt-5.4"}}}`,
+		Other:           `{"request_model_name":"gpt-5.5","upstream_model_name":"legacy-private-model","is_model_mapped":true,"response_model":{"upstream_model":"legacy-private-model"},"admin_info":{"use_channel":[11],"upstream_model_name":"gpt-5.4","is_model_mapped":true,"response_model":{"upstream_model":"gpt-5.4"}},"root_info":{"upstream_model_name":"root-private-model","is_model_mapped":true,"response_model":{"upstream_model":"root-private-model"}}}`,
 	}}
 
 	HideActualModelNames(logs)
@@ -305,4 +403,9 @@ func TestHideActualModelNamesRemovesUpstreamModelFields(t *testing.T) {
 	assert.NotContains(t, adminInfo, "is_model_mapped")
 	assert.NotContains(t, adminInfo, "response_model")
 	assert.Contains(t, adminInfo, "use_channel")
+	assert.NotContains(t, other, "upstream_model_name")
+	assert.NotContains(t, other, "is_model_mapped")
+	assert.NotContains(t, other, "response_model")
+	assert.NotContains(t, logs[0].Other, "legacy-private-model")
+	assert.NotContains(t, logs[0].Other, "root-private-model")
 }

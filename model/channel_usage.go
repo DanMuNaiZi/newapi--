@@ -50,7 +50,7 @@ type channelUsageAggregate struct {
 }
 
 const channelUsageAggregateSelect = `
-COALESCE(SUM(CASE WHEN type = 2 THEN COALESCE(resource_quota, 0) ELSE 0 END), 0) AS resource_quota,
+COALESCE(SUM(CASE WHEN type = 2 THEN COALESCE(resource_quota, 0) WHEN type = 6 THEN -COALESCE(resource_quota, 0) ELSE 0 END), 0) AS resource_quota,
 COALESCE(SUM(CASE WHEN type = 2 THEN quota WHEN type = 6 THEN -quota ELSE 0 END), 0) AS charged_quota,
 COALESCE(SUM(CASE WHEN type = 2 THEN prompt_tokens ELSE 0 END), 0) AS prompt_tokens,
 COALESCE(SUM(CASE WHEN type = 2 THEN completion_tokens ELSE 0 END), 0) AS completion_tokens,
@@ -60,7 +60,7 @@ COUNT(DISTINCT CASE WHEN type = 5 AND COALESCE(request_id, '') <> '' THEN reques
   + COALESCE(SUM(CASE WHEN type = 5 AND COALESCE(request_id, '') = '' THEN 1 ELSE 0 END), 0) AS failure_count,
 COUNT(DISTINCT CASE WHEN type = 2 AND resource_quota IS NOT NULL AND COALESCE(request_id, '') <> '' THEN request_id END)
   + COALESCE(SUM(CASE WHEN type = 2 AND resource_quota IS NOT NULL AND COALESCE(request_id, '') = '' THEN 1 ELSE 0 END), 0) AS resource_covered_requests,
-COALESCE(SUM(CASE WHEN type = 2 AND resource_quota IS NULL THEN 1 ELSE 0 END), 0) AS uncovered_resource_rows`
+COALESCE(SUM(CASE WHEN type IN (2, 6) AND resource_quota IS NULL THEN 1 ELSE 0 END), 0) AS uncovered_resource_rows`
 
 func scanChannelUsageAggregate(query *gorm.DB) (channelUsageAggregate, error) {
 	aggregate := channelUsageAggregate{}

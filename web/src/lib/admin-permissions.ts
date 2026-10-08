@@ -36,6 +36,8 @@ export const ADMIN_PERMISSION_RESOURCES = {
   SYSTEM_SETTINGS: 'system_settings',
   PAYMENT: 'payment',
   OAUTH: 'oauth',
+  PUBLIC_POOL: 'public_pool',
+  REFERRAL_CAMPAIGN: 'referral_campaign',
   SYSTEM_INFO: 'system_info',
   TASK_LOG: 'task_log',
   REPORT: 'report',

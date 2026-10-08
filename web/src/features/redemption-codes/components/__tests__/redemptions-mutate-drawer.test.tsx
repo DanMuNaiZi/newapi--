@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   fireEvent,
   render,
@@ -23,6 +24,7 @@ import {
   waitFor,
   type RenderResult,
 } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, test } from 'vitest'
 
 import type { Redemption } from '../../types'
@@ -99,15 +101,20 @@ function deferred<T>() {
 }
 
 function drawerTree(currentRow: Redemption) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
   return (
     <I18nextProvider i18n={i18n}>
-      <RedemptionsProvider>
-        <RedemptionsMutateDrawer
-          open
-          currentRow={currentRow}
-          onOpenChange={() => undefined}
-        />
-      </RedemptionsProvider>
+      <QueryClientProvider client={queryClient}>
+        <RedemptionsProvider>
+          <RedemptionsMutateDrawer
+            open
+            currentRow={currentRow}
+            onOpenChange={() => undefined}
+          />
+        </RedemptionsProvider>
+      </QueryClientProvider>
       <Toaster duration={60_000} />
     </I18nextProvider>
   )
@@ -192,6 +199,47 @@ afterEach(() => {
 })
 
 describe('redemption drawer', () => {
+  test('switching a quota code to subscription removes the old quota from the update', async () => {
+    const user = userEvent.setup()
+    const original = redemption(1)
+    const updates: Array<Record<string, unknown>> = []
+    apiClient.get = async (url) => ({
+      data: {
+        success: true,
+        data:
+          url === '/api/redemption/1'
+            ? original
+            : [{ plan: { id: 7, title: 'Pro month', enabled: true } }],
+      },
+    })
+    apiClient.put = async (_url, data) => {
+      updates.push(data as Record<string, unknown>)
+      return { data: { success: true } }
+    }
+    await renderDrawer(original)
+    await waitForLoadedForm()
+    await user.click(screen.getByRole('combobox', { name: 'Reward type' }))
+    await user.click(
+      await screen.findByRole('option', { name: 'Subscription' })
+    )
+    await waitFor(() =>
+      expect(
+        screen.getByRole('combobox', { name: 'Subscription plan' })
+      ).toBeEnabled()
+    )
+    await user.click(
+      screen.getByRole('combobox', { name: 'Subscription plan' })
+    )
+    await user.click(await screen.findByRole('option', { name: 'Pro month' }))
+    submitForm()
+    await waitFor(() => expect(updates).toHaveLength(1))
+    expect(updates[0]).toMatchObject({
+      reward_type: 'subscription',
+      subscription_plan_id: 7,
+      quota: 0,
+    })
+  })
+
   test('shows the reported CNY quota without floating-point noise', async () => {
     const original = redemption(1, 13888889)
     apiClient.get = async () => ({ data: { success: true, data: original } })

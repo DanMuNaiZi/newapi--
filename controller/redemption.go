@@ -224,6 +224,8 @@ func UpdateRedemption(c *gin.Context) {
 				return
 			}
 		}
+		preserveSubscriptionSnapshot := cleanRedemption.RewardType == model.RedemptionRewardSubscription &&
+			cleanRedemption.SubscriptionPlanId == redemption.SubscriptionPlanId && cleanRedemption.SubscriptionSnapshot != ""
 		cleanRedemption.Name = redemption.Name
 		cleanRedemption.Quota = redemption.Quota
 		cleanRedemption.ExpiredTime = redemption.ExpiredTime
@@ -236,18 +238,21 @@ func UpdateRedemption(c *gin.Context) {
 				common.ApiErrorMsg(c, "subscription plan is required")
 				return
 			}
-			plan, err := model.GetSubscriptionPlanById(redemption.SubscriptionPlanId)
-			if err != nil {
-				common.ApiError(c, err)
-				return
+			if !preserveSubscriptionSnapshot {
+				plan, err := model.GetSubscriptionPlanById(redemption.SubscriptionPlanId)
+				if err != nil {
+					common.ApiError(c, err)
+					return
+				}
+				snapshot, err := common.Marshal(plan)
+				if err != nil {
+					common.ApiError(c, err)
+					return
+				}
+				cleanRedemption.SubscriptionSnapshot = string(snapshot)
 			}
-			snapshot, err := common.Marshal(plan)
-			if err != nil {
-				common.ApiError(c, err)
-				return
-			}
+			cleanRedemption.Quota = 0
 			cleanRedemption.SubscriptionPlanId = redemption.SubscriptionPlanId
-			cleanRedemption.SubscriptionSnapshot = string(snapshot)
 		} else {
 			cleanRedemption.SubscriptionPlanId = 0
 			cleanRedemption.SubscriptionSnapshot = ""

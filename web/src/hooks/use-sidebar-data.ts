@@ -39,6 +39,8 @@ import {
   User,
   Users,
   Wallet,
+  Globe2,
+  Gift,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -54,6 +56,7 @@ import {
 } from '@/lib/admin-permissions'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
+import { useUserPreviewStore } from '@/stores/user-preview-store'
 
 /**
  * Root navigation groups for the application sidebar.
@@ -64,6 +67,7 @@ import { useAuthStore } from '@/stores/auth-store'
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
   const user = useAuthStore((state) => state.auth.user)
+  const previewToken = useUserPreviewStore((state) => state.token)
   const isRoot = user?.role === ROLE.SUPER_ADMIN
   const can = (resource: string, action = ADMIN_PERMISSION_ACTIONS.READ) =>
     isRoot || hasPermission(user, resource, action)
@@ -113,6 +117,20 @@ export function useSidebarData(): SidebarData {
       title: t('Subscriptions'),
       url: '/subscriptions',
       icon: CreditCard,
+    })
+  }
+  if (can(ADMIN_PERMISSION_RESOURCES.PUBLIC_POOL)) {
+    adminItems.push({
+      title: t('Public Pool Management'),
+      url: '/public-pool/admin',
+      icon: Globe2,
+    })
+  }
+  if (can(ADMIN_PERMISSION_RESOURCES.REFERRAL_CAMPAIGN)) {
+    adminItems.push({
+      title: t('Referral Campaign Management'),
+      url: '/referral-campaigns/admin',
+      icon: Gift,
     })
   }
   if (
@@ -195,7 +213,7 @@ export function useSidebarData(): SidebarData {
     })
   }
 
-  return {
+  const data: SidebarData = {
     systemSettingsAccess,
     navGroups: [
       {
@@ -238,6 +256,16 @@ export function useSidebarData(): SidebarData {
             url: '/security',
             icon: ShieldCheck,
           },
+          {
+            title: t('Public Pool'),
+            url: '/public-pool',
+            icon: Globe2,
+          },
+          {
+            title: t('Referral Program'),
+            url: '/referral-campaigns',
+            icon: Gift,
+          },
         ],
       },
       {
@@ -246,5 +274,28 @@ export function useSidebarData(): SidebarData {
         items: adminItems,
       },
     ],
+  }
+  if (!previewToken) return data
+  const previewPaths = new Set([
+    '/dashboard/overview',
+    '/dashboard/models',
+    '/usage-logs/common',
+    '/usage-logs/task',
+    '/profile',
+    '/wallet',
+  ])
+  return {
+    systemSettingsAccess: getSystemSettingsAccess(null),
+    navGroups: data.navGroups
+      .map((group) => ({
+        ...group,
+        items: group.items.filter(
+          (item) =>
+            'url' in item &&
+            typeof item.url === 'string' &&
+            previewPaths.has(item.url)
+        ),
+      }))
+      .filter((group) => group.items.length > 0),
   }
 }

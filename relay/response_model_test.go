@@ -71,11 +71,23 @@ func TestResponseModelComparisonAndLog(t *testing.T) {
 				return
 			}
 			require.NotNil(t, stored.ResponseModel)
+			expectedVisible := &relaycommon.ResponseModel{
+				RequestedModel: "requested",
+				UpstreamModel:  "requested",
+				ReturnedModel:  relaycommon.ClientVisibleErrorMessage(info, tc.returned),
+			}
 			assert.Equal(t, &relaycommon.ResponseModel{
-				RequestedModel: "requested", UpstreamModel: "mapped", ReturnedModel: tc.returned,
+				RequestedModel: expectedVisible.RequestedModel,
+				UpstreamModel:  expectedVisible.UpstreamModel,
+				ReturnedModel:  expectedVisible.ReturnedModel,
 			}, stored.ResponseModel)
+			snapshot := other.Snapshot()
+			adminInfo, ok := snapshot["admin_info"].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, *info.ResponseModel, adminInfo["response_model"])
 			assert.NotContains(t, other.JSONString(), "mismatch")
-			assert.Equal(t, tc.mismatch, stored.ResponseModel.Mismatch())
+			assert.Equal(t, expectedVisible.Mismatch(), stored.ResponseModel.Mismatch())
+			assert.Equal(t, tc.mismatch, info.ResponseModel.Mismatch())
 			assert.Equal(t, "mapped", info.UpstreamModelName)
 		})
 	}
@@ -108,7 +120,18 @@ func TestResponseModelLogOmitsUnchangedModel(t *testing.T) {
 			require.NotNil(t, info.ResponseModel)
 			assert.Equal(t, float64(1), other.Snapshot()["model_ratio"])
 			if tc.record {
-				assert.Equal(t, *info.ResponseModel, other.Snapshot()["response_model"])
+				expectedVisible := *info.ResponseModel
+				if tc.mapped {
+					expectedVisible.RequestedModel = info.ClientModelName()
+					expectedVisible.UpstreamModel = expectedVisible.RequestedModel
+					expectedVisible.ReturnedModel = relaycommon.ClientVisibleErrorMessage(info, expectedVisible.ReturnedModel)
+				}
+				assert.Equal(t, expectedVisible, other.Snapshot()["response_model"])
+				if tc.mapped {
+					adminInfo, ok := other.Snapshot()["admin_info"].(map[string]any)
+					require.True(t, ok)
+					assert.Equal(t, *info.ResponseModel, adminInfo["response_model"])
+				}
 			} else {
 				assert.NotContains(t, other.Snapshot(), "response_model")
 			}
@@ -221,7 +244,7 @@ func TestResponseModelHandlersCaptureBeforeConversion(t *testing.T) {
 			info := &relaycommon.RelayInfo{
 				OriginModelName: "requested", RelayFormat: tc.format, RelayMode: relayconstant.RelayModeChatCompletions,
 				IsStream: tc.stream, DisablePing: true, StartTime: time.Now(),
-				ChannelMeta:         &relaycommon.ChannelMeta{UpstreamModelName: "mapped"},
+				ChannelMeta:         &relaycommon.ChannelMeta{UpstreamModelName: "mapped", IsModelMapped: true},
 				ThinkingContentInfo: relaycommon.ThinkingContentInfo{IsFirstThinkingContent: true},
 			}
 			usage, apiErr := tc.handler(c, info, &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(tc.body))})
@@ -232,7 +255,16 @@ func TestResponseModelHandlersCaptureBeforeConversion(t *testing.T) {
 			assert.Equal(t, &relaycommon.ResponseModel{RequestedModel: "requested", UpstreamModel: "mapped", ReturnedModel: "returned"}, info.ResponseModel)
 			assert.True(t, info.ResponseModel.Mismatch())
 			other := service.GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 0, 0, 1)
-			assert.Equal(t, *info.ResponseModel, other.Snapshot()["response_model"])
+			visibleReturned := "returned"
+			if tc.name == "claude stream" || tc.name == "claude to responses stream" {
+				// Claude streaming retains the observed model as its upstream alias.
+				// That alias must be masked while the admin observation stays intact.
+				visibleReturned = "requested"
+			}
+			assert.Equal(t, relaycommon.ResponseModel{RequestedModel: "requested", UpstreamModel: "requested", ReturnedModel: visibleReturned}, other.Snapshot()["response_model"])
+			admin, ok := other.Snapshot()["admin_info"].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, *info.ResponseModel, admin["response_model"])
 		})
 	}
 }

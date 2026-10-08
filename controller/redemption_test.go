@@ -57,6 +57,20 @@ func TestUpdateRedemptionSnapshotsSubscriptionReward(t *testing.T) {
 	assert.NotEmpty(t, stored.SubscriptionSnapshot)
 	assert.Equal(t, "campaign-1", stored.Batch)
 	assert.Equal(t, "lottery", stored.SourceRef)
+
+	lockedSnapshot := stored.SubscriptionSnapshot
+	require.NoError(t, db.Model(plan).Update("total_amount", 900).Error)
+	model.InvalidateSubscriptionPlanCache(plan.Id)
+	recorder = httptest.NewRecorder()
+	ctx, _ = gin.CreateTestContext(recorder)
+	body = fmt.Sprintf(`{"id":%d,"name":"Renamed code","quota":0,"reward_type":"subscription","subscription_plan_id":%d}`, redemption.Id, plan.Id)
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/redemption/", bytes.NewBufferString(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set("id", admin.Id)
+	UpdateRedemption(ctx)
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+	require.NoError(t, db.First(&stored, redemption.Id).Error)
+	assert.Equal(t, lockedSnapshot, stored.SubscriptionSnapshot, "editing metadata must not change promised subscription rights")
 }
 
 func TestAddRedemptionCreatesSubscriptionSnapshot(t *testing.T) {

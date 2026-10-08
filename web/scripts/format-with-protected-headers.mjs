@@ -17,8 +17,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { spawnSync } from 'node:child_process'
-import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, extname, join, relative, resolve } from 'node:path'
 
 const mode = process.argv[2]
 
@@ -49,12 +58,7 @@ const headerExtensions = new Set([
   '.tsx',
 ])
 const protectedHeaderPattern =
-  /^\/\*\nCopyright \(C\)[\s\S]*?QuantumNous[\s\S]*?\*\/\n+/
-
-function extensionOf(path) {
-  const index = path.lastIndexOf('.')
-  return index === -1 ? '' : path.slice(index)
-}
+  /^\/\*\r?\nCopyright \(C\) [^\r\n]*QuantumNous\r?\n[\s\S]*?\*\/\r?\n+/
 
 function walk(dir, files = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -64,96 +68,68 @@ function walk(dir, files = []) {
       }
       continue
     }
-
     if (entry.isFile()) {
       files.push(join(dir, entry.name))
     }
   }
-
   return files
-}
-
-function snapshotFiles(files) {
-  const snapshot = new Map()
-  for (const file of files) {
-    snapshot.set(file, readFileSync(file))
-  }
-  return snapshot
-}
-
-function restoreSnapshot(snapshot) {
-  for (const [file, content] of snapshot) {
-    writeFileSync(file, content)
-  }
-}
-
-function stripProtectedHeaders(files) {
-  const headers = new Map()
-
-  for (const file of files) {
-    if (!headerExtensions.has(extensionOf(file))) {
-      continue
-    }
-
-    const content = readFileSync(file, 'utf8')
-    const match = content.match(protectedHeaderPattern)
-    if (!match) {
-      continue
-    }
-
-    headers.set(file, match[0])
-    writeFileSync(file, content.slice(match[0].length))
-  }
-
-  return headers
-}
-
-function restoreProtectedHeaders(headers) {
-  for (const [file, header] of headers) {
-    const content = readFileSync(file, 'utf8').replace(/^\n+/, '')
-    if (!content.startsWith(header)) {
-      writeFileSync(file, header + content)
-    }
-  }
-}
-
-function listChangedFiles(before, files) {
-  const changed = []
-
-  for (const file of files) {
-    const previous = before.get(file)
-    const current = readFileSync(file)
-    if (!previous || !previous.equals(current)) {
-      changed.push(relative(root, file))
-    }
-  }
-
-  return changed
 }
 
 const files = walk(root).filter(
   (file) => statSync(file).size < 10 * 1024 * 1024
 )
-const before = mode === '--check' ? snapshotFiles(files) : null
-let headers = new Map()
+const stagingRoot = mkdtempSync(join(tmpdir(), 'newapi-format-'))
+const snapshots = new Map()
 let exitCode = 0
 
 try {
-  headers = stripProtectedHeaders(files)
+  // Format copies so check mode never strips live source headers or rewrites
+  // files held open by Bun/Node on Windows, including this running script.
+  for (const file of files) {
+    const original = readFileSync(file)
+    const stagedFile = join(stagingRoot, relative(root, file))
+    let header = ''
+    let body = original
+    if (headerExtensions.has(extname(file))) {
+      const source = original.toString('utf8')
+      const match = source.match(protectedHeaderPattern)
+      if (match) {
+        header = match[0]
+        body = Buffer.from(source.slice(header.length))
+      }
+    }
+    snapshots.set(file, { original, header, stagedFile })
+    mkdirSync(dirname(stagedFile), { recursive: true })
+    writeFileSync(stagedFile, body)
+  }
+
   const result = spawnSync(
     'oxfmt',
     ['-c', '.oxfmtrc.json', '--ignore-path', '.gitignore', '--write', '.'],
-    {
-      cwd: root,
-      stdio: 'inherit',
-    }
+    { cwd: stagingRoot, stdio: 'inherit' }
   )
   exitCode = result.status ?? 1
-  restoreProtectedHeaders(headers)
-
-  if (mode === '--check' && exitCode === 0) {
-    const changed = listChangedFiles(before, files)
-    if (changed.length > 0) {
+  if (result.error) {
+    console.error(result.error.message)
+  }
+  if (exitCode === 0) {
+    const changed = []
+    for (const [file, snapshot] of snapshots) {
+      const body = readFileSync(snapshot.stagedFile)
+      const formatted = snapshot.header
+        ? Buffer.from(
+            snapshot.header + body.toString('utf8').replace(/^\n+/, '')
+          )
+        : body
+      if (snapshot.original.equals(formatted)) {
+        continue
+      }
+      changed.push(relative(root, file))
+      if (mode === '--write') {
+        writeFileSync(file, formatted)
+      }
+    }
+    if (mode === '--check' && changed.length > 0) {
       console.error('Format issues found in protected-header-safe check:')
       for (const file of changed) {
         console.error(file)
@@ -162,11 +138,11 @@ try {
     }
   }
 } finally {
-  if (mode === '--check' && before) {
-    restoreSnapshot(before)
-  } else {
-    restoreProtectedHeaders(headers)
+  const ownedTempPrefix = resolve(tmpdir(), 'newapi-format-')
+  if (!resolve(stagingRoot).startsWith(ownedTempPrefix)) {
+    throw new Error('Refusing to remove an unexpected formatter directory')
   }
+  rmSync(stagingRoot, { recursive: true, force: true })
 }
 
 process.exit(exitCode)

@@ -381,6 +381,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	finalQuota := info.PriceData.Quota
 	if parsed.Immediate != nil && parsed.Immediate.Status == model.TaskStatusFailure {
 		finalQuota = 0
+		info.PriceData.ResourceQuota = 0
 	} else if snap := info.TieredBillingSnapshot; snap != nil {
 		if parsed.Immediate != nil && parsed.Immediate.Status == model.TaskStatusSuccess && len(parsed.Immediate.UsageFacts) > 0 {
 			settlement, facts, err := service.EvaluateTaskCompletionUsage(snap, parsed.Immediate.UsageFacts)
@@ -388,6 +389,9 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 				logger.LogWarn(c, fmt.Sprintf("task immediate usage settlement failed; retaining reserved quota: %v", err))
 			} else {
 				finalQuota = settlement.ActualQuotaAfterGroup
+				resourceQuota, resourceClamp := common.QuotaRoundChecked(settlement.ActualQuotaBeforeGroup)
+				info.PriceData.ResourceQuota = resourceQuota
+				noteTaskQuotaClamp(info, resourceClamp)
 				snap.UsageFacts = facts
 				snap.EstimatedTier = settlement.MatchedTier
 				noteTaskQuotaClamp(info, settlement.Clamp)
@@ -654,6 +658,16 @@ func mapTaskStatusToSimple(status model.TaskStatus) string {
 }
 
 func TaskModel2Dto(task *model.Task) *dto.TaskDto {
+	properties := task.Properties
+	properties.UpstreamModelName = ""
+	resultURL := task.GetResultURL()
+	data := task.Data
+	if task.Status == model.TaskStatusFailure {
+		resultURL = ""
+		// Only the sanitized failure reason is public; provider error bodies can
+		// contain channel credentials and mapped model names.
+		data = nil
+	}
 	return &dto.TaskDto{
 		ID:         task.ID,
 		CreatedAt:  task.CreatedAt,
@@ -666,14 +680,14 @@ func TaskModel2Dto(task *model.Task) *dto.TaskDto {
 		Quota:      task.Quota,
 		Action:     constant.NormalizeTaskAction(task.Action),
 		Status:     string(task.Status),
-		FailReason: task.FailReason,
-		ResultURL:  task.GetResultURL(),
+		FailReason: service.SanitizeTaskFailureReason(task),
+		ResultURL:  resultURL,
 		SubmitTime: task.SubmitTime,
 		StartTime:  task.StartTime,
 		FinishTime: task.FinishTime,
 		Progress:   task.Progress,
-		Properties: task.Properties,
+		Properties: properties,
 		Username:   task.Username,
-		Data:       task.Data,
+		Data:       data,
 	}
 }

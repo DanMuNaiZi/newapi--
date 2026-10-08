@@ -115,7 +115,7 @@ func authorizeUserPreview(c *gin.Context, actor *model.UserBase, identity servic
 		writeUserPreviewRejection(c, actor, claims.TargetID, "user.preview_rejected", http.StatusForbidden)
 		return false
 	}
-	if !userPreviewPathAllowed(c.Request.URL.Path) {
+	if !userPreviewPathAllowed(c.FullPath()) {
 		writeUserPreviewRejection(c, actor, claims.TargetID, "user.preview_rejected", http.StatusForbidden)
 		return false
 	}
@@ -141,14 +141,18 @@ func authorizeUserPreview(c *gin.Context, actor *model.UserBase, identity servic
 }
 
 func userPreviewPathAllowed(path string) bool {
-	for _, prefix := range []string{
-		"/api/user/self", "/api/user/models", "/api/user/topup/self", "/api/user/topup/info",
-		"/api/user/checkin", "/api/log/self", "/api/data/self", "/api/data/flow/self",
-		"/api/midjourney/self", "/api/task/self", "/api/subscription/plans", "/api/subscription/self",
-	} {
-		if path == prefix || strings.HasPrefix(path, prefix+"/") {
-			return true
-		}
+	switch path {
+	case "/api/user/self", "/api/user/self/groups", "/api/user/models", "/api/user/aff", "/api/user/checkin",
+		"/api/user/topup/self", "/api/subscription/plans", "/api/subscription/self",
+		"/api/log/self", "/api/log/self/stat", "/api/log/self/search", "/api/data/self", "/api/data/flow/self",
+		"/api/mj/self", "/api/task/self", "/api/task/:task_id/artifacts", "/api/usage-rankings",
+		"/api/public-pool/status", "/api/public-pool/sites", "/api/public-pool/contributions/self",
+		"/api/referral-campaign/self", "/api/lottery/self", "/api/lottery/plans/:id",
+		"/api/lottery/plans/:id/participants", "/api/lottery/plans/:id/participants/page",
+		"/api/lottery/plans/:id/results", "/api/lottery/plans/:id/results/page", "/api/lottery/results/self",
+		"/api/lottery/results/self/page", "/api/lottery/results/self/pending",
+		"/api/lottery/notifications/self", "/api/lottery/notifications/self/page":
+		return true
 	}
 	return false
 }

@@ -74,6 +74,8 @@ const (
 	LotteryDrawRunStatusEmpty    LotteryDrawRunStatus = "empty"
 )
 
+var ErrLotteryPlanForbidden = errors.New("lottery plan is not visible to this user")
+
 type LotteryPlan struct {
 	Id                    int                    `json:"id"`
 	Title                 string                 `json:"title" gorm:"type:varchar(128);not null"`
@@ -234,17 +236,33 @@ type LotteryPlanView struct {
 }
 
 type LotteryPublicParticipantView struct {
+	Id          int    `json:"id"`
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
 	JoinedAt    int64  `json:"joined_at"`
+	IsSelf      bool   `json:"is_self"`
 }
 
 type LotteryPublicResultView struct {
+	Id          int               `json:"id"`
 	Username    string            `json:"username"`
 	DisplayName string            `json:"display_name"`
 	PrizeName   string            `json:"prize_name"`
 	RewardType  LotteryRewardType `json:"reward_type"`
 	CreatedAt   int64             `json:"created_at"`
+	IsSelf      bool              `json:"is_self"`
+}
+
+type LotteryPublicParticipantPage struct {
+	Items      []LotteryPublicParticipantView `json:"items"`
+	NextCursor string                         `json:"next_cursor,omitempty"`
+	HasMore    bool                           `json:"has_more"`
+}
+
+type LotteryPublicResultPage struct {
+	Items      []LotteryPublicResultView `json:"items"`
+	NextCursor string                    `json:"next_cursor,omitempty"`
+	HasMore    bool                      `json:"has_more"`
 }
 
 // LotteryPlanPublishedUpdate contains the only mutable settings once a plan
@@ -506,12 +524,44 @@ func ListLotteryPlansForUser(userId int) ([]LotteryPlanView, error) {
 	return views, nil
 }
 
+func GetLotteryPlanForUser(planId int, userId int) (*LotteryPlanView, error) {
+	plan, _, participated, err := getVisibleLotteryPlanForUser(planId, userId)
+	if err != nil {
+		return nil, err
+	}
+	view := &LotteryPlanView{LotteryPlan: plan, Joined: participated}
+	if err := DB.Model(&LotteryParticipant{}).
+		Where("plan_id = ? AND status = ?", plan.Id, LotteryParticipantStatusJoined).
+		Count(&view.ParticipantCount).Error; err != nil {
+		return nil, err
+	}
+	if err := DB.Model(&LotteryResult{}).
+		Where("plan_id = ?", plan.Id).
+		Count(&view.WinnerCount).Error; err != nil {
+		return nil, err
+	}
+	return view, nil
+}
+
 func ListLotteryPlansForAdmin() ([]LotteryPlan, error) {
 	var plans []LotteryPlan
 	if err := DB.Order("created_at desc, id desc").Find(&plans).Error; err != nil {
 		return nil, err
 	}
 	return plans, nil
+}
+
+// GetLotteryPlanForAdmin loads a plan by ID without applying end-user
+// eligibility rules. The admin router is responsible for authorization.
+func GetLotteryPlanForAdmin(planId int) (*LotteryPlan, error) {
+	if planId <= 0 {
+		return nil, errors.New("invalid lottery plan")
+	}
+	var plan LotteryPlan
+	if err := DB.First(&plan, planId).Error; err != nil {
+		return nil, err
+	}
+	return &plan, nil
 }
 
 func ListLotteryPrizes(planId int) ([]LotteryPrize, error) {
@@ -678,12 +728,59 @@ func ListLotteryParticipantsForUser(planId int, userId int) ([]LotteryPublicPart
 			continue
 		}
 		views = append(views, LotteryPublicParticipantView{
-			Username:    participant.Username,
-			DisplayName: participant.DisplayName,
+			Id:          participant.Id,
+			Username:    common.MaskUsername(participant.Username),
+			DisplayName: common.MaskUsername(participant.DisplayName),
 			JoinedAt:    participant.JoinedAt,
+			IsSelf:      participant.UserId == userId,
 		})
 	}
 	return views, nil
+}
+
+func ListLotteryParticipantsForUserPage(planId int, userId int, limit int, beforeCreatedAt int64, beforeId int) (*LotteryPublicParticipantPage, error) {
+	if err := ensureLotteryPlanVisibleToUser(planId, userId); err != nil {
+		return nil, err
+	}
+	if err := validateLotteryPublicPage(limit, beforeCreatedAt, beforeId); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = lotterySelfHistoryDefaultLimit
+	}
+	if limit > lotterySelfHistoryMaxLimit {
+		limit = lotterySelfHistoryMaxLimit
+	}
+	query := DB.Model(&LotteryParticipant{}).
+		Where("lottery_participants.plan_id = ? AND lottery_participants.status = ?", planId, LotteryParticipantStatusJoined)
+	if beforeId > 0 {
+		query = query.Where("(lottery_participants.joined_at < ?) OR (lottery_participants.joined_at = ? AND lottery_participants.id < ?)", beforeCreatedAt, beforeCreatedAt, beforeId)
+	}
+	var rows []LotteryParticipantView
+	if err := query.
+		Select("lottery_participants.*, users.username AS username, users.display_name AS display_name").
+		Joins("LEFT JOIN users ON users.id = lottery_participants.user_id").
+		Order("lottery_participants.joined_at DESC").
+		Order("lottery_participants.id DESC").
+		Limit(limit + 1).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	page := &LotteryPublicParticipantPage{HasMore: len(rows) > limit}
+	if page.HasMore {
+		rows = rows[:limit]
+	}
+	page.Items = make([]LotteryPublicParticipantView, 0, len(rows))
+	for _, row := range rows {
+		page.Items = append(page.Items, LotteryPublicParticipantView{
+			Id:          row.Id,
+			Username:    common.MaskUsername(row.Username),
+			DisplayName: common.MaskUsername(row.DisplayName),
+			JoinedAt:    row.JoinedAt,
+			IsSelf:      row.UserId == userId,
+		})
+	}
+	return page, nil
 }
 
 func ListLotteryResultsForUserPlan(planId int, userId int) ([]LotteryPublicResultView, error) {
@@ -697,14 +794,70 @@ func ListLotteryResultsForUserPlan(planId int, userId int) ([]LotteryPublicResul
 	views := make([]LotteryPublicResultView, 0, len(results))
 	for _, result := range results {
 		views = append(views, LotteryPublicResultView{
-			Username:    result.Username,
-			DisplayName: result.DisplayName,
+			Id:          result.Id,
+			Username:    common.MaskUsername(result.Username),
+			DisplayName: common.MaskUsername(result.DisplayName),
 			PrizeName:   result.PrizeName,
 			RewardType:  result.RewardType,
 			CreatedAt:   result.CreatedAt,
+			IsSelf:      result.UserId == userId,
 		})
 	}
 	return views, nil
+}
+
+func ListLotteryResultsForUserPlanPage(planId int, userId int, limit int, beforeCreatedAt int64, beforeId int) (*LotteryPublicResultPage, error) {
+	if err := ensureLotteryPlanVisibleToUser(planId, userId); err != nil {
+		return nil, err
+	}
+	if err := validateLotteryPublicPage(limit, beforeCreatedAt, beforeId); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = lotterySelfHistoryDefaultLimit
+	}
+	if limit > lotterySelfHistoryMaxLimit {
+		limit = lotterySelfHistoryMaxLimit
+	}
+	query := DB.Model(&LotteryResult{}).Where("lottery_results.plan_id = ?", planId)
+	if beforeId > 0 {
+		query = query.Where("(lottery_results.created_at < ?) OR (lottery_results.created_at = ? AND lottery_results.id < ?)", beforeCreatedAt, beforeCreatedAt, beforeId)
+	}
+	var rows []LotteryResultView
+	if err := query.
+		Select("lottery_results.*, users.username AS username, users.display_name AS display_name, lottery_prizes.name AS prize_name").
+		Joins("LEFT JOIN users ON users.id = lottery_results.user_id").
+		Joins("LEFT JOIN lottery_prizes ON lottery_prizes.id = lottery_results.prize_id").
+		Order("lottery_results.created_at DESC").
+		Order("lottery_results.id DESC").
+		Limit(limit + 1).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	page := &LotteryPublicResultPage{HasMore: len(rows) > limit}
+	if page.HasMore {
+		rows = rows[:limit]
+	}
+	page.Items = make([]LotteryPublicResultView, 0, len(rows))
+	for _, row := range rows {
+		page.Items = append(page.Items, LotteryPublicResultView{
+			Id:          row.Id,
+			Username:    common.MaskUsername(row.Username),
+			DisplayName: common.MaskUsername(row.DisplayName),
+			PrizeName:   row.PrizeName,
+			RewardType:  row.RewardType,
+			CreatedAt:   row.CreatedAt,
+			IsSelf:      row.UserId == userId,
+		})
+	}
+	return page, nil
+}
+
+func validateLotteryPublicPage(limit int, beforeCreatedAt int64, beforeId int) error {
+	if limit < 0 || (beforeId == 0 && beforeCreatedAt != 0) || beforeCreatedAt < 0 || beforeId < 0 {
+		return errors.New("invalid lottery page")
+	}
+	return nil
 }
 
 func ListLotteryNotificationsForUser(userId int) ([]LotteryNotification, error) {
@@ -823,32 +976,37 @@ func ListLotteryParticipants(planId int) ([]LotteryParticipantView, error) {
 }
 
 func ensureLotteryPlanVisibleToUser(planId int, userId int) error {
+	_, _, _, err := getVisibleLotteryPlanForUser(planId, userId)
+	return err
+}
+
+func getVisibleLotteryPlanForUser(planId int, userId int) (LotteryPlan, User, bool, error) {
 	if planId <= 0 || userId <= 0 {
-		return errors.New("invalid lottery visibility request")
+		return LotteryPlan{}, User{}, false, errors.New("invalid lottery visibility request")
 	}
 	var plan LotteryPlan
 	if err := DB.First(&plan, planId).Error; err != nil {
-		return err
+		return LotteryPlan{}, User{}, false, err
 	}
 	var user User
 	if err := DB.First(&user, userId).Error; err != nil {
-		return err
+		return LotteryPlan{}, User{}, false, err
 	}
 	var participantCount int64
 	if err := DB.Model(&LotteryParticipant{}).
 		Where("plan_id = ? AND user_id = ? AND status = ?", plan.Id, user.Id, LotteryParticipantStatusJoined).
 		Count(&participantCount).Error; err != nil {
-		return err
+		return LotteryPlan{}, User{}, false, err
 	}
 	isAdministrator := user.Role == common.RoleAdminUser || user.Role == common.RoleRootUser
 	visible, err := isLotteryPlanVisibleToUser(plan, user, isAdministrator, participantCount > 0)
 	if err != nil {
-		return err
+		return LotteryPlan{}, User{}, false, err
 	}
 	if !visible {
-		return errors.New("lottery plan is not visible to this user")
+		return LotteryPlan{}, User{}, false, ErrLotteryPlanForbidden
 	}
-	return nil
+	return plan, user, participantCount > 0, nil
 }
 
 func isLotteryPlanVisibleToUser(plan LotteryPlan, user User, isAdministrator bool, participated bool) (bool, error) {
@@ -1247,10 +1405,15 @@ func lotteryResultFromPrize(planId int, userId int, prize LotteryPrize, now int6
 	} else if prize.ClaimExpireSeconds > 0 {
 		claimExpiresAt = now + prize.ClaimExpireSeconds
 	}
+	// Keep a complete immutable copy of the selected prize. The prize row is
+	// intentionally editable for draft plans and may be removed after a draw;
+	// fulfillment must use the values that were actually awarded.
+	prizeSnapshot, _ := common.Marshal(prize)
 	return LotteryResult{
 		PlanId:               planId,
 		UserId:               userId,
 		PrizeId:              prize.Id,
+		PrizeSnapshot:        string(prizeSnapshot),
 		RewardType:           prize.RewardType,
 		Quota:                prize.Quota,
 		SubscriptionPlanId:   prize.SubscriptionPlanId,
@@ -1277,7 +1440,10 @@ func FulfillLotteryResult(resultId int) error {
 }
 
 func fulfillLotteryResult(resultId int, requestedUserId int, allowAuto bool) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
+	var recipientUserId int
+	creditedQuota := 0
+	subscriptionGranted := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
 		var result LotteryResult
 		if err := lockForUpdate(tx).First(&result, resultId).Error; err != nil {
 			return err
@@ -1292,16 +1458,25 @@ func fulfillLotteryResult(resultId int, requestedUserId int, allowAuto bool) err
 		if result.ClaimExpiresAt > 0 && result.ClaimExpiresAt <= now {
 			return errors.New("lottery reward claim has expired")
 		}
-		if !allowAuto && result.FulfillmentMode == LotteryFulfillmentAuto {
-			return errors.New("lottery reward is fulfilled automatically")
+		if allowAuto {
+			if result.FulfillmentMode != LotteryFulfillmentAuto || result.FulfillmentStatus != "pending_auto" {
+				return errors.New("lottery reward is not pending automatic fulfillment")
+			}
+		} else if result.FulfillmentMode != LotteryFulfillmentSelfClaim || result.FulfillmentStatus != "pending" {
+			return errors.New("lottery reward is not pending self-claim")
 		}
 		switch result.RewardType {
 		case LotteryRewardQuota:
-			if result.Quota <= 0 {
+			if result.Quota <= 0 || result.Quota > common.MaxQuota {
 				return errors.New("invalid lottery quota reward")
 			}
-			if err := tx.Model(&User{}).Where("id = ?", result.UserId).Update("quota", gorm.Expr("quota + ?", result.Quota)).Error; err != nil {
-				return err
+			credited := tx.Model(&User{}).Where("id = ? AND quota <= ?", result.UserId, common.MaxWalletQuota-result.Quota).
+				Update("quota", gorm.Expr("quota + ?", result.Quota))
+			if credited.Error != nil {
+				return credited.Error
+			}
+			if credited.RowsAffected != 1 {
+				return ErrWalletQuotaLimitExceeded
 			}
 		case LotteryRewardSubscription:
 			if result.SubscriptionSnapshot == "" {
@@ -1320,11 +1495,29 @@ func fulfillLotteryResult(resultId int, requestedUserId int, allowAuto bool) err
 		default:
 			return errors.New("invalid lottery reward type")
 		}
-		return tx.Model(&LotteryResult{}).Where("id = ? AND fulfillment_status != ?", result.Id, "fulfilled").Updates(map[string]interface{}{
+		if err := tx.Model(&LotteryResult{}).Where("id = ? AND fulfillment_status = ?", result.Id, result.FulfillmentStatus).Updates(map[string]any{
 			"fulfillment_status": "fulfilled",
 			"claimed_at":         now,
-		}).Error
+		}).Error; err != nil {
+			return err
+		}
+		recipientUserId = result.UserId
+		if result.RewardType == LotteryRewardQuota {
+			creditedQuota = result.Quota
+		} else {
+			subscriptionGranted = true
+		}
+		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if creditedQuota > 0 {
+		syncCreditUserQuotaCache(recipientUserId, creditedQuota, "lottery reward")
+	} else if subscriptionGranted {
+		refreshSubscriptionUserGroupCache(recipientUserId, "lottery subscription reward")
+	}
+	return nil
 }
 
 func selectWeightedLotteryParticipant(candidates []LotteryParticipant) (LotteryParticipant, error) {

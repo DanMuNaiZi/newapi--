@@ -18,6 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 
+import {
+  getRewardAmountError,
+  normalizeRewardAmount,
+} from '@/lib/reward-amount'
+
 import type { LotteryPlanCreatePayload } from '../types'
 
 export const LOTTERY_DATABASE_INT_MAX = 2_147_483_647
@@ -31,6 +36,8 @@ const prizeSchema = z
       .min(1, 'Prize quantity must be at least 1')
       .max(LOTTERY_DATABASE_INT_MAX, 'Prize quantity cannot exceed 2147483647'),
     reward_type: z.enum(['quota', 'subscription']),
+    reward_amount: z.string().optional(),
+    reward_unit: z.enum(['usd', 'cny', 'quota']).optional(),
     quota: z
       .number({ error: 'Quota reward must be greater than 0' })
       .int()
@@ -48,12 +55,34 @@ const prizeSchema = z
       .max(3650, 'Claim expiry cannot exceed 3650 days'),
   })
   .superRefine((prize, context) => {
-    if (prize.reward_type === 'quota' && prize.quota <= 0) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Quota reward must be greater than 0',
-        path: ['quota'],
-      })
+    if (prize.reward_type === 'quota') {
+      if (prize.reward_amount || prize.reward_unit) {
+        if (!prize.reward_amount || !prize.reward_unit) {
+          context.addIssue({
+            code: 'custom',
+            message: 'Reward amount and unit must be provided together',
+            path: ['reward_amount'],
+          })
+        } else {
+          const error = getRewardAmountError(
+            prize.reward_amount,
+            prize.reward_unit
+          )
+          if (error) {
+            context.addIssue({
+              code: 'custom',
+              message: error,
+              path: ['reward_amount'],
+            })
+          }
+        }
+      } else if (prize.quota <= 0) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Quota reward must be greater than 0',
+          path: ['quota'],
+        })
+      }
     }
     if (
       prize.reward_type === 'subscription' &&
@@ -140,6 +169,8 @@ export const DEFAULT_LOTTERY_PRIZE: LotteryAdminFormValues['prizes'][number] = {
   quantity: 1,
   reward_type: 'quota',
   quota: 100,
+  reward_amount: '1',
+  reward_unit: 'usd',
   subscription_plan_id: 0,
   fulfillment_mode: 'auto',
   claim_expire_days: 7,
@@ -202,7 +233,12 @@ export function buildLotteryPlanPayload(
       name: prize.name.trim(),
       quantity: prize.quantity,
       reward_type: prize.reward_type,
-      quota: prize.reward_type === 'quota' ? prize.quota : 0,
+      ...(prize.reward_type === 'quota' && prize.reward_amount
+        ? {
+            reward_amount: normalizeRewardAmount(prize.reward_amount),
+            reward_unit: prize.reward_unit ?? 'usd',
+          }
+        : { quota: prize.reward_type === 'quota' ? prize.quota : 0 }),
       subscription_plan_id:
         prize.reward_type === 'subscription' ? prize.subscription_plan_id : 0,
       fulfillment_mode: prize.fulfillment_mode,

@@ -18,6 +18,7 @@ import (
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
@@ -49,7 +50,7 @@ func GetTask(c *gin.Context) {
 	if createdAt == 0 {
 		createdAt = task.SubmitTime
 	}
-	failReason := task.FailReason
+	failReason := service.SanitizeTaskFailureReason(task)
 	if task.Status == model.TaskStatusSuccess && taskFailReasonIsLegacyResultURL(task.FailReason) {
 		failReason = ""
 	}
@@ -415,7 +416,7 @@ func GetAllTask(c *gin.Context) {
 	queryParams := model.SyncTaskQueryParams{Platform: constant.TaskPlatform(c.Query("platform")), TaskID: c.Query("task_id"), Status: c.Query("status"), Action: c.Query("action"), StartTimestamp: startTimestamp, EndTimestamp: endTimestamp, ChannelID: c.Query("channel_id")}
 	items := model.TaskGetAllTasks(pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
 	pageInfo.SetTotal(int(model.TaskCountAllTasks(queryParams)))
-	pageInfo.SetItems(tasksToDto(items, true, c.GetInt("role")))
+	pageInfo.SetItems(tasksToDto(items, true, c.GetInt("role"), authz.Can(c.GetInt("id"), c.GetInt("role"), authz.UsageLogActualModelView)))
 	common.ApiSuccess(c, pageInfo)
 }
 
@@ -431,7 +432,7 @@ func GetUserTask(c *gin.Context) {
 	common.ApiSuccess(c, pageInfo)
 }
 
-func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskDto {
+func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int, actualModelAccess ...bool) []*dto.TaskDto {
 	var userIDMap map[int]*model.UserBase
 	if fillUser {
 		userIDMap = make(map[int]*model.UserBase)
@@ -447,12 +448,15 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 	}
 	result := make([]*dto.TaskDto, len(tasks))
 	for i, task := range tasks {
+		item := relay.TaskModel2Dto(task)
 		if fillUser {
 			if user, ok := userIDMap[task.UserId]; ok {
-				task.Username = user.Username
+				item.Username = user.Username
 			}
 		}
-		item := relay.TaskModel2Dto(task)
+		if viewerRole >= common.RoleAuthorizedAdmin && len(actualModelAccess) > 0 && actualModelAccess[0] {
+			item.Properties = task.Properties
+		}
 		item.LegacyVideoAvailable = legacyVideoAvailable(task)
 		item.ResultDiscarded = task.PrivateData.ResultDiscarded
 		if task.Status == model.TaskStatusSuccess {

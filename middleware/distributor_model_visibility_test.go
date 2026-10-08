@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetModelRequestKeepsClientModelWhenResponsesCompactAddsSuffix(t *testing.T) {
+func TestGetModelRequestKeepsClientModelForResponsesCompact(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -27,5 +27,8 @@ func TestGetModelRequestKeepsClientModelWhenResponsesCompactAddsSuffix(t *testin
 	require.True(t, shouldSelectChannel)
 	require.NotNil(t, request)
 	require.Equal(t, "gpt-5.6-sol", request.RequestModelName)
-	require.Equal(t, "gpt-5.6-sol-openai-compact", request.Model)
+	// Compact routing no longer mutates the model name. The client model is
+	// retained as both the routing and request identity; any provider mapping
+	// is applied later by the relay adapter.
+	require.Equal(t, "gpt-5.6-sol", request.Model)
 }

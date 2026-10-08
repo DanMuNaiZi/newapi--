@@ -18,6 +18,49 @@ type channelErrorDisplayPolicy struct {
 	Record  *model.ChannelErrorRecord
 }
 
+// shouldProcessRelayChannelError separates failures produced by the selected
+// upstream channel from failures produced locally while preparing the request.
+// Local validation, billing, authentication, and configuration errors must
+// keep their existing client contract and must not be recorded as channel
+// health failures or hidden behind the upstream generic message.
+func shouldProcessRelayChannelError(err *types.NewAPIError) bool {
+	if err == nil {
+		return false
+	}
+	// Provider adapters may legitimately return an OpenAI/Claude error whose
+	// machine code happens to match one of the local error constants (for
+	// example, "invalid_request"). Only classify those constants as local when
+	// the gateway itself created a NewAPIError envelope.
+	if err.GetErrorType() != types.ErrorTypeNewAPIError {
+		return true
+	}
+
+	switch err.GetErrorCode() {
+	case types.ErrorCodeInvalidRequest,
+		types.ErrorCodeSensitiveWordsDetected,
+		types.ErrorCodeViolationFeeGrokCSAM,
+		types.ErrorCodeCountTokenFailed,
+		types.ErrorCodeModelPriceError,
+		types.ErrorCodeInvalidApiType,
+		types.ErrorCodeJsonMarshalFailed,
+		types.ErrorCodeGenRelayInfoFailed,
+		types.ErrorCodeReadRequestBodyFailed,
+		types.ErrorCodeConvertRequestFailed,
+		types.ErrorCodeAccessDenied,
+		types.ErrorCodeBadRequestBody,
+		types.ErrorCodeQueryDataError,
+		types.ErrorCodeUpdateDataError,
+		types.ErrorCodeInsufficientUserQuota,
+		types.ErrorCodePreConsumeTokenQuotaFailed,
+		types.ErrorCodeChannelParamOverrideInvalid,
+		types.ErrorCodeChannelHeaderOverrideInvalid,
+		types.ErrorCodeChannelModelMappedError:
+		return false
+	default:
+		return true
+	}
+}
+
 func buildClientRelayError(relayFormat types.RelayFormat, relayInfo *relaycommon.RelayInfo, upstreamErr *types.NewAPIError, policy *channelErrorDisplayPolicy) *types.NewAPIError {
 	if upstreamErr == nil {
 		return nil
@@ -60,14 +103,7 @@ func buildClientRelayError(relayFormat types.RelayFormat, relayInfo *relaycommon
 		return clientErr
 	}
 
-	message := relaycommon.ClientVisibleErrorMessage(relayInfo, clientErr.Error())
-	secrets := make([]string, 0, 1)
-	if relayInfo != nil && relayInfo.ChannelMeta != nil {
-		secrets = append(secrets, relayInfo.ApiKey)
-	}
-	clientErr.SetMessage(service.SanitizeUpstreamErrorMessage(message, secrets...))
-	clientErr.ClearMetadata()
-	return clientErr
+	return service.SanitizeClientUpstreamError(relayInfo, upstreamErr)
 }
 
 func setGenericClientRelayError(relayFormat types.RelayFormat, clientErr *types.NewAPIError, message string, statusCode int) {
@@ -105,14 +141,15 @@ func processRelayChannelError(c *gin.Context, channelError types.ChannelError, e
 	}
 	sampleMessage := relaycommon.ClientVisibleErrorMessage(relayInfo, err.MaskSensitiveError())
 	sampleMessage = service.SanitizeUpstreamErrorMessage(sampleMessage, secrets...)
+	errorType, errorCode := service.ChannelErrorAuditLabels(relayInfo, err, secrets...)
 	record, recordErr := model.UpsertChannelErrorRecord(model.ChannelErrorRecordInput{
 		ChannelID:          channelError.ChannelId,
 		RequestPath:        requestPath,
 		RequestModel:       requestModel,
 		UpstreamStatusCode: err.GetOriginalStatusCode(),
 		FinalStatusCode:    err.StatusCode,
-		ErrorType:          string(err.GetErrorType()),
-		ErrorCode:          string(err.GetErrorCode()),
+		ErrorType:          errorType,
+		ErrorCode:          errorCode,
 		SampleMessage:      sampleMessage,
 		RequestID:          c.GetString(common.RequestIdKey),
 		MultiKeyIndex:      multiKeyIndex,

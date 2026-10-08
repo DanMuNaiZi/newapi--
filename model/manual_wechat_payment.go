@@ -177,6 +177,11 @@ func GetAdminTopUps(pageInfo *common.PageInfo, filter AdminTopUpFilter) ([]*Admi
 	if filter.PaymentProvider != "" {
 		query = query.Where("top_ups.payment_provider = ?", filter.PaymentProvider)
 	}
+	if filter.PaymentProvider == PaymentProviderManualWechat {
+		// Completed subscriptions retain zero-amount entries in the historical
+		// ledger, while the manual payment balance tab lists quota purchases.
+		query = query.Where("top_ups.amount > ?", 0)
+	}
 	if filter.Status != "" {
 		query = query.Where("top_ups.status = ?", filter.Status)
 	}

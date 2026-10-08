@@ -75,11 +75,15 @@ func normalizeQuotaReward(spec dto.RewardSpec) (model.RewardSnapshot, error) {
 	if rounded.LessThan(decimal.NewFromInt(1)) || rounded.GreaterThan(decimal.NewFromInt(common.MaxQuota)) {
 		return model.RewardSnapshot{}, errors.New("reward quota is outside the supported range")
 	}
+	quota, clamp := common.QuotaFromDecimalChecked(rounded)
+	if clamp != nil {
+		return model.RewardSnapshot{}, errors.New("reward quota is outside the supported range")
+	}
 	return model.RewardSnapshot{
 		Type:            model.RewardTypeQuota,
 		InputAmount:     amount.String(),
 		InputUnit:       unit,
-		Quota:           common.QuotaFromDecimal(rounded),
+		Quota:           quota,
 		QuotaPerUnit:    strconv.FormatFloat(common.QuotaPerUnit, 'f', -1, 64),
 		USDExchangeRate: strconv.FormatFloat(operation_setting.USDExchangeRate, 'f', -1, 64),
 	}, nil

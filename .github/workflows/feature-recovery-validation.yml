@@ -1,0 +1,106 @@
+name: Feature recovery validation
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/channel-error-display-upstream-9a0be875
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recovery-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GOWORK: 'off'
+      AUDIT_MYSQL_DSN: root:recovery_fixture@tcp(127.0.0.1:3306)/mysql?charset=utf8mb4&parseTime=True&loc=Local
+      AUDIT_POSTGRES_DSN: postgres://newapi_audit:recovery_fixture@127.0.0.1:5432/postgres?sslmode=disable
+    services:
+      mysql:
+        image: mysql:5.7.44
+        env:
+          MYSQL_ROOT_PASSWORD: recovery_fixture
+          MYSQL_ROOT_HOST: '%'
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -precovery_fixture"
+          --health-interval=10s --health-timeout=5s --health-retries=15
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: newapi_audit
+          POSTGRES_PASSWORD: recovery_fixture
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U newapi_audit -d postgres"
+          --health-interval=10s --health-timeout=5s --health-retries=15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.26.8'
+          cache-dependency-path: |
+            go.sum
+            relaykit/go.sum
+      - name: Create frontend embed placeholder
+        run: mkdir -p web/dist && touch web/dist/index.html
+      - name: Backend regression and database matrix
+        run: go test ./... -count=1 -timeout 20m
+      - name: Build backend
+        run: go build ./...
+      - name: Test and build relaykit independently
+        working-directory: relaykit
+        run: |
+          go test ./... -count=1
+          go build ./...
+      - name: Check reachable Go vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.4.0'
+      - run: bun install --frozen-lockfile
+      - run: bun run i18n:sync
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun run format:check
+      - run: bun run test
+      - run: bun run build
+  image:
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+      - uses: docker/setup-buildx-action@v4
+      - name: Build verified commit image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          tags: new-api-custom:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}

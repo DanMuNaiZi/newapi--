@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -22,10 +23,13 @@ func TestResponsesWSClientErrorAppliesChannelDisplayPolicyAndMappedModel(t *test
 		},
 	}
 	upstream := types.WithOpenAIError(types.OpenAIError{
-		Message: "The 'gpt-5.6-terra' model is not supported for sk-channel-secret",
-		Type:    "invalid_request_error",
-		Code:    "unsupported_model",
+		Message:  "The 'gpt-5.6-terra' model is not supported for sk-channel-secret",
+		Type:     "invalid_request_error Authorization: Bearer type-secret",
+		Param:    "gpt-5.6-terra token=param-secret",
+		Code:     "unsupported_model",
+		Metadata: []byte(`{"body":"raw-private-body"}`),
 	}, http.StatusBadRequest)
+	upstreamMessage := upstream.Error()
 
 	generic := responsesWSClientError(info, upstream, dto.NormalizeUpstreamErrorDisplaySettings(nil), nil)
 	require.Equal(t, http.StatusServiceUnavailable, generic.StatusCode)
@@ -38,7 +42,15 @@ func TestResponsesWSClientErrorAppliesChannelDisplayPolicyAndMappedModel(t *test
 	require.Equal(t, http.StatusBadRequest, original.StatusCode)
 	require.Contains(t, original.Error(), "codex")
 	require.NotContains(t, original.Error(), "gpt-5.6-terra")
-	require.NotContains(t, original.Error(), "sk-secret")
+	require.NotContains(t, original.Error(), "sk-channel-secret")
+	originalWire, err := common.Marshal(original.ToOpenAIError())
+	require.NoError(t, err)
+	require.NotContains(t, string(originalWire), "gpt-5.6-terra")
+	require.NotContains(t, string(originalWire), "type-secret")
+	require.NotContains(t, string(originalWire), "param-secret")
+	require.NotContains(t, string(originalWire), "raw-private-body")
+	require.Equal(t, "unsupported_model", original.ToOpenAIError().Code)
+	require.Equal(t, upstreamMessage, upstream.Error())
 
 	custom := responsesWSClientError(info, upstream, dto.NormalizeUpstreamErrorDisplaySettings(nil), &model.ChannelErrorRecord{
 		DisplayMode:       dto.ChannelErrorDisplayModeCustom,

@@ -21,6 +21,8 @@ var legacySensitiveLogOtherKeys = []string{
 	"channel_name",
 	"channel_type",
 	"reject_reason",
+	"upstream_model_name",
+	"is_model_mapped",
 }
 
 type logOtherVisibility int
@@ -60,6 +62,12 @@ func isReservedLogOtherKey(key string) bool {
 func (o *LogOther) SetPublic(key string, value any) bool {
 	if o == nil || key == "" || isReservedLogOtherKey(key) {
 		return false
+	}
+	if key == "response_model" {
+		encoded, err := common.Marshal(value)
+		if err != nil || !isPublicResponseModel(encoded) {
+			return false
+		}
 	}
 	if o.public == nil {
 		o.public = make(map[string]any)
@@ -184,9 +192,38 @@ func (o *LogOther) MarshalJSON() ([]byte, error) {
 	return common.Marshal(o.toMap())
 }
 
-func normalizeLegacyRejectReason(values map[string]json.RawMessage) bool {
-	rejectReason, ok := values["reject_reason"]
-	if !ok {
+// Public model observations contain only the three protocol names, and their
+// upstream name has already been reduced to the requested name. The returned
+// name may differ legitimately on an unmapped request.
+func isPublicResponseModel(value common.RawMessage) bool {
+	var fields map[string]common.RawMessage
+	if common.Unmarshal(value, &fields) != nil || len(fields) != 3 {
+		return false
+	}
+	for _, key := range []string{"requested_model", "upstream_model", "returned_model"} {
+		if common.GetJsonType(fields[key]) != "string" {
+			return false
+		}
+	}
+	var requested, upstream, returned string
+	if common.Unmarshal(fields["requested_model"], &requested) != nil ||
+		common.Unmarshal(fields["upstream_model"], &upstream) != nil ||
+		common.Unmarshal(fields["returned_model"], &returned) != nil {
+		return false
+	}
+	return requested != "" && (upstream == "" || upstream == requested)
+}
+
+func normalizeLegacyAdminLogOther(values map[string]json.RawMessage) bool {
+	legacyFields := make(map[string]json.RawMessage)
+	for _, key := range []string{"reject_reason", "upstream_model_name", "is_model_mapped", "response_model"} {
+		value, exists := values[key]
+		if !exists || key == "response_model" && isPublicResponseModel(value) {
+			continue
+		}
+		legacyFields[key] = value
+	}
+	if len(legacyFields) == 0 {
 		return false
 	}
 
@@ -197,15 +234,19 @@ func normalizeLegacyRejectReason(values map[string]json.RawMessage) bool {
 	if adminInfo == nil {
 		adminInfo = make(map[string]json.RawMessage)
 	}
-	if _, exists := adminInfo["reject_reason"]; !exists {
-		adminInfo["reject_reason"] = rejectReason
+	for key, value := range legacyFields {
+		if _, exists := adminInfo[key]; !exists {
+			adminInfo[key] = value
+		}
 	}
 	encodedAdminInfo, err := common.Marshal(adminInfo)
 	if err != nil {
 		return false
 	}
 	values[logOtherAdminInfoKey] = encodedAdminInfo
-	delete(values, "reject_reason")
+	for key := range legacyFields {
+		delete(values, key)
+	}
 	return true
 }
 
@@ -239,8 +280,12 @@ func formatLogOtherJSON(value string, visibility logOtherVisibility) string {
 				changed = true
 			}
 		}
+		if responseModel, exists := values["response_model"]; exists && !isPublicResponseModel(responseModel) {
+			delete(values, "response_model")
+			changed = true
+		}
 	} else {
-		changed = normalizeLegacyRejectReason(values)
+		changed = normalizeLegacyAdminLogOther(values)
 		if visibility == logOtherVisibilityAdmin {
 			if _, exists := values[logOtherRootInfoKey]; exists {
 				delete(values, logOtherRootInfoKey)

@@ -64,7 +64,8 @@ api.get = ((url: string, config: ApiRequestConfig = {}) => {
 
   const params = config.params ? JSON.stringify(config.params) : '{}'
   const sessionSID = useAuthStore.getState().auth.session?.sid || 'anonymous'
-  const key = `${sessionSID}:${url}?${params}`
+  const previewToken = useUserPreviewStore.getState().token || 'actor'
+  const key = `${sessionSID}:${previewToken}:${url}?${params}`
   const existingRequest = inFlightGet.get(key)
   if (existingRequest) return existingRequest
 
@@ -154,6 +155,10 @@ api.interceptors.response.use(
 )
 
 api.interceptors.request.use(async (config) => {
+  const previewToken = useUserPreviewStore.getState().token
+  if (previewToken) {
+    config.headers['New-Api-User-Preview'] = previewToken
+  }
   if (config.singleUseAuthorization || config.headers.has('X-Security-Proof')) {
     // Refresh before spending a proof/flow, never by replaying its request.
     config.skipAuthRefresh = true
@@ -170,10 +175,6 @@ api.interceptors.request.use(async (config) => {
   const accessToken = useAuthStore.getState().auth.accessToken
   if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`
-  }
-  const previewToken = useUserPreviewStore.getState().token
-  if (previewToken) {
-    config.headers['New-Api-User-Preview'] = previewToken
   }
   return config
 })

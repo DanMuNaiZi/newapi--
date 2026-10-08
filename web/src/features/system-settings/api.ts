@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { api } from '@/lib/api'
+import { api, type ApiRequestConfig } from '@/lib/api'
 
 import type {
   ConfirmPaymentComplianceResponse,
@@ -32,6 +32,9 @@ import type {
   UpdatePasskeyDomainsResponse,
   UpstreamChannelsResponse,
   UpstreamRatiosResponse,
+  GitHubRegistrationIdentityResponse,
+  GitHubRegistrationWhitelistMutationResponse,
+  GitHubRegistrationWhitelistResponse,
 } from './types'
 
 export async function getSystemOptions() {
@@ -41,6 +44,68 @@ export async function getSystemOptions() {
 
 export async function updateSystemOption(request: UpdateOptionRequest) {
   const res = await api.put<UpdateOptionResponse>('/api/option/', request)
+  return res.data
+}
+
+export async function resolveGitHubRegistrationIdentity(
+  username: string,
+  config?: ApiRequestConfig
+) {
+  const res = await api.post<GitHubRegistrationIdentityResponse>(
+    '/api/github-registration/resolve',
+    { username },
+    { ...config, skipAuthRefresh: true }
+  )
+  return res.data
+}
+
+export async function listGitHubRegistrationWhitelist(
+  config?: ApiRequestConfig
+) {
+  const res = await api.get<GitHubRegistrationWhitelistResponse>(
+    '/api/github-registration/whitelist',
+    { ...config, skipAuthRefresh: true }
+  )
+  return res.data
+}
+
+export async function createGitHubRegistrationWhitelist(
+  request: {
+    username: string
+    github_id: string
+    remark: string
+  },
+  config?: ApiRequestConfig
+) {
+  const res = await api.post<GitHubRegistrationWhitelistMutationResponse>(
+    '/api/github-registration/whitelist',
+    request,
+    { ...config, skipAuthRefresh: true }
+  )
+  return res.data
+}
+
+export async function updateGitHubRegistrationWhitelist(
+  id: number,
+  remark: string,
+  config?: ApiRequestConfig
+) {
+  const res = await api.patch<GitHubRegistrationWhitelistMutationResponse>(
+    `/api/github-registration/whitelist/${id}`,
+    { remark },
+    { ...config, skipAuthRefresh: true }
+  )
+  return res.data
+}
+
+export async function deleteGitHubRegistrationWhitelist(
+  id: number,
+  config?: ApiRequestConfig
+) {
+  const res = await api.delete<UpdateOptionResponse>(
+    `/api/github-registration/whitelist/${id}`,
+    { ...config, skipAuthRefresh: true }
+  )
   return res.data
 }
 

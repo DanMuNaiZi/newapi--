@@ -98,7 +98,7 @@ func UpsertChannelErrorRecord(input ChannelErrorRecordInput) (*ChannelErrorRecor
 		DoUpdates: clause.Assignments(map[string]any{
 			"final_status_code":    input.FinalStatusCode,
 			"sample_message":       record.SampleMessage,
-			"occurrence_count":     gorm.Expr("occurrence_count + ?", 1),
+			"occurrence_count":     gorm.Expr("? + ?", clause.Column{Table: record.TableName(), Name: "occurrence_count"}, 1),
 			"last_seen_time":       now,
 			"last_request_id":      record.LastRequestID,
 			"last_multi_key_index": input.MultiKeyIndex,

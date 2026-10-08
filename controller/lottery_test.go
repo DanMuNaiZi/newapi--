@@ -144,7 +144,7 @@ func TestLotteryPublicDetailsEndpointsReturnParticipantAndWinnerNames(t *testing
 	participantsContext.Params = gin.Params{{Key: "id", Value: fmt.Sprint(plan.Id)}}
 	participantsContext.Set("id", user.Id)
 	GetLotteryParticipantsForSelf(participantsContext)
-	require.Contains(t, participantsRecorder.Body.String(), `"username":"lottery-public-user"`)
+	require.Contains(t, participantsRecorder.Body.String(), `"username":"l***r"`)
 	require.NotContains(t, participantsRecorder.Body.String(), `"weight"`)
 	require.NotContains(t, participantsRecorder.Body.String(), `"preset_prize_id"`)
 
@@ -153,7 +153,7 @@ func TestLotteryPublicDetailsEndpointsReturnParticipantAndWinnerNames(t *testing
 	resultsContext.Params = gin.Params{{Key: "id", Value: fmt.Sprint(plan.Id)}}
 	resultsContext.Set("id", user.Id)
 	GetLotteryPlanResultsForSelf(resultsContext)
-	require.Contains(t, resultsRecorder.Body.String(), `"username":"lottery-public-user"`)
+	require.Contains(t, resultsRecorder.Body.String(), `"username":"l***r"`)
 	require.Contains(t, resultsRecorder.Body.String(), `"prize_name":"Public prize"`)
 	require.NotContains(t, resultsRecorder.Body.String(), `"redemption_code"`)
 }

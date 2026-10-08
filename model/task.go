@@ -170,6 +170,9 @@ type TaskBillingContext struct {
 	OriginModelName string                       `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
 	PerCallBilling  bool                         `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
 	TieredSnapshot  *billingexpr.BillingSnapshot `json:"tiered_snapshot,omitempty"`
+	// ResourceQuota is the last settled cost before group discounts. Nil keeps
+	// historical tasks with unknown resource cost distinct from free usage.
+	ResourceQuota *int `json:"resource_quota,omitempty"`
 }
 
 // ResultRetrievable reports whether retrieval surfaces (native query routes,
@@ -543,7 +546,7 @@ func (Task *Task) Update() error {
 }
 
 func (t *Task) UpdateQuota() error {
-	return DB.Model(t).Update("quota", t.Quota).Error
+	return DB.Model(t).Updates(map[string]any{"quota": t.Quota, "private_data": t.PrivateData}).Error
 }
 
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).

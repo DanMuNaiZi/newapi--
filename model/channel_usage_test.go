@@ -15,10 +15,11 @@ func TestGetChannelUsageSummarySeparatesResourceAndChargedQuota(t *testing.T) {
 	cleanup := LOG_DB.Where("channel_id = ?", channelID).Delete(&Log{})
 	require.NoError(t, cleanup.Error)
 	resource := 70
+	resourceRefund := 0
 	rows := []*Log{
 		{ChannelId: channelID, CreatedAt: start + 10, Type: LogTypeConsume, Quota: 100, ResourceQuota: &resource, PromptTokens: 10, CompletionTokens: 5, RequestId: "request-1"},
 		{ChannelId: channelID, CreatedAt: start + 20, Type: LogTypeConsume, Quota: 40, ResourceQuota: &resource, PromptTokens: 4, CompletionTokens: 2, RequestId: "request-1"},
-		{ChannelId: channelID, CreatedAt: start + 30, Type: LogTypeRefund, Quota: 30, RequestId: "request-1"},
+		{ChannelId: channelID, CreatedAt: start + 30, Type: LogTypeRefund, Quota: 30, ResourceQuota: &resourceRefund, RequestId: "request-1"},
 		{ChannelId: channelID, CreatedAt: start + 40, Type: LogTypeError, RequestId: "request-2"},
 	}
 	for _, row := range rows {

@@ -90,17 +90,33 @@ export interface LotteryResultView extends LotteryResult {
 }
 
 export interface LotteryPublicParticipant {
+  id: number
   username: string
   display_name: string
   joined_at: number
+  is_self: boolean
 }
 
 export interface LotteryPublicResult {
+  id: number
   username: string
   display_name: string
   prize_name: string
   reward_type: 'quota' | 'subscription'
   created_at: number
+  is_self: boolean
+}
+
+export interface LotteryPublicParticipantPage {
+  items: LotteryPublicParticipant[]
+  next_cursor?: string
+  has_more: boolean
+}
+
+export interface LotteryPublicResultPage {
+  items: LotteryPublicResult[]
+  next_cursor?: string
+  has_more: boolean
 }
 
 export interface LotteryPrize {
@@ -110,6 +126,9 @@ export interface LotteryPrize {
   quantity: number
   reward_type: 'quota' | 'subscription'
   quota: number
+  prize_snapshot?: string
+  reward_amount?: string
+  reward_unit?: 'usd' | 'cny' | 'quota'
   subscription_plan_id: number
   fulfillment_mode: 'auto' | 'self_claim' | 'redemption_code'
   claim_expire_seconds: number
@@ -142,7 +161,9 @@ export interface LotteryPlanCreatePayload {
     name: string
     quantity: number
     reward_type: 'quota' | 'subscription'
-    quota: number
+    quota?: number
+    reward_amount?: string
+    reward_unit?: 'usd' | 'cny' | 'quota'
     subscription_plan_id: number
     fulfillment_mode: 'auto' | 'self_claim' | 'redemption_code'
     claim_expire_seconds: number

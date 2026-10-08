@@ -24,6 +24,8 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import { useAuthStore } from '@/stores/auth-store'
+import { useUserPreviewStore } from '@/stores/user-preview-store'
 
 import {
   claimLotteryResult,
@@ -36,19 +38,26 @@ import { LotteryIcon } from './lottery-icon'
 export function LotteryDashboardPanel() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  const currentUserId = useAuthStore((state) => state.auth.user?.id)
+  const readOnlyPreview = useUserPreviewStore((state) => Boolean(state.token))
+  const previewUserId = useUserPreviewStore((state) => state.target?.id)
+  const userId = (readOnlyPreview ? previewUserId : currentUserId) ?? 0
   const plansQuery = useQuery({
-    queryKey: ['lottery', 'self'],
+    queryKey: ['lottery', 'self', userId],
     queryFn: getLotteryPlansForSelf,
+    enabled: userId > 0,
     refetchInterval: 30_000,
   })
   const resultsQuery = useQuery({
-    queryKey: ['lottery', 'results', 'pending'],
+    queryKey: ['lottery', 'results', 'pending', userId],
     queryFn: getClaimableLotteryResultsForSelf,
+    enabled: userId > 0,
     refetchInterval: 30_000,
   })
   const notificationsQuery = useQuery({
-    queryKey: ['lottery', 'notifications', 'page', 'unread'],
+    queryKey: ['lottery', 'notifications', 'summary', 'unread', userId],
     queryFn: () => getLotteryNotificationsPageForSelf(undefined, 20, true),
+    enabled: userId > 0,
     refetchInterval: 30_000,
   })
   const claimMutation = useMutation({
@@ -191,17 +200,23 @@ export function LotteryDashboardPanel() {
                 <span className='truncate text-sm'>
                   {t('Lottery reward')} #{result.id}
                 </span>
-                <Button
-                  size='sm'
-                  disabled={claimMutation.isPending}
-                  onClick={() =>
-                    claimMutation.mutate({
-                      resultId: result.id,
-                    })
-                  }
-                >
-                  {t('Claim lottery reward')}
-                </Button>
+                {readOnlyPreview ? (
+                  <span className='text-muted-foreground text-xs'>
+                    {t('User preview is read-only')}
+                  </span>
+                ) : (
+                  <Button
+                    size='sm'
+                    disabled={claimMutation.isPending}
+                    onClick={() =>
+                      claimMutation.mutate({
+                        resultId: result.id,
+                      })
+                    }
+                  >
+                    {t('Claim lottery reward')}
+                  </Button>
+                )}
               </div>
             ))}
           </div>

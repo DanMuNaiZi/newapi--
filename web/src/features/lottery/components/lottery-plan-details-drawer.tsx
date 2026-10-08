@@ -35,9 +35,17 @@ import {
 } from '@/components/ui/sheet'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  ADMIN_PERMISSION_ACTIONS,
+  ADMIN_PERMISSION_RESOURCES,
+  hasPermission,
+} from '@/lib/admin-permissions'
 import { formatQuota } from '@/lib/format'
+import { useAuthStore } from '@/stores/auth-store'
+import { useUserPreviewStore } from '@/stores/user-preview-store'
 
 import {
+  getAdminLotteryPlan,
   getAdminLotteryResults,
   getLotteryParticipants,
   getLotteryPrizes,
@@ -64,6 +72,8 @@ type LotteryPlanDetailsDrawerProps = {
   initialTab: LotteryDetailsTab
   open: boolean
   plan: LotteryPlan | null
+  planId?: number
+  canOperate?: boolean
   onOpenChange: (open: boolean) => void
 }
 
@@ -89,8 +99,31 @@ function getStatusVariant(status: LotteryPlan['status']): StatusVariant {
 export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  const currentUser = useAuthStore((state) => state.auth.user)
+  const readOnlyPreview = useUserPreviewStore((state) => Boolean(state.token))
+  const canRead =
+    !readOnlyPreview &&
+    hasPermission(
+      currentUser,
+      ADMIN_PERMISSION_RESOURCES.LOTTERY,
+      ADMIN_PERMISSION_ACTIONS.READ
+    )
+  const canOperate =
+    canRead &&
+    props.canOperate !== false &&
+    hasPermission(
+      currentUser,
+      ADMIN_PERMISSION_RESOURCES.LOTTERY,
+      ADMIN_PERMISSION_ACTIONS.OPERATE
+    )
   const [tab, setTab] = useState<LotteryDetailsTab>(props.initialTab)
-  const planId = props.plan?.id ?? 0
+  const planId = props.planId ?? props.plan?.id ?? 0
+  const planQuery = useQuery({
+    queryKey: ['lottery', 'admin', 'plan', planId],
+    queryFn: () => getAdminLotteryPlan(planId),
+    enabled: props.open && canRead && planId > 0,
+  })
+  const plan = planQuery.data?.success ? planQuery.data.data : props.plan
 
   useEffect(() => {
     if (props.open) setTab(props.initialTab)
@@ -99,17 +132,17 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
   const prizesQuery = useQuery({
     queryKey: ['lottery', 'admin', 'prizes', planId],
     queryFn: () => getLotteryPrizes(planId),
-    enabled: props.open && planId > 0,
+    enabled: props.open && canRead && planId > 0,
   })
   const participantsQuery = useQuery({
     queryKey: ['lottery', 'admin', 'participants', planId],
     queryFn: () => getLotteryParticipants(planId),
-    enabled: props.open && planId > 0,
+    enabled: props.open && canRead && planId > 0,
   })
   const resultsQuery = useQuery({
     queryKey: ['lottery', 'admin', 'results', planId],
     queryFn: () => getAdminLotteryResults(planId),
-    enabled: props.open && planId > 0 && tab === 'results',
+    enabled: props.open && canRead && planId > 0 && tab === 'results',
   })
   const participantMutation = useMutation({
     mutationFn: updateLotteryParticipant,
@@ -118,6 +151,7 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
   const updateParticipant = async (
     payload: LotteryParticipantUpdate
   ): Promise<boolean> => {
+    if (!canOperate) return false
     try {
       const result = await participantMutation.mutateAsync(payload)
       if (!result.success) {
@@ -147,7 +181,7 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
     : []
 
   const eligibilityLabel = (() => {
-    switch (props.plan?.eligibility_mode) {
+    switch (plan?.eligibility_mode) {
       case 'groups':
         return t('Selected groups')
       case 'users':
@@ -158,20 +192,18 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
   })()
 
   return (
-    <Sheet open={props.open} onOpenChange={props.onOpenChange}>
+    <Sheet open={props.open && canRead} onOpenChange={props.onOpenChange}>
       <SheetContent className={sideDrawerContentClassName('sm:max-w-[820px]')}>
         <SheetHeader className={sideDrawerHeaderClassName()}>
           <div className='flex items-start gap-3 pr-8'>
-            <LotteryIcon src={props.plan?.icon} size='md' />
+            <LotteryIcon src={plan?.icon} size='md' />
             <div className='min-w-0 flex-1'>
               <div className='flex flex-wrap items-center gap-2'>
-                <SheetTitle>
-                  {props.plan?.title ?? t('Lottery details')}
-                </SheetTitle>
-                {props.plan && (
+                <SheetTitle>{plan?.title ?? t('Lottery details')}</SheetTitle>
+                {plan && (
                   <StatusBadge
-                    label={getLotteryPlanStatusLabel(t, props.plan.status)}
-                    variant={getStatusVariant(props.plan.status)}
+                    label={getLotteryPlanStatusLabel(t, plan.status)}
+                    variant={getStatusVariant(plan.status)}
                     copyable={false}
                   />
                 )}
@@ -203,7 +235,7 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
             value='overview'
             className='min-h-0 overflow-y-auto px-4 py-5 sm:px-6'
           >
-            {props.plan && (
+            {plan && (
               <div className='space-y-6'>
                 <section>
                   <h3 className='text-sm font-semibold'>
@@ -214,14 +246,14 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
                       <dt className='text-muted-foreground text-xs'>
                         {t('Plan ID')}
                       </dt>
-                      <dd className='mt-1 font-medium'>#{props.plan.id}</dd>
+                      <dd className='mt-1 font-medium'>#{plan.id}</dd>
                     </div>
                     <div className='border-border/70 px-1 py-3 sm:pl-4'>
                       <dt className='text-muted-foreground text-xs'>
                         {t('Maximum participants')}
                       </dt>
                       <dd className='mt-1 font-medium'>
-                        {props.plan.max_participants}
+                        {plan.max_participants}
                       </dd>
                     </div>
                     <div className='border-border/70 border-t px-1 py-3 sm:border-r sm:pr-4'>
@@ -229,7 +261,7 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
                         {t('Registration start time')}
                       </dt>
                       <dd className='mt-1 font-medium'>
-                        {formatLotteryDate(props.plan.registration_start_time)}
+                        {formatLotteryDate(plan.registration_start_time)}
                       </dd>
                     </div>
                     <div className='border-border/70 border-t px-1 py-3 sm:pl-4'>
@@ -237,7 +269,7 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
                         {t('Draw time')}
                       </dt>
                       <dd className='mt-1 font-medium'>
-                        {formatLotteryDate(props.plan.draw_time)}
+                        {formatLotteryDate(plan.draw_time)}
                       </dd>
                     </div>
                     <div className='border-border/70 border-t px-1 py-3 sm:border-r sm:pr-4'>
@@ -259,7 +291,7 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
                     {t('Lottery description')}
                   </h3>
                   <p className='text-muted-foreground mt-2 text-sm leading-6 whitespace-pre-wrap'>
-                    {props.plan.description || t('No description')}
+                    {plan.description || t('No description')}
                   </p>
                 </section>
               </div>
@@ -289,12 +321,14 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
                   } else if (prize.fulfillment_mode === 'self_claim') {
                     deliveryLabel = t('Winner claims manually')
                   }
-                  const rewardLabel =
-                    prize.reward_type === 'subscription'
-                      ? t('Subscription #{{id}}', {
-                          id: prize.subscription_plan_id,
-                        })
-                      : formatQuota(prize.quota)
+                  let rewardLabel = formatQuota(prize.quota)
+                  if (prize.reward_type === 'subscription') {
+                    rewardLabel = t('Subscription #{{id}}', {
+                      id: prize.subscription_plan_id,
+                    })
+                  } else if (prize.reward_amount && prize.reward_unit) {
+                    rewardLabel = `${prize.reward_amount} ${prize.reward_unit.toUpperCase()} · ${formatQuota(prize.quota)}`
+                  }
 
                   return (
                     <article
@@ -340,16 +374,37 @@ export function LotteryPlanDetailsDrawer(props: LotteryPlanDetailsDrawerProps) {
             )}
             {!participantsQuery.isLoading && participants.length > 0 && (
               <div className='border-border/70 divide-border/70 divide-y border-y'>
-                {participants.map((participant) => (
-                  <LotteryParticipantEditor
-                    key={participant.id}
-                    participant={participant}
-                    planId={planId}
-                    prizes={prizes}
-                    isPending={participantMutation.isPending}
-                    onUpdate={updateParticipant}
-                  />
-                ))}
+                {participants.map((participant) =>
+                  canOperate ? (
+                    <LotteryParticipantEditor
+                      key={participant.id}
+                      participant={participant}
+                      planId={planId}
+                      prizes={prizes}
+                      isPending={participantMutation.isPending}
+                      onUpdate={updateParticipant}
+                    />
+                  ) : (
+                    <article
+                      key={participant.id}
+                      className='flex items-center justify-between gap-3 py-4'
+                    >
+                      <div className='min-w-0'>
+                        <div className='truncate text-sm font-medium'>
+                          {participant.display_name ||
+                            participant.username ||
+                            `#${participant.user_id}`}
+                        </div>
+                        <div className='text-muted-foreground mt-1 text-xs'>
+                          {t('User ID')} #{participant.user_id}
+                        </div>
+                      </div>
+                      <span className='text-muted-foreground shrink-0 text-xs'>
+                        {t('Read-only')}
+                      </span>
+                    </article>
+                  )
+                )}
               </div>
             )}
           </TabsContent>

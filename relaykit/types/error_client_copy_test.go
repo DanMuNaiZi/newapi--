@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"testing"
 
+	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -40,6 +41,27 @@ func TestNewAPIErrorClientCopyDoesNotMutateOriginal(t *testing.T) {
 		Type:    "upstream_error",
 		Code:    ErrorCodeUpstreamServiceUnavailable,
 	}, clientCopy.ToOpenAIError())
+}
+
+func TestNewAPIErrorClientCopySeparatesNestedErrorDetails(t *testing.T) {
+	code := map[string]any{
+		"details": []any{map[string]any{"model": "upstream-model"}},
+		"typed":   map[string][]string{"keys": {"upstream-key"}},
+	}
+	original := WithOpenAIError(OpenAIError{Message: "rejected", Type: "upstream_error", Code: code}, http.StatusBadRequest)
+	before, err := kitutil.Marshal(original.ToOpenAIError())
+	require.NoError(t, err)
+
+	clientCopy := original.ClientCopy()
+	clientCode, ok := clientCopy.ToOpenAIError().Code.(map[string]any)
+	require.True(t, ok)
+	clientCode["details"].([]any)[0].(map[string]any)["model"] = "requested-model"
+	clientCode["typed"].(map[string][]string)["keys"][0] = "masked-key"
+	clientCode["extra"] = "client-only"
+
+	after, err := kitutil.Marshal(original.ToOpenAIError())
+	require.NoError(t, err)
+	assert.JSONEq(t, string(before), string(after))
 }
 
 func TestNewAPIErrorSetMessageUpdatesStructuredRelayError(t *testing.T) {

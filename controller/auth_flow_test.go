@@ -832,7 +832,12 @@ type legacyGitHubOAuthProvider struct {
 
 func (*legacyGitHubOAuthProvider) GetName() string { return "GitHub" }
 func (provider *legacyGitHubOAuthProvider) GetUserInfo(context.Context, *oauth.OAuthToken) (*oauth.OAuthUser, error) {
-	return &oauth.OAuthUser{ProviderUserID: provider.providerUserID, Username: provider.legacyID, Extra: map[string]any{"legacy_id": provider.legacyID}}, nil
+	return &oauth.OAuthUser{
+		ProviderUserID: provider.providerUserID,
+		Username:       provider.legacyID,
+		CreatedAt:      time.Now().AddDate(-1, 0, 0).Unix(),
+		Extra:          map[string]any{"legacy_id": provider.legacyID},
+	}, nil
 }
 func (provider *legacyGitHubOAuthProvider) GetVerifiedEmails(context.Context, *oauth.OAuthToken) ([]string, error) {
 	provider.verifiedEmailCalls++

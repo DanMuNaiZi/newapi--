@@ -20,6 +20,8 @@ func TestUpdateOptionRejectsRetiredFrontendTheme(t *testing.T) {
 		"/api/option/",
 		strings.NewReader(`{"key":"theme.frontend","value":"classic"}`),
 	)
+	context.Set("id", 1)
+	context.Set("role", common.RoleRootUser)
 
 	UpdateOption(context)
 

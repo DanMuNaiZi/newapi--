@@ -25,6 +25,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { MultiSelect } from '@/components/multi-select'
+import { RewardAmountField } from '@/components/reward-amount-field'
 import { Button } from '@/components/ui/button'
 import {
   Field,
@@ -40,6 +41,8 @@ import { Spinner } from '@/components/ui/spinner'
 import { Textarea } from '@/components/ui/textarea'
 import { getAdminPlans } from '@/features/subscriptions/api'
 import type { User } from '@/features/users/types'
+import { useRewardQuotaConfig } from '@/hooks/use-reward-quota-config'
+import { getRewardConversionError } from '@/lib/reward-amount'
 import { cn } from '@/lib/utils'
 
 import { createLotteryPlan, getLotteryAdminGroups } from '../api'
@@ -81,6 +84,7 @@ export function LotteryPlanForm(props: LotteryPlanFormProps) {
     name: 'selected_groups',
   })
   const iconValue = useWatch({ control: form.control, name: 'icon' })
+  const rewardConfig = useRewardQuotaConfig()
 
   const groupsQuery = useQuery({
     queryKey: ['lottery', 'admin', 'groups'],
@@ -117,6 +121,19 @@ export function LotteryPlanForm(props: LotteryPlanFormProps) {
 
   const eligibilityField = form.register('eligibility_mode')
   const submit = (values: LotteryAdminFormValues): void => {
+    for (const prize of values.prizes) {
+      if (prize.reward_type !== 'quota' || !prize.reward_amount) continue
+      const error = getRewardConversionError(
+        prize.reward_amount,
+        prize.reward_unit ?? 'usd',
+        rewardConfig.quotaPerUnit,
+        rewardConfig.usdExchangeRate
+      )
+      if (error) {
+        toast.error(t(error))
+        return
+      }
+    }
     createMutation.mutate(buildLotteryPlanPayload(values))
   }
 
@@ -482,29 +499,24 @@ export function LotteryPlanForm(props: LotteryPlanFormProps) {
                     </Field>
 
                     {rewardType === 'quota' ? (
-                      <Field data-invalid={Boolean(errors?.quota)}>
-                        <FieldLabel htmlFor={`lottery-prize-${index}-quota`}>
-                          {t('Reward quota')}
-                        </FieldLabel>
-                        <Input
-                          id={`lottery-prize-${index}-quota`}
-                          type='number'
-                          min={1}
-                          max={LOTTERY_DATABASE_INT_MAX}
-                          aria-invalid={Boolean(errors?.quota)}
-                          {...form.register(`prizes.${index}.quota`, {
-                            valueAsNumber: true,
-                          })}
-                        />
-                        <FieldDescription>
-                          {t('Uses the same quota unit as the user balance.')}
-                        </FieldDescription>
-                        <FieldError>
-                          {errors?.quota?.message
-                            ? t(errors.quota.message)
-                            : null}
-                        </FieldError>
-                      </Field>
+                      <RewardAmountField
+                        id={`lottery-prize-${index}-reward-amount`}
+                        amount={
+                          prizeValues[index]?.reward_amount ??
+                          String(prizeValues[index]?.quota ?? '')
+                        }
+                        unit={prizeValues[index]?.reward_unit ?? 'usd'}
+                        amountField={form.register(
+                          `prizes.${index}.reward_amount`
+                        )}
+                        unitField={form.register(`prizes.${index}.reward_unit`)}
+                        quotaPerUnit={rewardConfig.quotaPerUnit}
+                        usdExchangeRate={rewardConfig.usdExchangeRate}
+                        error={
+                          errors?.reward_amount?.message ||
+                          errors?.quota?.message
+                        }
+                      />
                     ) : (
                       <Field
                         data-invalid={Boolean(errors?.subscription_plan_id)}

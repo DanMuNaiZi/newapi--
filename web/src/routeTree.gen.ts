@@ -47,7 +47,11 @@ import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenti
 import { Route as AuthenticatedModelsSectionRouteImport } from './routes/_authenticated/models/$section'
 import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
+import { Route as AuthenticatedPublicPoolIndexRouteImport } from './routes/_authenticated/public-pool/index'
+import { Route as AuthenticatedPublicPoolAdminRouteImport } from './routes/_authenticated/public-pool/admin'
 import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
+import { Route as AuthenticatedReferralCampaignsIndexRouteImport } from './routes/_authenticated/referral-campaigns/index'
+import { Route as AuthenticatedReferralCampaignsAdminRouteImport } from './routes/_authenticated/referral-campaigns/admin'
 import { Route as AuthenticatedSecurityIndexRouteImport } from './routes/_authenticated/security/index'
 import { Route as AuthenticatedSubscriptionsIndexRouteImport } from './routes/_authenticated/subscriptions/index'
 import { Route as AuthenticatedSystemInfoIndexRouteImport } from './routes/_authenticated/system-info/index'
@@ -277,10 +281,34 @@ const AuthenticatedProfileIndexRoute =
     path: '/profile/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedPublicPoolIndexRoute =
+  AuthenticatedPublicPoolIndexRouteImport.update({
+    id: '/public-pool/',
+    path: '/public-pool/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedPublicPoolAdminRoute =
+  AuthenticatedPublicPoolAdminRouteImport.update({
+    id: '/public-pool/admin',
+    path: '/public-pool/admin',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedRedemptionCodesIndexRoute =
   AuthenticatedRedemptionCodesIndexRouteImport.update({
     id: '/redemption-codes/',
     path: '/redemption-codes/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedReferralCampaignsIndexRoute =
+  AuthenticatedReferralCampaignsIndexRouteImport.update({
+    id: '/referral-campaigns/',
+    path: '/referral-campaigns/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedReferralCampaignsAdminRoute =
+  AuthenticatedReferralCampaignsAdminRouteImport.update({
+    id: '/referral-campaigns/admin',
+    path: '/referral-campaigns/admin',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedSecurityIndexRoute =
@@ -479,6 +507,8 @@ export interface FileRoutesByFullPath {
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/lotteries/admin': typeof AuthenticatedLotteriesAdminRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/public-pool/admin': typeof AuthenticatedPublicPoolAdminRoute
+  '/referral-campaigns/admin': typeof AuthenticatedReferralCampaignsAdminRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
@@ -489,7 +519,9 @@ export interface FileRoutesByFullPath {
   '/models/': typeof AuthenticatedModelsIndexRoute
   '/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
+  '/public-pool/': typeof AuthenticatedPublicPoolIndexRoute
   '/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
+  '/referral-campaigns/': typeof AuthenticatedReferralCampaignsIndexRoute
   '/security/': typeof AuthenticatedSecurityIndexRoute
   '/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info/': typeof AuthenticatedSystemInfoIndexRoute
@@ -545,6 +577,8 @@ export interface FileRoutesByTo {
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/lotteries/admin': typeof AuthenticatedLotteriesAdminRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/public-pool/admin': typeof AuthenticatedPublicPoolAdminRoute
+  '/referral-campaigns/admin': typeof AuthenticatedReferralCampaignsAdminRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
@@ -555,7 +589,9 @@ export interface FileRoutesByTo {
   '/models': typeof AuthenticatedModelsIndexRoute
   '/playground': typeof AuthenticatedPlaygroundIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
+  '/public-pool': typeof AuthenticatedPublicPoolIndexRoute
   '/redemption-codes': typeof AuthenticatedRedemptionCodesIndexRoute
+  '/referral-campaigns': typeof AuthenticatedReferralCampaignsIndexRoute
   '/security': typeof AuthenticatedSecurityIndexRoute
   '/subscriptions': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info': typeof AuthenticatedSystemInfoIndexRoute
@@ -615,6 +651,8 @@ export interface FileRoutesById {
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/lotteries/admin': typeof AuthenticatedLotteriesAdminRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/_authenticated/public-pool/admin': typeof AuthenticatedPublicPoolAdminRoute
+  '/_authenticated/referral-campaigns/admin': typeof AuthenticatedReferralCampaignsAdminRoute
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
@@ -625,7 +663,9 @@ export interface FileRoutesById {
   '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
   '/_authenticated/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
+  '/_authenticated/public-pool/': typeof AuthenticatedPublicPoolIndexRoute
   '/_authenticated/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
+  '/_authenticated/referral-campaigns/': typeof AuthenticatedReferralCampaignsIndexRoute
   '/_authenticated/security/': typeof AuthenticatedSecurityIndexRoute
   '/_authenticated/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/_authenticated/system-info/': typeof AuthenticatedSystemInfoIndexRoute
@@ -684,6 +724,8 @@ export interface FileRouteTypes {
     | '/errors/$error'
     | '/lotteries/admin'
     | '/models/$section'
+    | '/public-pool/admin'
+    | '/referral-campaigns/admin'
     | '/usage-logs/$section'
     | '/usage-logs/audit'
     | '/channels/'
@@ -694,7 +736,9 @@ export interface FileRouteTypes {
     | '/models/'
     | '/playground/'
     | '/profile/'
+    | '/public-pool/'
     | '/redemption-codes/'
+    | '/referral-campaigns/'
     | '/security/'
     | '/subscriptions/'
     | '/system-info/'
@@ -750,6 +794,8 @@ export interface FileRouteTypes {
     | '/errors/$error'
     | '/lotteries/admin'
     | '/models/$section'
+    | '/public-pool/admin'
+    | '/referral-campaigns/admin'
     | '/usage-logs/$section'
     | '/usage-logs/audit'
     | '/channels'
@@ -760,7 +806,9 @@ export interface FileRouteTypes {
     | '/models'
     | '/playground'
     | '/profile'
+    | '/public-pool'
     | '/redemption-codes'
+    | '/referral-campaigns'
     | '/security'
     | '/subscriptions'
     | '/system-info'
@@ -819,6 +867,8 @@ export interface FileRouteTypes {
     | '/_authenticated/errors/$error'
     | '/_authenticated/lotteries/admin'
     | '/_authenticated/models/$section'
+    | '/_authenticated/public-pool/admin'
+    | '/_authenticated/referral-campaigns/admin'
     | '/_authenticated/usage-logs/$section'
     | '/_authenticated/usage-logs/audit'
     | '/_authenticated/channels/'
@@ -829,7 +879,9 @@ export interface FileRouteTypes {
     | '/_authenticated/models/'
     | '/_authenticated/playground/'
     | '/_authenticated/profile/'
+    | '/_authenticated/public-pool/'
     | '/_authenticated/redemption-codes/'
+    | '/_authenticated/referral-campaigns/'
     | '/_authenticated/security/'
     | '/_authenticated/subscriptions/'
     | '/_authenticated/system-info/'
@@ -1145,11 +1197,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProfileIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/public-pool/': {
+      id: '/_authenticated/public-pool/'
+      path: '/public-pool'
+      fullPath: '/public-pool/'
+      preLoaderRoute: typeof AuthenticatedPublicPoolIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/public-pool/admin': {
+      id: '/_authenticated/public-pool/admin'
+      path: '/public-pool/admin'
+      fullPath: '/public-pool/admin'
+      preLoaderRoute: typeof AuthenticatedPublicPoolAdminRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/redemption-codes/': {
       id: '/_authenticated/redemption-codes/'
       path: '/redemption-codes'
       fullPath: '/redemption-codes/'
       preLoaderRoute: typeof AuthenticatedRedemptionCodesIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/referral-campaigns/': {
+      id: '/_authenticated/referral-campaigns/'
+      path: '/referral-campaigns'
+      fullPath: '/referral-campaigns/'
+      preLoaderRoute: typeof AuthenticatedReferralCampaignsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/referral-campaigns/admin': {
+      id: '/_authenticated/referral-campaigns/admin'
+      path: '/referral-campaigns/admin'
+      fullPath: '/referral-campaigns/admin'
+      preLoaderRoute: typeof AuthenticatedReferralCampaignsAdminRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/security/': {
@@ -1448,6 +1528,8 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedLotteriesAdminRoute: typeof AuthenticatedLotteriesAdminRoute
   AuthenticatedModelsSectionRoute: typeof AuthenticatedModelsSectionRoute
+  AuthenticatedPublicPoolAdminRoute: typeof AuthenticatedPublicPoolAdminRoute
+  AuthenticatedReferralCampaignsAdminRoute: typeof AuthenticatedReferralCampaignsAdminRoute
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
   AuthenticatedUsageLogsAuditRoute: typeof AuthenticatedUsageLogsAuditRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
@@ -1458,7 +1540,9 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
   AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
+  AuthenticatedPublicPoolIndexRoute: typeof AuthenticatedPublicPoolIndexRoute
   AuthenticatedRedemptionCodesIndexRoute: typeof AuthenticatedRedemptionCodesIndexRoute
+  AuthenticatedReferralCampaignsIndexRoute: typeof AuthenticatedReferralCampaignsIndexRoute
   AuthenticatedSecurityIndexRoute: typeof AuthenticatedSecurityIndexRoute
   AuthenticatedSubscriptionsIndexRoute: typeof AuthenticatedSubscriptionsIndexRoute
   AuthenticatedSystemInfoIndexRoute: typeof AuthenticatedSystemInfoIndexRoute
@@ -1478,6 +1562,9 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
   AuthenticatedLotteriesAdminRoute: AuthenticatedLotteriesAdminRoute,
   AuthenticatedModelsSectionRoute: AuthenticatedModelsSectionRoute,
+  AuthenticatedPublicPoolAdminRoute: AuthenticatedPublicPoolAdminRoute,
+  AuthenticatedReferralCampaignsAdminRoute:
+    AuthenticatedReferralCampaignsAdminRoute,
   AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
   AuthenticatedUsageLogsAuditRoute: AuthenticatedUsageLogsAuditRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
@@ -1488,8 +1575,11 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,
   AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,
+  AuthenticatedPublicPoolIndexRoute: AuthenticatedPublicPoolIndexRoute,
   AuthenticatedRedemptionCodesIndexRoute:
     AuthenticatedRedemptionCodesIndexRoute,
+  AuthenticatedReferralCampaignsIndexRoute:
+    AuthenticatedReferralCampaignsIndexRoute,
   AuthenticatedSecurityIndexRoute: AuthenticatedSecurityIndexRoute,
   AuthenticatedSubscriptionsIndexRoute: AuthenticatedSubscriptionsIndexRoute,
   AuthenticatedSystemInfoIndexRoute: AuthenticatedSystemInfoIndexRoute,

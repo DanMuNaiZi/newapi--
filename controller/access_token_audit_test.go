@@ -440,6 +440,9 @@ func newAuditTestDatabase(t *testing.T, kind, dsn string) (*gorm.DB, string) {
 		path := t.TempDir() + "/audit.db"
 		db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
 		require.NoError(t, err)
+		connection, err := db.DB()
+		require.NoError(t, err)
+		t.Cleanup(func() { assert.NoError(t, connection.Close()) })
 		return db, path
 	}
 	require.NotEmpty(t, dsn)
@@ -694,6 +697,7 @@ func TestAuditDatabaseMatrix(t *testing.T) {
 						legacy := "released-token"
 						require.NoError(t, db.Create(&releasedAuditUser{Username: "released-owner", Password: "placeholder", AccessToken: &legacy, AffCode: "released-aff", Quota: 1234}).Error)
 						require.NoError(t, db.Create(&releasedAuditLog{UserId: 1, Type: model.LogTypeLogin, Content: "historical login", CreatedAt: 100, RequestId: "legacy-request"}).Error)
+						seedRecoveredUpgradeRows(t, db)
 					}
 					for range 2 {
 						require.NoError(t, model.InitDB())
@@ -769,6 +773,7 @@ func TestAuditDatabaseMatrix(t *testing.T) {
 					require.NoError(t, authz.ReloadPolicy())
 					assert.False(t, authz.Can(1, common.RoleAdminUser, authz.AuditRead))
 					assert.True(t, authz.Can(1, common.RoleRootUser, authz.AuditRead))
+					verifyRecoveredFeatureTransactions(t)
 				})
 			}
 		})

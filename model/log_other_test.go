@@ -56,6 +56,9 @@ func TestLogOtherRejectsSensitivePublicFields(t *testing.T) {
 		"channel_name",
 		"channel_type",
 		"reject_reason",
+		"upstream_model_name",
+		"is_model_mapped",
+		"response_model",
 	} {
 		assert.False(t, other.SetPublic(key, "must-not-leak"), key)
 	}

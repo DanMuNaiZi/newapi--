@@ -117,8 +117,12 @@ func assignDisplayLogIds(logs []*Log, startIdx int) {
 }
 
 func formatUserLogs(logs []*Log, startIdx int) {
+	populateActualModelNames(logs)
 	for i := range logs {
 		logs[i].ChannelName = ""
+		if logs[i].ActualModelName != "" {
+			logs[i].Content = strings.ReplaceAll(logs[i].Content, logs[i].ActualModelName, logs[i].ModelName)
+		}
 		logs[i].ActualModelName = ""
 		logs[i].ResourceQuota = nil
 		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityUser)
@@ -131,16 +135,28 @@ func populateActualModelNames(logs []*Log) {
 		if log == nil {
 			continue
 		}
+		previousActualModel := log.ActualModelName
 		log.ActualModelName = ""
 		values, err := common.StrToMap(log.Other)
 		if err != nil || values == nil {
 			continue
 		}
-		adminInfo, _ := values[logOtherAdminInfoKey].(map[string]any)
-		if adminInfo == nil {
-			continue
+		storedModelName := log.ModelName
+		if requestModel, ok := values["request_model_name"].(string); ok && requestModel != "" {
+			log.ModelName = requestModel
 		}
-		upstreamModel, _ := adminInfo["upstream_model_name"].(string)
+		upstreamModel, _ := values["upstream_model_name"].(string)
+		if adminInfo, ok := values[logOtherAdminInfoKey].(map[string]any); ok {
+			if scopedModel, ok := adminInfo["upstream_model_name"].(string); ok && scopedModel != "" {
+				upstreamModel = scopedModel
+			}
+		}
+		if upstreamModel == "" && storedModelName != log.ModelName {
+			upstreamModel = storedModelName
+		}
+		if upstreamModel == "" {
+			upstreamModel = previousActualModel
+		}
 		if upstreamModel != "" && upstreamModel != log.ModelName {
 			log.ActualModelName = upstreamModel
 		}
@@ -150,9 +166,13 @@ func populateActualModelNames(logs []*Log) {
 // HideActualModelNames keeps the operational log response while removing the
 // upstream model identity for viewers without the dedicated permission.
 func HideActualModelNames(logs []*Log) {
+	populateActualModelNames(logs)
 	for _, log := range logs {
 		if log == nil {
 			continue
+		}
+		if log.ActualModelName != "" {
+			log.Content = strings.ReplaceAll(log.Content, log.ActualModelName, log.ModelName)
 		}
 		log.ActualModelName = ""
 		values, err := common.StrToMap(log.Other)
@@ -181,6 +201,7 @@ func HideActualModelNames(logs []*Log) {
 // FormatAdminLogs removes root-only diagnostics while retaining operational
 // admin_info. Root callers must not pass their results through this formatter.
 func FormatAdminLogs(logs []*Log) {
+	populateActualModelNames(logs)
 	for i := range logs {
 		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityAdmin)
 	}
@@ -189,6 +210,7 @@ func FormatAdminLogs(logs []*Log) {
 // FormatRootLogs normalizes legacy metadata into the current scoped shape
 // without removing root-only diagnostics.
 func FormatRootLogs(logs []*Log) {
+	populateActualModelNames(logs)
 	for i := range logs {
 		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityRoot)
 	}
@@ -474,6 +496,12 @@ func isReferralActivationEligible(params RecordConsumeLogParams) bool {
 		return false
 	}
 	other := params.Other.Snapshot()
+	if other["is_task"] == true {
+		admin, _ := other[logOtherAdminInfoKey].(map[string]any)
+		if admin["task_billing_finalized"] != true {
+			return false
+		}
+	}
 	if other["violation_fee"] == true {
 		return false
 	}
@@ -500,17 +528,18 @@ func activateReferralCampaignFromConsumeLog(c *gin.Context, userId int, params R
 }
 
 type RecordTaskBillingLogParams struct {
-	UserId    int
-	LogType   int
-	Content   string
-	RequestId string
-	ChannelId int
-	ModelName string
-	Quota     int
-	TokenId   int
-	Group     string
-	Other     *LogOther
-	NodeName  string // 任务发起节点；为空时回退当前节点
+	UserId        int
+	LogType       int
+	Content       string
+	RequestId     string
+	ChannelId     int
+	ModelName     string
+	Quota         int
+	ResourceQuota *int
+	TokenId       int
+	Group         string
+	Other         *LogOther
+	NodeName      string // 任务发起节点；为空时回退当前节点
 }
 
 func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
@@ -526,19 +555,20 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 	createdAt := common.GetTimestamp()
 	log := &Log{
-		UserId:    params.UserId,
-		Username:  username,
-		CreatedAt: createdAt,
-		Type:      params.LogType,
-		Content:   params.Content,
-		TokenName: tokenName,
-		ModelName: params.ModelName,
-		Quota:     params.Quota,
-		ChannelId: params.ChannelId,
-		TokenId:   params.TokenId,
-		Group:     params.Group,
-		RequestId: params.RequestId,
-		Other:     params.Other.JSONString(),
+		UserId:        params.UserId,
+		Username:      username,
+		CreatedAt:     createdAt,
+		Type:          params.LogType,
+		Content:       params.Content,
+		TokenName:     tokenName,
+		ModelName:     params.ModelName,
+		Quota:         params.Quota,
+		ResourceQuota: params.ResourceQuota,
+		ChannelId:     params.ChannelId,
+		TokenId:       params.TokenId,
+		Group:         params.Group,
+		RequestId:     params.RequestId,
+		Other:         params.Other.JSONString(),
 	}
 	err := createLog(log)
 	if err != nil {

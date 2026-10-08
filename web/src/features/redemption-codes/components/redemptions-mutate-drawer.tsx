@@ -59,7 +59,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import { getAdminPlans } from '@/features/subscriptions/api'
+import { getPublicPlans } from '@/features/subscriptions/api'
 import {
   formatQuotaWithCurrency,
   getCurrencyDisplay,
@@ -122,12 +122,12 @@ export function RedemptionsMutateDrawer({
   })
   const rewardType = form.watch('reward_type')
   const plansQuery = useQuery({
-    queryKey: ['admin-subscription-plans-for-redemption'],
+    queryKey: ['enabled-subscription-plans-for-redemption'],
     queryFn: async () => {
-      const result = requireServerSuccess(await getAdminPlans())
+      const result = requireServerSuccess(await getPublicPlans())
       return (result.data ?? []).filter((record) => record.plan.enabled)
     },
-    enabled: open,
+    enabled: open && rewardType === 'subscription',
   })
 
   // Load existing data when updating
@@ -196,9 +196,14 @@ export function RedemptionsMutateDrawer({
       const basePayload = transformFormDataToPayload(data)
 
       if (isUpdate && currentRow && loadedRedemption) {
-        const quota = form.getFieldState('quota_dollars').isDirty
-          ? basePayload.quota
-          : loadedRedemption.quota
+        let quota = basePayload.quota
+        if (
+          basePayload.reward_type === 'quota' &&
+          loadedRedemption.reward_type === 'quota' &&
+          !form.getFieldState('quota_dollars').isDirty
+        ) {
+          quota = loadedRedemption.quota
+        }
         const result = await updateRedemption({
           ...basePayload,
           quota,
@@ -227,9 +232,17 @@ export function RedemptionsMutateDrawer({
             setCreatedCodes({
               keys: result.data,
               name: basePayload.name,
-              quota: formatQuotaWithCurrency(basePayload.quota, {
-                abbreviate: false,
-              }),
+              quota:
+                basePayload.reward_type === 'subscription'
+                  ? plansQuery.data?.find(
+                      (record) =>
+                        record.plan.id === basePayload.subscription_plan_id
+                    )?.plan.title ||
+                    `${t('Subscription plan')} #${basePayload.subscription_plan_id}`
+                  : formatQuotaWithCurrency(basePayload.quota, {
+                      abbreviate: false,
+                    }),
+              rewardType: basePayload.reward_type,
             })
           }
           onOpenChange(false)
@@ -249,8 +262,19 @@ export function RedemptionsMutateDrawer({
     if (!isUpdate) {
       const name = form.getValues('name')
       if (!name?.trim()) {
-        const quota = parseQuotaFromDollars(form.getValues('quota_dollars'))
-        form.setValue('name', formatQuota(quota), { shouldValidate: true })
+        let suggestedName = formatQuota(
+          parseQuotaFromDollars(form.getValues('quota_dollars'))
+        )
+        if (form.getValues('reward_type') === 'subscription') {
+          suggestedName =
+            plansQuery.data?.find(
+              (record) =>
+                record.plan.id === form.getValues('subscription_plan_id')
+            )?.plan.title || t('Subscription')
+        }
+        form.setValue('name', [...suggestedName].slice(0, 20).join(''), {
+          shouldValidate: true,
+        })
       }
     }
 
@@ -423,6 +447,23 @@ export function RedemptionsMutateDrawer({
                             </FormControl>
                             <SelectContent>
                               <SelectGroup>
+                                {loadedRedemption?.reward_type ===
+                                  'subscription' &&
+                                  loadedRedemption.subscription_plan_id > 0 &&
+                                  !plansQuery.data?.some(
+                                    (record) =>
+                                      record.plan.id ===
+                                      loadedRedemption.subscription_plan_id
+                                  ) && (
+                                    <SelectItem
+                                      value={String(
+                                        loadedRedemption.subscription_plan_id
+                                      )}
+                                    >
+                                      {t('Subscription plan')} #
+                                      {loadedRedemption.subscription_plan_id}
+                                    </SelectItem>
+                                  )}
                                 {(plansQuery.data ?? []).map((record) => (
                                   <SelectItem
                                     key={record.plan.id}
